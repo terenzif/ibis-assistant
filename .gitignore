@@ -8,6 +8,7 @@ knowledge.db-wal
 knowledge.db-shm
 *.db
 project.db/
+surreal.log
 
 
 # Temporary
@@ -16,5 +17,3 @@ tmp/
 
 # Repositories (Indexed content)
 repos/
-DeckOnLine/
-redmine-mcp/
