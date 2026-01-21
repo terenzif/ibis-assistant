@@ -14,11 +14,18 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
+type Ingester interface {
+	IngestIssue(dbClient db.Executor, issueIDStr string) error
+}
+
 type Client struct {
 	BaseURL string
 	APIKey  string
 	HTTP    *http.Client
 }
+
+// Ensure Client implements Ingester
+var _ Ingester = (*Client)(nil)
 
 func NewClient(url, key string) *Client {
 	return &Client{
@@ -49,7 +56,7 @@ type NamedObj struct {
 
 // IngestIssue fetches a single issue by ID and updates the graph
 // This is called "On-Demand" when a commit references an issue.
-func (c *Client) IngestIssue(dbClient *db.Client, issueIDStr string) error {
+func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
 	log.Printf("Fetching Redmine Issue #%s...", issueIDStr)
 	
 	issue, err := c.GetIssue(issueIDStr)

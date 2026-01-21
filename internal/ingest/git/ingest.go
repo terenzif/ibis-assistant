@@ -14,7 +14,7 @@ import (
 )
 
 // IngestRepo analyzes a git repository and populates the Knowledge Graph
-func IngestRepo(client *db.Client, redmineClient *redmine.Client, repoPath string) error {
+func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("invalid repo path: %w", err)

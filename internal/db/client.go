@@ -8,9 +8,18 @@ import (
 	"github.com/surrealdb/surrealdb.go" // Standard driver
 )
 
+type Executor interface {
+	Execute(sql string) (interface{}, error)
+	SmartQuery(sql string, vars interface{}) (interface{}, error)
+	Close()
+}
+
 type Client struct {
 	DB *surrealdb.DB
 }
+
+// Ensure Client implements Executor
+var _ Executor = (*Client)(nil)
 
 func NewClient(endpoint, ns, db, user, pass string) (*Client, error) {
 	// Connect to SurrealDB
