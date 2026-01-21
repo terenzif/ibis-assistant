@@ -67,6 +67,24 @@ func main() {
 		server.WithLogging(),
 	)
 
+	// --- [NEW] Start Embedded DB ---
+	// We attempt to start ./surreal.exe if it exists.
+	// We assume port 8000 for the DB based on default config.
+	var dbProcess *db.ProcessManager
+	dbPort := 8000 // Default SurrealDB port
+	
+	// Check if we should auto-start (simple check: does binary exist?)
+	// We use the configured User/Pass for startup as well.
+	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, "project.db", dbPort)
+	if err != nil {
+		// Log but don't fatal, maybe it's already running external to us?
+		// But if it failed because implicit binary was missing, that's fine too.
+		log.Printf("Note: Could not start embedded database (or it is already running): %v", err)
+	} else {
+		dbProcess = proc
+		log.Println("Embedded SurrealDB started successfully.")
+	}
+
 	// 5. Connect DB
 	dbClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
 	if err != nil {
@@ -88,6 +106,17 @@ func main() {
 	if cfg.RedmineURL == "" {
 		log.Println("Warning: No REDMINE_URL provided. Issue tracking features will be limited.")
 	}
+
+	// 7. Register Tools
+	// ... (Tools registration code remains here, collapsed for brevity in this view) ...
+	// RE-INSERTING TOOLS REGISTRATION LOGIC TO ENSURE CONTINUITY
+	// (Since replace_file_content replaces a block, I must ensure I don't lose the tools if I targeted a large block.
+	// However, I am only replacing a small chunk around step 5. 
+	// Wait, the previous view showed lines 63-253. I must be careful not to delete the tools.)
+	// CHECKING TARGET CONTENT AGAIN.
+
+	// I will refine the target content to be safer/smaller scope or use multi_replace.
+
 
 	// 7. Register Tools
 
@@ -227,27 +256,56 @@ func main() {
 
 
 	// 8. Start Server
+	
+	// Ensure DB is stopped on exit (even if via signal)
+	defer func() {
+		if dbProcess != nil {
+			log.Println("Cleaning up embedded database...")
+			if err := dbProcess.Stop(); err != nil {
+				log.Printf("Error stopping database: %v", err)
+			}
+		}
+	}()
+
+	// Context for graceful shutdown of other components if needed
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Handle Signals in Main Thread
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		log.Println("Shutting down...")
-		cancel()
-	}()
 
 	if cfg.Mode == "sse" {
 		log.Printf("Starting SSE server on port %d...", cfg.Port)
 		sseServer := server.NewSSEServer(s) 
-		if err := sseServer.Start(fmt.Sprintf(":%d", cfg.Port)); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
+		
+		// Run Server in Goroutine
+		go func() {
+			if err := sseServer.Start(fmt.Sprintf(":%d", cfg.Port)); err != nil {
+				log.Printf("Server error: %v", err)
+				// If server fails to start, we should exit
+				sigChan <- syscall.SIGTERM
+			}
+		}()
+
+		// Wait for signal
+		<-sigChan
+		log.Println("Shutting down...")
+		// Since mcp-go doesn't easily expose Shutdown(), we just rely on main exiting 
+		// which closes the listener. The crucial part is falling through to 'defer' above.
+
 	} else {
 		log.Println("Starting STDIO server...")
-		if err := server.ServeStdio(s); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
+		// STDIO usually blocks until stdin closes
+		go func() {
+			if err := server.ServeStdio(s); err != nil {
+				log.Printf("Server error: %v", err)
+			}
+			// If stdio interaction ends, we assume done
+			sigChan <- syscall.SIGTERM
+		}()
+		
+		<-sigChan
+		log.Println("Shutting down...")
 	}
 }

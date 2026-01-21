@@ -1,0 +1,124 @@
+package db
+
+import (
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
+	"time"
+)
+
+// ProcessManager handles the lifecycle of the embedded SurrealDB process.
+type ProcessManager struct {
+	cmd *exec.Cmd
+}
+
+// StartEmbedded launches the surreal process in the background.
+// It expects the binary to be named 'surreal.exe' (Windows) or 'surreal' (Unix) in the current directory.
+func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, error) {
+	binName := "surreal"
+	if runtime.GOOS == "windows" {
+		binName = "surreal.exe"
+	}
+
+	// Check if binary exists in CWD
+	if _, err := os.Stat(binName); os.IsNotExist(err) {
+		return nil, fmt.Errorf("database binary '%s' not found in current directory", binName)
+	}
+
+	// Construct command
+	// surreal start --user root --pass root. --bind 0.0.0.0:8000 file:project.db
+	bindAddr := fmt.Sprintf("0.0.0.0:%d", port)
+	fileArg := fmt.Sprintf("file:%s", dataPath)
+
+	args := []string{
+		"start",
+		"--user", user,
+		"--pass", password,
+		"--bind", bindAddr,
+		fileArg,
+	}
+
+	cmd := exec.Command("./" + binName, args...)
+	
+	// Check if log file exists/create it
+	logFile, err := os.OpenFile("surreal.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	} else {
+		// Fallback to stdio if log file fails
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+
+	log.Printf("Starting embedded database: %s %v", binName, args)
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start database process: %w", err)
+	}
+
+	// Wait for port to be open
+	if err := waitForPort(port, 10*time.Second); err != nil {
+		// If timeout, try to kill and return error
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("database started but port %d did not open in time: %w", port, err)
+	}
+
+	return &ProcessManager{cmd: cmd}, nil
+}
+
+// Stop attempts to gracefully shut down the database.
+func (pm *ProcessManager) Stop() error {
+	if pm.cmd == nil || pm.cmd.Process == nil {
+		return nil
+	}
+
+	log.Println("Stopping embedded database...")
+
+	// Attempt graceful shutdown via Signal (only on non-Windows)
+	if runtime.GOOS != "windows" {
+		if err := pm.cmd.Process.Signal(os.Interrupt); err != nil {
+			// If we can't signal (e.g. process already dead), just return
+			// But on Windows this returns "not supported", which we now avoid.
+			log.Printf("Warning: Failed to signal database: %v", err)
+		}
+	} else {
+		// On Windows, if started via terminal, Ctrl+C propagates.
+		// If not, we have no easy way to SIGINT without external tools.
+		// We'll proceed to Wait, and if that fails, we Kill.
+	}
+
+	// Wait for exit with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- pm.cmd.Wait()
+	}()
+
+	select {
+	case <-done:
+		log.Println("Embedded database stopped.")
+		return nil
+	case <-time.After(2 * time.Second):
+		// Use shorter timeout for dev responsiveness
+		log.Println("Database did not stop in time (or requires Kill on Windows), forcing kill...")
+		return pm.cmd.Process.Kill()
+	}
+}
+
+func waitForPort(port int, timeout time.Duration) error {
+	address := fmt.Sprintf("localhost:%d", port)
+	deadline := time.Now().Add(timeout)
+	
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return errors.New("timeout connecting to port")
+}
