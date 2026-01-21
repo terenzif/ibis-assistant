@@ -1,6 +1,7 @@
 package redmine
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,43 +52,13 @@ type NamedObj struct {
 func (c *Client) IngestIssue(dbClient *db.Client, issueIDStr string) error {
 	log.Printf("Fetching Redmine Issue #%s...", issueIDStr)
 	
-	endpoint := fmt.Sprintf("%s/issues/%s.json?include=journals", c.BaseURL, issueIDStr)
-	
-	req, err := http.NewRequest("GET", endpoint, nil)
+	issue, err := c.GetIssue(issueIDStr)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("redmine request failed: %w", err)
+	if issue == nil {
+		return nil // Not found
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		log.Printf("Issue #%s not found in Redmine. Skipping.", issueIDStr)
-		return nil
-	}
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("redmine error %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Wrapper for single issue response
-	type SingleIssueResponse struct {
-		Issue Issue `json:"issue"`
-	}
-
-	var result SingleIssueResponse
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return err
-	}
-	
-	issue := result.Issue
 
 	issueID := fmt.Sprintf("%s:%d", schema.TableIssue, issue.ID)
 	trackerID := fmt.Sprintf("%s:%d", schema.TableTracker, issue.Tracker.ID)
@@ -108,9 +79,113 @@ func (c *Client) IngestIssue(dbClient *db.Client, issueIDStr string) error {
 	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", issueID, schema.EdgePartOf, trackerID))
 	
 	// 5. Link Issue -> Author (Reported By) -- Optional but good
-	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", authorID, schema.EdgeAuthored, issueID)) // Reusing 'authored' for 'reported' implies somewhat ok
+	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", authorID, schema.EdgeAuthored, issueID)) 
 	
 	log.Printf("Successfully ingested Issue #%d", issue.ID)
+	
+	return nil
+}
+
+// GetIssue fetches a raw Issue from Redmine
+func (c *Client) GetIssue(id string) (*Issue, error) {
+	endpoint := fmt.Sprintf("%s/issues/%s.json?include=journals", c.BaseURL, id)
+	
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("redmine request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, nil // Not found
+	}
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("redmine error %d: %s", resp.StatusCode, string(body))
+	}
+
+	type SingleIssueResponse struct {
+		Issue Issue `json:"issue"`
+	}
+
+	var result SingleIssueResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	
+	return &result.Issue, nil
+}
+
+// SearchIssues finds issues matching a query (subject contains)
+func (c *Client) SearchIssues(query string) ([]Issue, error) {
+	// Redmine API filtering: https://www.redmine.org/projects/redmine/wiki/Rest_Issues
+	// Filtering by subject is not directly "search query" but we use `subject` filter if available or generic text search
+	// Usually `f[]=subject&op[subject]=~&v[subject]=<query>` logic.
+	// For simplicity, we just use standard listing.
+	// Note: Generic search is often just `issues.json`.
+	
+	endpoint := fmt.Sprintf("%s/issues.json?subject=~%s&limit=10", c.BaseURL, query)
+	
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("redmine search error %d", resp.StatusCode)
+	}
+
+	var result IssuesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	
+	return result.Issues, nil
+}
+
+// UpdateIssue updates an issue (e.g. adding notes)
+func (c *Client) UpdateIssue(id string, notes string) error {
+	endpoint := fmt.Sprintf("%s/issues/%s.json", c.BaseURL, id)
+	
+	payload := map[string]interface{}{
+		"issue": map[string]string{
+			"notes": notes,
+		},
+	}
+	
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest("PUT", endpoint, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("redmine update error %d: %s", resp.StatusCode, string(respBody))
+	}
 	
 	return nil
 }

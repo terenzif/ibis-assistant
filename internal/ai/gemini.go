@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,21 +15,134 @@ const (
 	BaseURL        = "https://generativelanguage.googleapis.com/v1beta"
 )
 
+// Client abstracts interaction with the AI Provider
+// It supports multiple API Keys for simple round-robin pooling.
 type Client struct {
-	APIKey string
-	HTTP   *http.Client
-	// Simple rate limiter
-	Ticker *time.Ticker
+	workers []*worker
+	next    uint32
 }
 
-func NewClient(apiKey string, rpm int) *Client {
+type worker struct {
+	apiKey string
+	client *http.Client
+	ticker *time.Ticker
+}
+
+func NewClient(apiKeys []string, rpm int) *Client {
+	if len(apiKeys) == 0 {
+		return &Client{}
+	}
+
+	workers := make([]*worker, len(apiKeys))
+	// Distribute RPM across workers or assume RPM is PER KEY (usually the case for Gemini)
+	// If RPM is 60, does the user mean TOTAL or PER KEY?
+	// Usually limits are per Project/Key. We'll assume PER KEY for max throughput.
+	// If user meant "Global Limit", we should divide. But "Pool" implies parallelization.
+	// Let's stick to simple "Each worker respects the provided RPM".
 	interval := time.Minute / time.Duration(rpm)
+	if rpm <= 0 {
+		interval = time.Millisecond // No limit
+	}
+
+	for i, key := range apiKeys {
+		workers[i] = &worker{
+			apiKey: key,
+			client: &http.Client{Timeout: 30 * time.Second},
+			ticker: time.NewTicker(interval),
+		}
+	}
+
 	return &Client{
-		APIKey: apiKey,
-		HTTP:   &http.Client{Timeout: 30 * time.Second},
-		Ticker: time.NewTicker(interval),
+		workers: workers,
 	}
 }
+
+// EmbedText generates a vector embedding for the given text
+func (c *Client) EmbedText(text string) ([]float32, error) {
+	return c.getWorker().embedText(text)
+}
+
+// BatchEmbedText generates embeddings for multiple strings in one call
+func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
+	return c.getWorker().batchEmbedText(texts)
+}
+
+func (c *Client) getWorker() *worker {
+	if len(c.workers) == 0 {
+		return nil
+	}
+	idx := atomic.AddUint32(&c.next, 1)
+	return c.workers[idx%uint32(len(c.workers))]
+}
+
+// --- Worker Implementation ---
+
+func (w *worker) embedText(text string) ([]float32, error) {
+	res, err := w.batchEmbedText([]string{text})
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+	return res[0], nil
+}
+
+func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
+	if w == nil {
+		return nil, fmt.Errorf("no ai worker available (check API keys)")
+	}
+	
+	// Rate Limit Wait
+	if w.ticker != nil {
+		<-w.ticker.C
+	}
+
+	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", BaseURL, EmbeddingModel, w.apiKey)
+
+	reqItems := make([]EmbedRequestItem, len(texts))
+	for i, t := range texts {
+		reqItems[i] = EmbedRequestItem{
+			Model: EmbeddingModel,
+			Content: Content{
+				Parts: []Part{{Text: t}},
+			},
+		}
+	}
+	
+	payload := BatchEmbedRequest{Requests: reqItems}
+	
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, w.apiKey[len(w.apiKey)-4:], string(body))
+	}
+
+	var result BatchEmbedResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parsing error: %w", err)
+	}
+
+	out := make([][]float32, len(result.Embeddings))
+	for i, e := range result.Embeddings {
+		out[i] = e.Values
+	}
+
+	return out, nil
+}
+
+// --- DTOs ---
 
 type EmbeddingRequest struct {
 	Model   string   `json:"model"`
@@ -51,7 +165,6 @@ type EmbeddingResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// BatchEmbedRequest for batchEmbedContents
 type BatchEmbedRequest struct {
 	Requests []EmbedRequestItem `json:"requests"`
 }
@@ -66,65 +179,4 @@ type BatchEmbedResponse struct {
 	} `json:"embeddings"`
 }
 
-// EmbedText generates a vector embedding for the given text
-func (c *Client) EmbedText(text string) ([]float32, error) {
-	// Re-use batch for single
-	res, err := c.BatchEmbedText([]string{text})
-	if err != nil {
-		return nil, err
-	}
-	if len(res) == 0 {
-		return nil, fmt.Errorf("no embedding returned")
-	}
-	return res[0], nil
-}
-
-// BatchEmbedText generates embeddings for multiple strings in one call
-func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
-	// Wait for rate limiter (once per batch call)
-	<-c.Ticker.C
-
-	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", BaseURL, EmbeddingModel, c.APIKey)
-
-	reqItems := make([]EmbedRequestItem, len(texts))
-	for i, t := range texts {
-		reqItems[i] = EmbedRequestItem{
-			Model: EmbeddingModel,
-			Content: Content{
-				Parts: []Part{{Text: t}},
-			},
-		}
-	}
-	
-	payload := BatchEmbedRequest{Requests: reqItems}
-	
-	jsonBody, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.HTTP.Post(url, "application/json", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result BatchEmbedResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("parsing error: %w", err)
-	}
-
-	out := make([][]float32, len(result.Embeddings))
-	for i, e := range result.Embeddings {
-		out[i] = e.Values
-	}
-
-	return out, nil
-}
 

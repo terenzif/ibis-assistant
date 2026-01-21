@@ -10,10 +10,10 @@ import (
 	"strings"
 	"syscall"
 
-	// "time" // Removed if not used
-
 	"github.com/deckonline/knowledge_mcp/internal/ai"
+	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/discovery"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/code"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/git"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
@@ -23,147 +23,133 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-var (
-	port      = flag.Int("port", 3030, "Port to listen on for SSE")
-	mode      = flag.String("mode", "sse", "Mode: 'sse' or 'stdio'")
-	repos     = flag.String("repos", ".", "Comma-separated list of git repositories to analyze")
-	rpm       = flag.Int("rpm", 60, "Rate limit (Requests Per Minute) for Gemini API")
-)
-
 func main() {
+	// 1. Load Config (Defaults + Env)
+	cfg := config.Load()
+
+	// 2. Parse Flags (Overrides)
+	portFlag := flag.Int("port", cfg.Port, "Port to listen on for SSE")
+	modeFlag := flag.String("mode", cfg.Mode, "Mode: 'sse' or 'stdio'")
+	scanFlag := flag.Bool("scan", cfg.AutoScan, "Discover git repositories in current/root directory")
+	rootFlag := flag.String("root", cfg.DiscoveryRoot, "Root directory for discovery")
+	
 	flag.Parse()
 
-	// 1. Initialize MCP Server
+	cfg.Port = *portFlag
+	cfg.Mode = *modeFlag
+	cfg.AutoScan = *scanFlag
+	cfg.DiscoveryRoot = *rootFlag
+	
+	// 3. Discovery Logic
+	log.Printf("Starting Knowledge Server (Mode: %s)...", cfg.Mode)
+	var activeRepos []string
+	
+	if cfg.AutoScan {
+		log.Printf("Scanning for repositories in %s...", cfg.DiscoveryRoot)
+		scanner := discovery.NewScanner(cfg.DiscoveryRoot)
+		repos, err := scanner.Scan()
+		if err != nil {
+			log.Printf("Warning: Discovery failed: %v", err)
+		} else {
+			activeRepos = append(activeRepos, repos...)
+			log.Printf("Discovered %d repositories.", len(repos))
+		}
+	}
+	// Append any manually configured repos (e.g. from Env CSV if we added that, currently only code/flags)
+	if len(cfg.GitRepos) > 0 {
+		activeRepos = append(activeRepos, cfg.GitRepos...)
+	}
+
+	// 4. Initialize MCP Server
 	s := server.NewMCPServer(
 		"Knowledge Graph MCP",
-		"1.0.0",
+		"1.1.0",
 		server.WithLogging(),
 	)
 
-	// --- Custom Logic ---
-	// TODO: Load from env/flags
-	dbClient, err := db.NewClient("ws://localhost:8000/rpc", "deckonline", "analysis", "root", "root")
+	// 5. Connect DB
+	dbClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
 	if err != nil {
 		log.Printf("Warning: Failed to connect to SurrealDB: %v", err)
 	} else {
 		defer dbClient.Close()
 		log.Println("Connected to SurrealDB.")
-		
-		// Init Schema
-		// For simplicity, we run the init SQL directly
-		// In prod, check if migration needed
-		// _, err = dbClient.Execute(schema.GenerateInitSQL())
-		// if err != nil {
-		// 	 log.Printf("Schema init error: %v", err)
-		// }
 	}
 
-	// 2. Register Tools
-	
-	// Init AI Client
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	aiClient := ai.NewClient(apiKey, *rpm)
+	// 6. Initialize Clients
+	aiClient := ai.NewClient(cfg.GeminiKeys, cfg.GeminiRPM)
+	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
+	searchService := &search.Service{DB: dbClient, AI: aiClient}
 
-	// Init Redmine Client
-	redmineURL := os.Getenv("REDMINE_URL")
-	redmineKey := os.Getenv("REDMINE_API_KEY")
-	redmineClient := redmine.NewClient(redmineURL, redmineKey)
+	// --- Check Connections ---
+	if len(cfg.GeminiKeys) == 0 {
+		log.Println("Warning: No GEMINI_API_KEY provided. AI features will be disabled.")
+	}
+	if cfg.RedmineURL == "" {
+		log.Println("Warning: No REDMINE_URL provided. Issue tracking features will be limited.")
+	}
 
-	// Tool: Ingest Git
+	// 7. Register Tools
+
+	// --- Knowledge Tools ---
+
 	s.AddTool(mcp.NewTool("ingest_git",
-		mcp.WithDescription("Trigger git ingestion for configured repositories"),
+		mcp.WithDescription("Trigger git ingestion for repositories. If no path is provided, ingest all discovered/configured repos."),
+		mcp.WithString("path", mcp.Description("Optional specific repo path to ingest")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if dbClient == nil {
-			return mcp.NewToolResultError("Database not connected"), nil
+		if dbClient == nil { return mcp.NewToolResultError("Database not connected"), nil }
+		
+		targets := activeRepos
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if ok {
+			if p, ok := args["path"].(string); ok && p != "" {
+				targets = []string{p}
+			}
 		}
-		
-		repoList := strings.Split(*repos, ",")
+
 		var output strings.Builder
-		
-		for _, r := range repoList {
-			r = strings.TrimSpace(r)
-			if r == "" { continue }
-			
-			// Pass redmineClient to trigger on-demand ingestion
+		for _, r := range targets {
 			if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
 				output.WriteString(fmt.Sprintf("Error ingesting %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully ingested %s\n", r))
 			}
 		}
-		
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
-	// Tool: Ingest Codebase (RAG)
 	s.AddTool(mcp.NewTool("ingest_code",
-		mcp.WithDescription("Trigger codebase vectorization (Delta RAG)"),
+		mcp.WithDescription("Trigger codebase vectorization (Delta RAG). If no path provided, scans all repos."),
+		mcp.WithString("path", mcp.Description("Optional specific repo path")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if dbClient == nil {
-			return mcp.NewToolResultError("Database not connected"), nil
-		}
-		if apiKey == "" {
-			return mcp.NewToolResultError("GEMINI_API_KEY not set"), nil
+		if dbClient == nil { return mcp.NewToolResultError("Database not connected"), nil }
+		if len(cfg.GeminiKeys) == 0 { return mcp.NewToolResultError("No AI Keys configured"), nil }
+		
+		targets := activeRepos
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if ok {
+			if p, ok := args["path"].(string); ok && p != "" {
+				targets = []string{p}
+			}
 		}
 		
-		repoList := strings.Split(*repos, ",")
 		var output strings.Builder
-		
-		for _, r := range repoList {
-			r = strings.TrimSpace(r)
-			if r == "" { continue }
-			
+		for _, r := range targets {
 			if err := code.IngestCodebase(dbClient, aiClient, r); err != nil {
 				output.WriteString(fmt.Sprintf("Error scanning %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully scanned %s\n", r))
 			}
 		}
-		
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
-	// Tool: Add Ticket Context (Manual Redmine Ingest)
-	s.AddTool(mcp.NewTool("add_ticket_context",
-		mcp.WithDescription("Manually ingest a Redmine ticket and link it into the graph"),
-		mcp.WithString("ticket_id", mcp.Description("Redmine Issue ID (numeric)")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if dbClient == nil {
-			return mcp.NewToolResultError("Database not connected"), nil
-		}
-		if redmineURL == "" {
-			return mcp.NewToolResultError("REDMINE_URL not set"), nil
-		}
-		
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Invalid arguments"), nil
-		}
-		ticketID, _ := args["ticket_id"].(string)
-		if ticketID == "" {
-			return mcp.NewToolResultError("ticket_id is required"), nil
-		}
-
-		if err := redmineClient.IngestIssue(dbClient, ticketID); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error ingesting issue %s: %v", ticketID, err)), nil
-		}
-		
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully ingested Ticket #%s.", ticketID)), nil
-	})
-
-
-	// Init Search Service
-	searchService := &search.Service{DB: dbClient, AI: aiClient}
-
-	// Tool: Ask Project (Unified Interface)
 	s.AddTool(mcp.NewTool("ask_project",
 		mcp.WithDescription("Ask a natural language question about the project history and code."),
 		mcp.WithString("query", mcp.Description("The question (e.g., 'Why was login changed?')")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Invalid arguments"), nil
-		}
+		if !ok { return mcp.NewToolResultError("Invalid arguments"), nil }
 		query, _ := args["query"].(string)
 
 		results, err := searchService.AskProject(query)
@@ -171,27 +157,79 @@ func main() {
 			return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 		}
 
-		// Format output as text (since MCP handles text best for now)
 		var out strings.Builder
 		out.WriteString(fmt.Sprintf("Found %d results for '%s':\n\n", len(results), query))
 		for i, r := range results {
 			out.WriteString(fmt.Sprintf("%d. [%s] %s (Score: %.2f)\n%s\n\n", i+1, r.Type, r.ID, r.Score, r.Content))
 		}
-		
 		return mcp.NewToolResultText(out.String()), nil
 	})
 
-	s.AddTool(mcp.NewTool("ping",
-		mcp.WithDescription("Check if server is alive"),
-	), func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return mcp.NewToolResultText("pong"), nil
+	// --- Redmine Direct Tools ---
+
+	s.AddTool(mcp.NewTool("redmine_search_issues",
+		mcp.WithDescription("Search matching issues in Redmine by text/subject."),
+		mcp.WithString("query", mcp.Description("Text to search for")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if cfg.RedmineURL == "" { return mcp.NewToolResultError("Redmine not configured"), nil }
+		args := request.Params.Arguments.(map[string]interface{})
+		query, _ := args["query"].(string)
+
+		issues, err := redmineClient.SearchIssues(query)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+		}
+		
+		var out strings.Builder
+		for _, idx := range issues {
+			out.WriteString(fmt.Sprintf("[%d] %s (%s) - %s\n", idx.ID, idx.Subject, idx.Status.Name, idx.Author.Name))
+		}
+		return mcp.NewToolResultText(out.String()), nil
 	})
 
-	// 3. Start Server
+	s.AddTool(mcp.NewTool("redmine_get_issue",
+		mcp.WithDescription("Get detailed information for a specific Redmine issue."),
+		mcp.WithString("id", mcp.Description("Issue ID")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if cfg.RedmineURL == "" { return mcp.NewToolResultError("Redmine not configured"), nil }
+		args := request.Params.Arguments.(map[string]interface{})
+		id, _ := args["id"].(string)
+
+		issue, err := redmineClient.GetIssue(id)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+		}
+		if issue == nil {
+			return mcp.NewToolResultError("Issue not found"), nil
+		}
+		
+		out := fmt.Sprintf("ID: %d\nSubject: %s\nStatus: %s\nTracker: %s\nAuthor: %s\nCreated: %s\n\n%s", 
+			issue.ID, issue.Subject, issue.Status.Name, issue.Tracker.Name, issue.Author.Name, issue.CreatedOn, issue.Description)
+		return mcp.NewToolResultText(out), nil
+	})
+
+	s.AddTool(mcp.NewTool("redmine_update_issue",
+		mcp.WithDescription("Update a Redmine issue (e.g. add notes)."),
+		mcp.WithString("id", mcp.Description("Issue ID")),
+		mcp.WithString("notes", mcp.Description("Notes/Comment to add")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if cfg.RedmineURL == "" { return mcp.NewToolResultError("Redmine not configured"), nil }
+		args := request.Params.Arguments.(map[string]interface{})
+		id, _ := args["id"].(string)
+		notes, _ := args["notes"].(string)
+
+		err := redmineClient.UpdateIssue(id, notes)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Issue #%s updated successfully.", id)), nil
+	})
+
+
+	// 8. Start Server
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -200,11 +238,10 @@ func main() {
 		cancel()
 	}()
 
-	if *mode == "sse" {
-		log.Printf("Starting SSE server on port %d...", *port)
-		// NewSSEServer(s, options...) - Removing URL string arg causing error
+	if cfg.Mode == "sse" {
+		log.Printf("Starting SSE server on port %d...", cfg.Port)
 		sseServer := server.NewSSEServer(s) 
-		if err := sseServer.Start(fmt.Sprintf(":%d", *port)); err != nil {
+		if err := sseServer.Start(fmt.Sprintf(":%d", cfg.Port)); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	} else {
@@ -213,6 +250,4 @@ func main() {
 			log.Fatalf("Server error: %v", err)
 		}
 	}
-	
-	log.Println("Server stopped.")
 }
