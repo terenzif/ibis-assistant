@@ -51,19 +51,52 @@ type EmbeddingResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// BatchEmbedRequest for batchEmbedContents
+type BatchEmbedRequest struct {
+	Requests []EmbedRequestItem `json:"requests"`
+}
+type EmbedRequestItem struct {
+	Model   string  `json:"model"`
+	Content Content `json:"content"`
+}
+
+type BatchEmbedResponse struct {
+	Embeddings []struct {
+		Values []float32 `json:"values"`
+	} `json:"embeddings"`
+}
+
 // EmbedText generates a vector embedding for the given text
 func (c *Client) EmbedText(text string) ([]float32, error) {
-	// Wait for rate limiter
+	// Re-use batch for single
+	res, err := c.BatchEmbedText([]string{text})
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+	return res[0], nil
+}
+
+// BatchEmbedText generates embeddings for multiple strings in one call
+func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
+	// Wait for rate limiter (once per batch call)
 	<-c.Ticker.C
 
-	url := fmt.Sprintf("%s/%s:embedContent?key=%s", BaseURL, EmbeddingModel, c.APIKey)
+	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", BaseURL, EmbeddingModel, c.APIKey)
 
-	payload := EmbeddingRequest{
-		Model: EmbeddingModel,
-		Content: Content{
-			Parts: []Part{{Text: text}},
-		},
+	reqItems := make([]EmbedRequestItem, len(texts))
+	for i, t := range texts {
+		reqItems[i] = EmbedRequestItem{
+			Model: EmbeddingModel,
+			Content: Content{
+				Parts: []Part{{Text: t}},
+			},
+		}
 	}
+	
+	payload := BatchEmbedRequest{Requests: reqItems}
 	
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
@@ -82,14 +115,16 @@ func (c *Client) EmbedText(text string) ([]float32, error) {
 		return nil, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result EmbeddingResponse
+	var result BatchEmbedResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parsing error: %w", err)
 	}
 
-	if result.Error != nil {
-		return nil, fmt.Errorf("gemini api error %d: %s", result.Error.Code, result.Error.Message)
+	out := make([][]float32, len(result.Embeddings))
+	for i, e := range result.Embeddings {
+		out[i] = e.Values
 	}
 
-	return result.Embedding.Values, nil
+	return out, nil
 }
+

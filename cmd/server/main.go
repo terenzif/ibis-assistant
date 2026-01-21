@@ -84,7 +84,8 @@ func main() {
 			r = strings.TrimSpace(r)
 			if r == "" { continue }
 			
-			if err := git.IngestRepo(dbClient, r); err != nil {
+			// Pass redmineClient to trigger on-demand ingestion
+			if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
 				output.WriteString(fmt.Sprintf("Error ingesting %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully ingested %s\n", r))
@@ -122,9 +123,10 @@ func main() {
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
-	// Tool: Ingest Redmine (Intent)
-	s.AddTool(mcp.NewTool("ingest_redmine",
-		mcp.WithDescription("Trigger Redmine issues ingestion (Intent Layer)"),
+	// Tool: Add Ticket Context (Manual Redmine Ingest)
+	s.AddTool(mcp.NewTool("add_ticket_context",
+		mcp.WithDescription("Manually ingest a Redmine ticket and link it into the graph"),
+		mcp.WithString("ticket_id", mcp.Description("Redmine Issue ID (numeric)")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if dbClient == nil {
 			return mcp.NewToolResultError("Database not connected"), nil
@@ -133,12 +135,22 @@ func main() {
 			return mcp.NewToolResultError("REDMINE_URL not set"), nil
 		}
 		
-		if err := redmineClient.IngestIssues(dbClient); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error ingesting issues: %v", err)), nil
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+		ticketID, _ := args["ticket_id"].(string)
+		if ticketID == "" {
+			return mcp.NewToolResultError("ticket_id is required"), nil
+		}
+
+		if err := redmineClient.IngestIssue(dbClient, ticketID); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error ingesting issue %s: %v", ticketID, err)), nil
 		}
 		
-		return mcp.NewToolResultText("Successfully ingested Redmine issues."), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully ingested Ticket #%s.", ticketID)), nil
 	})
+
 
 	// Init Search Service
 	searchService := &search.Service{DB: dbClient, AI: aiClient}

@@ -46,13 +46,12 @@ type NamedObj struct {
 	Name string `json:"name"`
 }
 
-// IngestIssues fetches issues and updates the graph
-func (c *Client) IngestIssues(dbClient *db.Client) error {
-	log.Println("Starting Redmine ingestion...")
+// IngestIssue fetches a single issue by ID and updates the graph
+// This is called "On-Demand" when a commit references an issue.
+func (c *Client) IngestIssue(dbClient *db.Client, issueIDStr string) error {
+	log.Printf("Fetching Redmine Issue #%s...", issueIDStr)
 	
-	// Fetch all open issues + recent closed?
-	// For MVP, just fetch last 100 updated issues
-	endpoint := fmt.Sprintf("%s/issues.json?limit=100&sort=updated_on:desc&status_id=*", c.BaseURL)
+	endpoint := fmt.Sprintf("%s/issues/%s.json?include=journals", c.BaseURL, issueIDStr)
 	
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
@@ -67,44 +66,55 @@ func (c *Client) IngestIssues(dbClient *db.Client) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 404 {
+		log.Printf("Issue #%s not found in Redmine. Skipping.", issueIDStr)
+		return nil
+	}
+
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("redmine error %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result IssuesResponse
-	// To be safe:
+	// Wrapper for single issue response
+	type SingleIssueResponse struct {
+		Issue Issue `json:"issue"`
+	}
+
+	var result SingleIssueResponse
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return err
 	}
+	
+	issue := result.Issue
 
-	for _, issue := range result.Issues {
-		issueID := fmt.Sprintf("%s:%d", schema.TableIssue, issue.ID)
-		trackerID := fmt.Sprintf("%s:%d", schema.TableTracker, issue.Tracker.ID)
-		authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, sanitizeID(issue.Author.Name))
+	issueID := fmt.Sprintf("%s:%d", schema.TableIssue, issue.ID)
+	trackerID := fmt.Sprintf("%s:%d", schema.TableTracker, issue.Tracker.ID)
+	authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, sanitizeID(issue.Author.Name))
 
-		// 1. Create/Update Tracker
-		dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", trackerID, escapeSQL(issue.Tracker.Name)))
+	// 1. Create/Update Tracker
+	dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", trackerID, escapeSQL(issue.Tracker.Name)))
 
-		// 2. Create/Update Author (Redmine user)
-		dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", authorID, escapeSQL(issue.Author.Name)))
+	// 2. Create/Update Author (Redmine user)
+	dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", authorID, escapeSQL(issue.Author.Name)))
 
-		// 3. Update Issue
-		// We use CONTENT for safety with complex strings, or SET
-		// escapeSQL is crucial here.
-		ql := fmt.Sprintf("UPDATE %s SET subject = '%s', description = '%s', status = '%s', updated_on = '%s';", 
-			issueID, escapeSQL(issue.Subject), escapeSQL(issue.Description), escapeSQL(issue.Status.Name), issue.UpdatedOn)
-		dbClient.Execute(ql)
+	// 3. Update Issue
+	ql := fmt.Sprintf("UPDATE %s SET subject = '%s', description = '%s', status = '%s', updated_on = '%s';", 
+		issueID, escapeSQL(issue.Subject), escapeSQL(issue.Description), escapeSQL(issue.Status.Name), issue.UpdatedOn)
+	dbClient.Execute(ql)
 
-		// 4. Link Issue -> Tracker
-		dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", issueID, schema.EdgePartOf, trackerID))
-		
-		fmt.Printf("Ingested Issue #%d\n", issue.ID)
-	}
+	// 4. Link Issue -> Tracker
+	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", issueID, schema.EdgePartOf, trackerID))
+	
+	// 5. Link Issue -> Author (Reported By) -- Optional but good
+	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", authorID, schema.EdgeAuthored, issueID)) // Reusing 'authored' for 'reported' implies somewhat ok
+	
+	log.Printf("Successfully ingested Issue #%d", issue.ID)
 	
 	return nil
 }
+
 
 func sanitizeID(s string) string {
 	safe := strings.ReplaceAll(s, " ", "_")

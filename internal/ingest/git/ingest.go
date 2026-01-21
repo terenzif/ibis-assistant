@@ -9,11 +9,12 @@ import (
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // IngestRepo analyzes a git repository and populates the Knowledge Graph
-func IngestRepo(client *db.Client, repoPath string) error {
+func IngestRepo(client *db.Client, redmineClient *redmine.Client, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("invalid repo path: %w", err)
@@ -112,11 +113,6 @@ func IngestRepo(client *db.Client, repoPath string) error {
 			// 4. Link Parents (Timeline)
 			for _, pHash := range parents {
 				parentID := fmt.Sprintf("%s:%s", schema.TableCommit, pHash)
-				// Note: Parent might not exist if --reverse isn't perfect or partial fetch, 
-				// but 'RELATE' creates edges. Ideally we want nodes to exist. 
-				// With --reverse, parent should usually exist (except root).
-				// We won't strictly enforce parent existence to avoid crashing on shallow clones, 
-				// but the edge will be created pointing to the ID.
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", parentID, schema.EdgeParentOf, commitID))
 			}
 
@@ -134,13 +130,27 @@ func IngestRepo(client *db.Client, repoPath string) error {
 					if end > start {
 						// Found an issue ID
 						issueIDStr := subject[start:end]
-						// Create Issue Node (Placeholder, assuming Redmine ingestion will fill details)
-						// We assume Redmine ID is just the number
+						// Create Issue Node (Placeholder first)
 						issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
 						
-						// Ensure issue exists (upsert generic)
-						// In a real flow, Redmine ingestion fills this. Here we ensure it exists so we can link.
-						batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
+						// In-Band Ingestion: Trigger Redmine fetch if client is available
+						if redmineClient != nil {
+							// We can't do this ASYNC inside this tight loop easily without concurrency control,
+							// but for "Knowledge Server" ingestion speed, let's just log it or do it.
+							// Making HTTP calls here will SLOW DOWN git ingestion massively.
+							// BETTER: Just create the placeholder existence, and queue it?
+							// User explicitly asked for "On Demand". 
+							// Let's do it synchronous for now to ensure graph integrity, or launch a goroutine?
+							// Goroutine is better.
+							go func(id string) {
+								if err := redmineClient.IngestIssue(client, id); err != nil {
+									log.Printf("Failed to ingest referenced issue #%s: %v", id, err)
+								}
+							}(issueIDStr)
+						} else {
+						    // Just ensure existence
+						    batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
+						}
 
 						// Link Commit -> Issue
 						batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", commitID, schema.EdgeImplements, issueID))
@@ -151,18 +161,12 @@ func IngestRepo(client *db.Client, repoPath string) error {
 
 		} else {
 			// File line
-			// line is path/to/file.ext
 			path := line
 			fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
 			
 			// 1. Upsert File
-			// We store just the path for now. 
-			// 'repo' link can be added too.
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, escapeSQL(path)))
 			
-			// 2. Link Repo -> File (if needed, or just rely on path)
-			// batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", repoID, schema.EdgeContains, fileID))
-
 			// 3. Link Commit -> File (Changed)
 			if currentCommitID != "" {
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", currentCommitID, schema.EdgeChanged, fileID))
@@ -190,6 +194,7 @@ func IngestRepo(client *db.Client, repoPath string) error {
 	log.Println("\nIngestion complete.")
 	return nil
 }
+
 
 func sanitizeID(s string) string {
 	// Simple sanitizer for SurrealDB IDs (alphanumeric + _ ideally)

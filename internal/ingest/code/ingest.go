@@ -85,39 +85,60 @@ func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) e
 		// Update hash
 		_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, escapeSQL(path)))
 
-		// 4. Chunk & Embed
+		// Chunk & Embed
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
 		
-		chunks := chunkContent(string(content), 512) // 512 chars approx ~ 128 tokens, simple split
+		chunks := chunkContent(string(content), 1000) // 1000 chars ~ 250 tokens
 		
 		// Delete old chunks
 		// DELETE file_chunk WHERE file = $fileID
 		dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID))
 
-		for i, chunk := range chunks {
-			if strings.TrimSpace(chunk) == "" { continue }
+		// Batching Logic (Gemini limit is 100 per batch)
+		batchSize := 100
+		for i := 0; i < len(chunks); i += batchSize {
+			end := i + batchSize
+			if end > len(chunks) {
+				end = len(chunks)
+			}
+			batch := chunks[i:end]
 			
-			// Embed
-			vec, err := aiClient.EmbedText(chunk)
-			if err != nil {
-				log.Printf("Embedding error for %s: %v", path, err)
+			// Filter empty
+			var validBatch []string
+			var validIndices []int
+			for k, c := range batch {
+				if strings.TrimSpace(c) != "" {
+					validBatch = append(validBatch, c)
+					validIndices = append(validIndices, i+k)
+				}
+			}
+			if len(validBatch) == 0 {
 				continue
 			}
-			
-			// Store
-			// vector string format: "[0.1, 0.2, ...]"
-			// Better: construct JSON array string
-			vecJson, _ := json.Marshal(vec)
 
-			chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), i)
-			
-			ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;", 
-				chunkID, fileID, escapeSQL(chunk), string(vecJson))
+			// Call Batch API
+			vectors, err := aiClient.BatchEmbedText(validBatch)
+			if err != nil {
+				log.Printf("Batch embedding error for %s: %v", path, err)
+				continue
+			}
+
+			// Store Results
+			for k, vec := range vectors {
+				originalIndex := validIndices[k]
+				chunkContentStr := validBatch[k]
 				
-			dbClient.Execute(ql)
+				vecJson, _ := json.Marshal(vec)
+				chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
+				
+				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;", 
+					chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
+				
+				dbClient.Execute(ql)
+			}
 		}
 
 		return nil
