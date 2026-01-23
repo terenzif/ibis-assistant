@@ -1,0 +1,16 @@
+{
+  "port": 3030,
+  "mode": "sse",
+  "db_url": "ws://localhost:8000/rpc",
+  "db_namespace": "deckonline",
+  "db_database": "analysis",
+  "db_user": "root",
+  "db_password": "root",
+  "gemini_keys": [],
+  "gemini_rpm": 60,
+  "redmine_url": "",
+  "redmine_key": "",
+  "discovery_root": ".",
+  "auto_scan": false,
+  "git_repos": []
+}
