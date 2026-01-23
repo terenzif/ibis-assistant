@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/auth"
 	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
@@ -59,7 +59,7 @@ type NamedObj struct {
 // IngestIssue fetches a single issue by ID and updates the graph
 // This is called "On-Demand" when a commit references an issue.
 func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
-	log.Printf("Fetching Redmine Issue #%s...", issueIDStr)
+	logger.Info("Fetching Redmine Issue #%s...", issueIDStr)
 	
 	// Use Background context for ingestion (system key)
 	issue, err := c.GetIssue(context.Background(), issueIDStr)
@@ -91,7 +91,7 @@ func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
 	// 5. Link Issue -> Author (Reported By) -- Optional but good
 	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", authorID, schema.EdgeAuthored, issueID)) 
 	
-	log.Printf("Successfully ingested Issue #%d", issue.ID)
+	logger.Info("Successfully ingested Issue #%d", issue.ID)
 	
 	return nil
 }
@@ -114,11 +114,15 @@ func (c *Client) GetIssue(ctx context.Context, id string) (*Issue, error) {
 	req.Header.Set("X-Redmine-API-Key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
+	logger.Debug("Redmine: GET %s", endpoint)
+	start := time.Now()
 	resp, err := c.HTTP.Do(req)
+	duration := time.Since(start)
 	if err != nil {
 		return nil, fmt.Errorf("redmine request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	logger.Debug("Redmine: Received %d in %v", resp.StatusCode, duration)
 
 	if resp.StatusCode == 404 {
 		return nil, nil // Not found

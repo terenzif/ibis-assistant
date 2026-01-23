@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	"github.com/deckonline/knowledge_mcp/internal/logger"
 )
 
 const (
@@ -98,6 +100,12 @@ func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
 		<-w.ticker.C
 	}
 
+	keyInfo := w.apiKey
+	if len(keyInfo) > 8 {
+		keyInfo = keyInfo[len(keyInfo)-4:]
+	}
+	logger.Debug("AI: Sending batch embedding request (size: %d) using key ...%s", len(texts), keyInfo)
+
 	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", BaseURL, EmbeddingModel, w.apiKey)
 
 	reqItems := make([]EmbedRequestItem, len(texts))
@@ -117,17 +125,21 @@ func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
 		return nil, err
 	}
 
+	start := time.Now()
 	resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	duration := time.Since(start)
 
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, w.apiKey[len(w.apiKey)-4:], string(body))
+		return nil, fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, keyInfo, string(body))
 	}
+
+	logger.Debug("AI: Successfully received embeddings for %d items in %v", len(texts), duration)
 
 	var result BatchEmbedResponse
 	if err := json.Unmarshal(body, &result); err != nil {

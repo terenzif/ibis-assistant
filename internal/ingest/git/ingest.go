@@ -3,13 +3,13 @@ package git
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
+	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
@@ -21,7 +21,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	}
 	repoName := filepath.Base(absPath)
 
-	log.Printf("Starting ingestion for repo: %s (%s)", repoName, absPath)
+	logger.Info("Starting ingestion for repo: %s (%s)", repoName, absPath)
 
 	// 1. Run Git Log
 	// Format: COMMIT|Hash|Parents|Author|Date|Subject
@@ -54,6 +54,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	// In SurrealDB, ID can be `repo:deckonline`
 	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, sanitizeID(repoName))
 	// We init the repo node
+	logger.Debug("Upserting repo node: %s", repoID)
 	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, escapeSQL(absPath)))
 	if err != nil {
 		return fmt.Errorf("failed to upsert repo node: %w", err)
@@ -65,6 +66,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 		}
 		// Execute transaction
 		ql := "BEGIN TRANSACTION;\n" + batchQL.String() + "COMMIT TRANSACTION;"
+		logger.Debug("Flushing batch of %d operations", batchCount)
 		_, err := client.Execute(ql)
 		if err != nil {
 			return fmt.Errorf("batch execution failed: %w", err)
@@ -135,16 +137,9 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 						
 						// In-Band Ingestion: Trigger Redmine fetch if client is available
 						if redmineClient != nil {
-							// We can't do this ASYNC inside this tight loop easily without concurrency control,
-							// but for "Knowledge Server" ingestion speed, let's just log it or do it.
-							// Making HTTP calls here will SLOW DOWN git ingestion massively.
-							// BETTER: Just create the placeholder existence, and queue it?
-							// User explicitly asked for "On Demand". 
-							// Let's do it synchronous for now to ensure graph integrity, or launch a goroutine?
-							// Goroutine is better.
 							go func(id string) {
 								if err := redmineClient.IngestIssue(client, id); err != nil {
-									log.Printf("Failed to ingest referenced issue #%s: %v", id, err)
+									logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
 								}
 							}(issueIDStr)
 						} else {
@@ -178,7 +173,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			if err := flushBatch(); err != nil {
 				return err
 			}
-			fmt.Print(".") // Progress indicator
+			logger.Info("... flushed 1000 items to DB")
 		}
 	}
 
@@ -186,12 +181,13 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	if err := flushBatch(); err != nil {
 		return err
 	}
+	logger.Debug("Final batch flushed.")
 
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("git command finished with error: %w", err)
 	}
 
-	log.Println("\nIngestion complete.")
+	logger.Info("Ingestion complete for %s", repoName)
 	return nil
 }
 

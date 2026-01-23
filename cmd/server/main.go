@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +18,7 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/ingest/code"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/git"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
+	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/search"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -47,6 +47,8 @@ func main() {
 	modeFlag := flag.String("mode", cfg.Mode, "Mode: 'sse' or 'stdio'")
 	scanFlag := flag.Bool("scan", cfg.AutoScan, "Discover git repositories in current/root directory")
 	rootFlag := flag.String("root", cfg.DiscoveryRoot, "Root directory for discovery")
+	logFileFlag := flag.String("log-file", cfg.LogFile, "Log file path")
+	logLevelFlag := flag.String("log-level", cfg.LogLevel, "Log level: DEBUG, INFO, WARN, ERROR")
 	
 	flag.Parse()
 
@@ -54,25 +56,36 @@ func main() {
 	cfg.Mode = *modeFlag
 	cfg.AutoScan = *scanFlag
 	cfg.DiscoveryRoot = *rootFlag
+	cfg.LogFile = *logFileFlag
+	cfg.LogLevel = *logLevelFlag
 	
+	// Initialize Logger
+	if err := logger.Init(cfg.LogFile, cfg.LogLevel); err != nil {
+		fmt.Printf("Error initializing logger: %v\n", err)
+		os.Exit(1)
+	}
+
 	// 3. Discovery Logic
-	log.Printf("Starting Knowledge Server (Mode: %s)...", cfg.Mode)
+	logger.Info("Starting Knowledge Server (Mode: %s)...", cfg.Mode)
 	var activeRepos []string
 	
 	if cfg.AutoScan {
-		log.Printf("Scanning for repositories in %s...", cfg.DiscoveryRoot)
+		logger.Info("Scanning for repositories in %s...", cfg.DiscoveryRoot)
 		scanner := discovery.NewScanner(cfg.DiscoveryRoot)
 		repos, err := scanner.Scan()
 		if err != nil {
-			log.Printf("Warning: Discovery failed: %v", err)
+			logger.Warn("Discovery failed: %v", err)
 		} else {
 			activeRepos = append(activeRepos, repos...)
-			log.Printf("Discovered %d repositories.", len(repos))
+			logger.Info("Discovered %d repositories.", len(repos))
+			for _, r := range repos {
+				logger.Debug("Discovered repo: %s", r)
+			}
 		}
 	}
-	// Append any manually configured repos (e.g. from Env CSV if we added that, currently only code/flags)
 	if len(cfg.GitRepos) > 0 {
 		activeRepos = append(activeRepos, cfg.GitRepos...)
+		logger.Debug("Added %d manually configured repositories", len(cfg.GitRepos))
 	}
 
 	// 4. Initialize MCP Server
@@ -83,64 +96,70 @@ func main() {
 	)
 
 	// --- [NEW] Start Embedded DB ---
-	// We attempt to start ./surreal.exe if it exists.
-	// We assume port 8000 for the DB based on default config.
 	var dbProcess *db.ProcessManager
-	dbPort := 8000 // Default SurrealDB port
+	dbPort := 8000 
 	
-	// Check if we should auto-start (simple check: does binary exist?)
-	// We use the configured User/Pass for startup as well.
+	logger.Debug("Attempting to start embedded database...")
 	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, "project.db", dbPort)
 	if err != nil {
-		// Log but don't fatal, maybe it's already running external to us?
-		// But if it failed because implicit binary was missing, that's fine too.
-		log.Printf("Note: Could not start embedded database (or it is already running): %v", err)
+		logger.Info("Note: Could not start embedded database (or it is already running): %v", err)
 	} else {
 		dbProcess = proc
-		log.Println("Embedded SurrealDB started successfully.")
+		logger.Info("Embedded SurrealDB started successfully.")
 	}
 
 	// 5. Connect DB
+	logger.Info("Connecting to SurrealDB at %s...", cfg.DBUrl)
 	dbClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
 	if err != nil {
-		log.Printf("Warning: Failed to connect to SurrealDB: %v", err)
+		logger.Error("CRITICAL: Failed to connect to SurrealDB: %v", err)
 	} else {
 		defer dbClient.Close()
-		log.Println("Connected to SurrealDB.")
+		logger.Info("Successfully connected to SurrealDB.")
 	}
 
 	// 6. Initialize Clients
+	logger.Info("Initializing Gemini AI Client with %d keys...", len(cfg.GeminiKeys))
 	aiClient := ai.NewClient(cfg.GeminiKeys, cfg.GeminiRPM)
+	
+	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
 	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
+	
 	searchService := &search.Service{DB: dbClient, AI: aiClient}
 
 	// --- Check Connections ---
 	if len(cfg.GeminiKeys) == 0 {
-		log.Println("Warning: No GEMINI_API_KEY provided. AI features will be disabled.")
+		logger.Warn("No GEMINI_API_KEY provided. AI features will be disabled.")
 	}
 	if cfg.RedmineURL == "" {
-		log.Println("Warning: No REDMINE_URL provided. Issue tracking features will be limited.")
+		logger.Warn("No REDMINE_URL provided. Issue tracking features will be limited.")
+	}
+
+	// --- [NEW] Background Indexing ---
+	if len(activeRepos) > 0 {
+		logger.Info("Triggering background indexing for %d repositories...", len(activeRepos))
+		go func() {
+			for _, r := range activeRepos {
+				logger.Info("Background: Indexing Git history for %s...", r)
+				if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
+					logger.Error("Background: Git ingestion error for %s: %v", r, err)
+				}
+				
+				logger.Info("Background: Vectorizing codebase for %s...", r)
+				if err := code.IngestCodebase(dbClient, aiClient, r); err != nil {
+					logger.Error("Background: Code ingestion error for %s: %v", r, err)
+				}
+			}
+			logger.Info("Background: Initial indexing complete.")
+		}()
 	}
 
 	// 7. Register Tools
-	// ... (Tools registration code remains here, collapsed for brevity in this view) ...
-	// RE-INSERTING TOOLS REGISTRATION LOGIC TO ENSURE CONTINUITY
-	// (Since replace_file_content replaces a block, I must ensure I don't lose the tools if I targeted a large block.
-	// However, I am only replacing a small chunk around step 5. 
-	// Wait, the previous view showed lines 63-253. I must be careful not to delete the tools.)
-	// CHECKING TARGET CONTENT AGAIN.
-
-	// I will refine the target content to be safer/smaller scope or use multi_replace.
-
-
-	// 7. Register Tools
-
-	// --- Knowledge Tools ---
-
 	s.AddTool(mcp.NewTool("ingest_git",
 		mcp.WithDescription("Trigger git ingestion for repositories. If no path is provided, ingest all discovered/configured repos."),
 		mcp.WithString("path", mcp.Description("Optional specific repo path to ingest")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ingest_git")
 		if dbClient == nil { return mcp.NewToolResultError("Database not connected"), nil }
 		
 		targets := activeRepos
@@ -166,6 +185,7 @@ func main() {
 		mcp.WithDescription("Trigger codebase vectorization (Delta RAG). If no path provided, scans all repos."),
 		mcp.WithString("path", mcp.Description("Optional specific repo path")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ingest_code")
 		if dbClient == nil { return mcp.NewToolResultError("Database not connected"), nil }
 		if len(cfg.GeminiKeys) == 0 { return mcp.NewToolResultError("No AI Keys configured"), nil }
 		
@@ -192,6 +212,7 @@ func main() {
 		mcp.WithDescription("Ask a natural language question about the project history and code."),
 		mcp.WithString("query", mcp.Description("The question (e.g., 'Why was login changed?')")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ask_project")
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok { return mcp.NewToolResultError("Invalid arguments"), nil }
 		query, _ := args["query"].(string)
@@ -215,6 +236,7 @@ func main() {
 		mcp.WithDescription("Search matching issues in Redmine by text/subject."),
 		mcp.WithString("query", mcp.Description("Text to search for")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: redmine_search_issues")
 		if cfg.RedmineURL == "" { return mcp.NewToolResultError("Redmine not configured"), nil }
 		args := request.Params.Arguments.(map[string]interface{})
 		query, _ := args["query"].(string)
@@ -236,6 +258,7 @@ func main() {
 		mcp.WithDescription("Get detailed information for a specific Redmine issue."),
 		mcp.WithString("id", mcp.Description("Issue ID")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: redmine_get_issue")
 		if cfg.RedmineURL == "" { return mcp.NewToolResultError("Redmine not configured"), nil }
 		args := request.Params.Arguments.(map[string]interface{})
 		id, _ := args["id"].(string)
@@ -259,6 +282,7 @@ func main() {
 		mcp.WithString("id", mcp.Description("Issue ID")),
 		mcp.WithString("notes", mcp.Description("Notes/Comment to add")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: redmine_update_issue")
 		if cfg.RedmineURL == "" { return mcp.NewToolResultError("Redmine not configured"), nil }
 		args := request.Params.Arguments.(map[string]interface{})
 		id, _ := args["id"].(string)
@@ -282,9 +306,9 @@ func main() {
 	// Ensure DB is stopped on exit (even if via signal)
 	defer func() {
 		if dbProcess != nil {
-			log.Println("Cleaning up embedded database...")
+			logger.Info("Cleaning up embedded database...")
 			if err := dbProcess.Stop(); err != nil {
-				log.Printf("Error stopping database: %v", err)
+				logger.Error("Error stopping database: %v", err)
 			}
 		}
 	}()
@@ -298,18 +322,11 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	if cfg.Mode == "sse" {
-		log.Printf("Starting SSE server on port %d...", cfg.Port)
+		logger.Info("Starting SSE server on port %d...", cfg.Port)
 		sseServer := server.NewSSEServer(s) 
 		
 		// Run Server in Goroutine
 		go func() {
-			// Wrap the SSE server's handler with our AuthMiddleware
-			// The SSEServer.Start method blocks and handles everything, but we need to intercept the handler.
-			// mcp-go SSEServer.Start unfortunately initializes its own Mux and listens. 
-			// We might need to use HandleSSE directly if we want middleware.
-			// Checking mcp-go docs/code (simulated):
-			// If SSEServer.Start() is rigid, we better construct a standard http.Server.
-			
 			mux := http.NewServeMux()
 			mux.Handle("/sse", sseServer.SSEHandler())
 			mux.Handle("/message", sseServer.MessageHandler())
@@ -323,29 +340,27 @@ func main() {
 			}
 			
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("Server error: %v", err)
+				logger.Error("Server error: %v", err)
 				sigChan <- syscall.SIGTERM
 			}
 		}()
 
 		// Wait for signal
 		<-sigChan
-		log.Println("Shutting down...")
-		// Since mcp-go doesn't easily expose Shutdown(), we just rely on main exiting 
-		// which closes the listener. The crucial part is falling through to 'defer' above.
+		logger.Info("Shutting down...")
 
 	} else {
-		log.Println("Starting STDIO server...")
+		logger.Info("Starting STDIO server...")
 		// STDIO usually blocks until stdin closes
 		go func() {
 			if err := server.ServeStdio(s); err != nil {
-				log.Printf("Server error: %v", err)
+				logger.Error("Server error: %v", err)
 			}
 			// If stdio interaction ends, we assume done
 			sigChan <- syscall.SIGTERM
 		}()
 		
 		<-sigChan
-		log.Println("Shutting down...")
+		logger.Info("Shutting down...")
 	}
 }

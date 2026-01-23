@@ -23,6 +23,8 @@ type Config struct {
 	DiscoveryRoot string   `json:"discovery_root"`
 	AutoScan      bool     `json:"auto_scan"`
 	GitRepos      []string `json:"git_repos"` // Manual list override
+	LogFile       string   `json:"log_file"`
+	LogLevel      string   `json:"log_level"` // DEBUG, INFO, WARN, ERROR
 }
 
 // Load returns the configuration loaded from Defaults + File + Env
@@ -39,6 +41,7 @@ func Load() *Config {
 		GeminiRPM:     60,
 		DiscoveryRoot: ".",
 		AutoScan:      false,
+		LogLevel:      "INFO",
 	}
 
 	// 2. Load from config.json if exists
@@ -114,6 +117,12 @@ func Load() *Config {
 	}
 	if v := os.Getenv("AUTO_SCAN"); v == "true" {
 		cfg.AutoScan = true
+	}
+	if v := os.Getenv("LOG_FILE"); v != "" {
+		cfg.LogFile = v
+	}
+	if v := os.Getenv("LOG_LEVEL"); v != "" {
+		cfg.LogLevel = strings.ToUpper(v)
 	}
 
 	return cfg

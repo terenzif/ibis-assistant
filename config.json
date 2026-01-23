@@ -11,6 +11,8 @@
   "redmine_url": "",
   "redmine_key": "",
   "discovery_root": ".",
-  "auto_scan": false,
-  "git_repos": []
+  "auto_scan": true,
+  "git_repos": [],
+  "log_file": "server.log",
+  "log_level": "INFO"
 }

@@ -107,8 +107,8 @@ func (s *Scanner) Scan() ([]string, error) {
 
 func isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
-	info, err := os.Stat(gitDir)
-	return err == nil && info.IsDir()
+	_, err := os.Stat(gitDir)
+	return err == nil
 }
 
 func scanSubmodules(repoRoot string) ([]string, error) {
@@ -126,13 +126,14 @@ func scanSubmodules(repoRoot string) ([]string, error) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		// path = sub/module/path
-		if strings.HasPrefix(line, "path = ") {
-			relPath := strings.TrimPrefix(line, "path = ")
-			absPath := filepath.Join(repoRoot, relPath)
-			// Verify it exists and is a repo/dir
-			if _, err := os.Stat(absPath); err == nil {
-				submodules = append(submodules, absPath)
+		if strings.Contains(line, "path =") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				relPath := strings.TrimSpace(parts[1])
+				absPath := filepath.Join(repoRoot, relPath)
+				if _, err := os.Stat(absPath); err == nil {
+					submodules = append(submodules, absPath)
+				}
 			}
 		}
 	}

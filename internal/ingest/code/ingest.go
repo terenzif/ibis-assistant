@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
@@ -33,7 +33,7 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 		return err
 	}
 
-	log.Printf("Starting code analysis for: %s", absPath)
+	logger.Info("Starting code analysis for: %s", absPath)
 
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -54,7 +54,7 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 		// 1. Calculate Hash
 		hash, err := fileHash(path)
 		if err != nil {
-			log.Printf("Error hashing %s: %v", path, err)
+			logger.Error("Error hashing %s: %v", path, err)
 			return nil
 		}
 
@@ -89,7 +89,7 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 			}
 		}
 
-		log.Printf("Processing %s...", filepath.Base(path))
+		logger.Info("Processing %s...", filepath.Base(path))
 
 		// 3. Update File Node
 		// Update hash
@@ -129,10 +129,9 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 				continue
 			}
 
-			// Call Batch API
 			vectors, err := aiClient.BatchEmbedText(validBatch)
 			if err != nil {
-				log.Printf("Batch embedding error for %s: %v", path, err)
+				logger.Error("Batch embedding error for %s: %v", path, err)
 				continue
 			}
 
@@ -149,11 +148,13 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 				
 				dbClient.Execute(ql)
 			}
+			logger.Info("  - Embedded %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
 		}
 
 		return nil
 	})
 
+	logger.Info("Code analysis complete for %s", absPath)
 	return err
 }
 
