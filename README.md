@@ -62,24 +62,51 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
    > **Nota su Redmine**: La chiave `redmine_key` nel config è la **System Key**, utilizzata per operazioni di background (es. ingestion automatica). Per operazioni utente (es. aggiornare un ticket), il client deve fornire la propria chiave via header `X-Redmine-API-Key`.
 
 4. **Avvia il Server**:
-   Se `surreal.exe` è nella cartella, basta lanciare:
+   Se `surreal.exe` è nella cartella, l'avvio standard è:
    
    ```bash
-   ./knowledge_server.exe
+   ./knowledge_server.exe /run
    ```
    
-   Altrimenti, assicurati che il DB sia attivo come da configurazione.
+   Eseguendo `knowledge_server.exe` senza parametri verrà mostrata la guida rapida ai comandi.
+
+5. **Installazione come Servizio Windows**:
+   È possibile installare il server come servizio di sistema per un avvio automatico:
+
+   ```bash
+   # Installa il servizio (Richiede privilegi di Amministratore)
+   ./knowledge_server.exe /install
+
+   # Disinstalla il servizio
+   ./knowledge_server.exe /uninstall
+   ```
+   Il servizio verrà configurato con il nome "knowledge-server" e descrizione appropriata.
 
 ## 🚀 Utilizzo
 
 ### Esecuzione del Server
 
-Il server può essere eseguito in modalità SSE (Server-Sent Events) o Stdio.
+Il server supporta tre comandi principali:
+
+* `/run`: Avvia il server interattivamente (comportamento standard MCP).
+* `/install`: Installa il server come servizio Windows "knowledge-server".
+* `/uninstall`: Rimuove il servizio Windows.
+
+Può essere eseguito in modalità SSE (Server-Sent Events) o Stdio tramite i flag (da usare con `/run`):
 
 ```bash
 # Esempio: Analizza il repo corrente e avvia in modalità SSE
-./knowledge_server.exe -mode sse -port 3030 -repos "C:/path/to/my/repo"
+./knowledge_server.exe /run -mode sse -port 3030 -scan
 ```
+
+### ⚙️ Configurazione e Precedenza
+Il server segue una gerarchia di priorità per la configurazione:
+1. **Flag da riga di comando** (es. `-port 9000`) - Priorità massima.
+2. **Variabili d'ambiente** (es. `PORT=9000`).
+3. **File di configurazione** (`config.json`).
+4. **Default predefiniti**.
+
+Il file `config.json` viene cercato automaticamente nella directory corrente e nella directory in cui si trova l'eseguibile (utile quando eseguito come servizio). È possibile specificare un file diverso con il flag `-config <path>`.
 
 ### 🔌 Integrazione Client (Centralizzata)
 

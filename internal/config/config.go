@@ -2,7 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -25,10 +27,13 @@ type Config struct {
 	GitRepos      []string `json:"git_repos"` // Manual list override
 	LogFile       string   `json:"log_file"`
 	LogLevel      string   `json:"log_level"` // DEBUG, INFO, WARN, ERROR
+	ConfigLoaded  bool     `json:"-"`         // True if a config file was successfully loaded
+	ConfigPath    string   `json:"-"`         // Path to the file that was loaded
 }
 
-// Load returns the configuration loaded from Defaults + File + Env
-func Load() *Config {
+// Load returns the configuration loaded from Defaults + File + Env.
+// It accepts optional config search paths.
+func Load(paths ...string) *Config {
 	// 1. Defaults
 	cfg := &Config{
 		Port:          3030,
@@ -40,21 +45,39 @@ func Load() *Config {
 		DBPassword:    "root",
 		GeminiRPM:     60,
 		DiscoveryRoot: ".",
-		AutoScan:      false,
+		AutoScan:      true,
 		LogLevel:      "INFO",
 	}
 
-	// 2. Load from config.json if exists
-	if f, err := os.Open("config.json"); err == nil {
-		defer f.Close()
-		decoder := json.NewDecoder(f)
-		if err := decoder.Decode(cfg); err != nil {
-			// Just log warning or ignore in this simplified loader
-			// println("Warning: Failed to parse config.json")
+	// 2. Candidate paths
+	searchPaths := paths
+	if len(searchPaths) == 0 {
+		searchPaths = []string{"config.json"}
+		// If we are running as a service, the CWD might be wrong.
+		// Try next to executable.
+		if exe, err := os.Executable(); err == nil {
+			searchPaths = append(searchPaths, filepath.Join(filepath.Dir(exe), "config.json"))
 		}
 	}
 
-	// 3. Env Overrides
+	// 3. Load from first found config file
+	for _, p := range searchPaths {
+		if f, err := os.Open(p); err == nil {
+			defer f.Close()
+			decoder := json.NewDecoder(f)
+			if err := decoder.Decode(cfg); err == nil {
+				cfg.ConfigLoaded = true
+				cfg.ConfigPath, _ = filepath.Abs(p)
+				break 
+			} else {
+				// We found a file but it's invalid.
+				// We print to stderr because logger isn't initialized yet.
+				fmt.Fprintf(os.Stderr, "Error parsing config file %s: %v\n", p, err)
+			}
+		}
+	}
+
+	// 4. Env Overrides (Highest priority before CLI flags)
 	if v := os.Getenv("PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.Port = p

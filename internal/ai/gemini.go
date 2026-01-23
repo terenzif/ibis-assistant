@@ -59,6 +59,10 @@ func NewClient(apiKeys []string, rpm int) *Client {
 	}
 }
 
+func (c *Client) IsFunctional() bool {
+	return len(c.workers) > 0
+}
+
 // EmbedText generates a vector embedding for the given text
 func (c *Client) EmbedText(text string) ([]float32, error) {
 	return c.getWorker().embedText(text)

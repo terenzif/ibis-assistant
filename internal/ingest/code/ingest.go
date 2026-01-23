@@ -35,6 +35,10 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 
 	logger.Info("Starting code analysis for: %s", absPath)
 
+	if aiClient == nil || !aiClient.IsFunctional() {
+		return fmt.Errorf("AI vectorization is disabled: no Gemini API keys provided (set GEMINI_API_KEY or gemini_keys in config.json)")
+	}
+
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err

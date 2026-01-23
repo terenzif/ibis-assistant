@@ -39,19 +39,93 @@ func AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	// 1. Load Config (Defaults + Env)
-	cfg := config.Load()
+	if len(os.Args) < 2 {
+		printHelp()
+		return
+	}
 
-	// 2. Parse Flags (Overrides)
-	portFlag := flag.Int("port", cfg.Port, "Port to listen on for SSE")
-	modeFlag := flag.String("mode", cfg.Mode, "Mode: 'sse' or 'stdio'")
-	scanFlag := flag.Bool("scan", cfg.AutoScan, "Discover git repositories in current/root directory")
-	rootFlag := flag.String("root", cfg.DiscoveryRoot, "Root directory for discovery")
-	logFileFlag := flag.String("log-file", cfg.LogFile, "Log file path")
-	logLevelFlag := flag.String("log-level", cfg.LogLevel, "Log level: DEBUG, INFO, WARN, ERROR")
+	cmd := os.Args[1]
+	switch cmd {
+	case "/run":
+		// Normal interactive run or service run
+		// We shift the arguments to skip the command for flag parsing
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		runServer()
+	case "/install", "/uninstall":
+		handleService(cmd)
+	default:
+		// If it's not a known command, it might be a flag or just wrong.
+		// If it starts with - or --, we assume they want to run with flags directly?
+		// But the request says "without params it will print a syntetic --help guide"
+		// And add 3 commands.
+		if strings.HasPrefix(cmd, "-") {
+			runServer()
+		} else {
+			fmt.Printf("Unknown command: %s\n", cmd)
+			printHelp()
+		}
+	}
+}
+
+func printHelp() {
+	fmt.Println("Knowledge Server - MCP Knowledge Graph & Search")
+	fmt.Println("\nUsage:")
+	fmt.Println("  knowledge_server.exe <command> [options]")
+	fmt.Println("\nCommands:")
+	fmt.Println("  /run        Run the server interactively (standard MCP behavior)")
+	fmt.Println("  /install    Install as Windows Service 'knowledge-server'")
+	fmt.Println("  /uninstall  Uninstall the Windows Service")
+	fmt.Println("\nOptions (used with /run or as flags):")
+	fmt.Println("  -port int        Port to listen on for SSE (default 8080)")
+	fmt.Println("  -mode string     Mode: 'sse' or 'stdio' (default 'sse')")
+	fmt.Println("  -scan            Discover git repositories in current/root directory (default true)")
+	fmt.Println("  -root string     Root directory for discovery (default '.')")
+	fmt.Println("  -log-file string Log file path")
+	fmt.Println("  -log-level string Log level: DEBUG, INFO, WARN, ERROR (default 'INFO')")
+	fmt.Println("  -config string   Path to config.json (searches current dir and exe dir by default)")
+	fmt.Println("\nConfiguration Precedence:")
+	fmt.Println("  1. Command Line Flags (highest)")
+	fmt.Println("  2. Environment Variables")
+	fmt.Println("  3. Config File (config.json)")
+	fmt.Println("  4. Hardcoded Defaults (lowest)")
+	fmt.Println("\nExample:")
+	fmt.Println("  knowledge_server.exe /run -port 9000 -mode sse")
+}
+
+func runServer() {
+	// 1. Initial check for custom config path in raw args
+	configPath := ""
+	for i, arg := range os.Args {
+		if (arg == "-config" || arg == "--config") && i+1 < len(os.Args) {
+			configPath = os.Args[i+1]
+			break
+		}
+	}
+
+	// 2. Load Config (Defaults + config.json + Env)
+	var cfg *config.Config
+	if configPath != "" {
+		cfg = config.Load(configPath)
+	} else {
+		cfg = config.Load()
+	}
+
+	// 3. Flags (Values from config are used as defaults)
+	// This ensures that CLI flags override Config File values.
+	fs := flag.NewFlagSet("server", flag.ExitOnError)
 	
-	flag.Parse()
+	portFlag := fs.Int("port", cfg.Port, "Port to listen on for SSE")
+	modeFlag := fs.String("mode", cfg.Mode, "Mode: 'sse' or 'stdio'")
+	scanFlag := fs.Bool("scan", cfg.AutoScan, "Discover git repositories in current/root directory")
+	rootFlag := fs.String("root", cfg.DiscoveryRoot, "Root directory for discovery")
+	logFileFlag := fs.String("log-file", cfg.LogFile, "Log file path")
+	logLevelFlag := fs.String("log-level", cfg.LogLevel, "Log level: DEBUG, INFO, WARN, ERROR")
+	// Add config flag just for help/documentation visibility
+	_ = fs.String("config", "", "Path to config.json")
+	
+	fs.Parse(os.Args[1:])
 
+	// 4. Apply overrides back to cfg
 	cfg.Port = *portFlag
 	cfg.Mode = *modeFlag
 	cfg.AutoScan = *scanFlag
@@ -63,6 +137,12 @@ func main() {
 	if err := logger.Init(cfg.LogFile, cfg.LogLevel); err != nil {
 		fmt.Printf("Error initializing logger: %v\n", err)
 		os.Exit(1)
+	}
+
+	if cfg.ConfigLoaded {
+		logger.Info("Configuration loaded from: %s", cfg.ConfigPath)
+	} else {
+		logger.Warn("No config file found, using defaults and environment variables.")
 	}
 
 	// 3. Discovery Logic
@@ -128,11 +208,13 @@ func main() {
 	searchService := &search.Service{DB: dbClient, AI: aiClient}
 
 	// --- Check Connections ---
-	if len(cfg.GeminiKeys) == 0 {
-		logger.Warn("No GEMINI_API_KEY provided. AI features will be disabled.")
+	if !aiClient.IsFunctional() {
+		logger.Warn("⚠️  AI vectorization is DISABLED (no Gemini API keys found).")
+		logger.Warn("   - Add keys to 'config.json' (gemini_keys: [\"...\"])")
+		logger.Warn("   - Or set 'GEMINI_API_KEY' environment variable.")
 	}
 	if cfg.RedmineURL == "" {
-		logger.Warn("No REDMINE_URL provided. Issue tracking features will be limited.")
+		logger.Warn("⚠️  Redmine URL not configured. Issue tracking features will be limited.")
 	}
 
 	// --- [NEW] Background Indexing ---
