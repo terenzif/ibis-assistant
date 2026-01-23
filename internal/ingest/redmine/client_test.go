@@ -1,10 +1,13 @@
 package redmine
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/deckonline/knowledge_mcp/internal/auth"
 )
 
 func TestGetIssue(t *testing.T) {
@@ -38,7 +41,7 @@ func TestGetIssue(t *testing.T) {
 
 	client := NewClient(server.URL, "fake-key")
 
-	issue, err := client.GetIssue("123")
+	issue, err := client.GetIssue(context.Background(), "123")
 	if err != nil {
 		t.Fatalf("GetIssue failed: %v", err)
 	}
@@ -75,7 +78,7 @@ func TestSearchIssues(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "key")
-	issues, err := client.SearchIssues("login")
+	issues, err := client.SearchIssues(context.Background(), "login")
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -85,5 +88,29 @@ func TestSearchIssues(t *testing.T) {
 	}
 	if issues[0].ID != 10 {
 		t.Errorf("Expected first issue ID 10, got %d", issues[0].ID)
+	}
+}
+
+func TestContextKeyOverride(t *testing.T) {
+	// Mock Server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify we got the User Key, not the System Key
+		if r.Header.Get("X-Redmine-API-Key") != "user-secret-key" {
+			t.Errorf("Expected user-secret-key, got %s", r.Header.Get("X-Redmine-API-Key"))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issue": {"id": 999}}`))
+	}))
+	defer server.Close()
+
+	// Client has System Key
+	client := NewClient(server.URL, "system-key")
+
+	// Context has User Key
+	ctx := context.WithValue(context.Background(), auth.RedmineKeyContextKey, "user-secret-key")
+
+	_, err := client.GetIssue(ctx, "999")
+	if err != nil {
+		t.Fatalf("GetIssue failed: %v", err)
 	}
 }

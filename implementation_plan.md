@@ -29,6 +29,7 @@ Build a **Graph + RAG + Timeline** knowledge server that gives *any* AI (Claude,
 ### 1. Project Restructuring
 -   **Completed**: `knowledge_server` established.
 -   **Completed**: Analyze `redmine_mcp` (Integrated into `internal/ingest/redmine`).
+-   **Completed**: Redmine User-Specific Authentication (Privacy & Permissions).
 -   **Scope**: Support **Multi-Repo** ingestion + **Redmine** integration.
 
 ### 2. Service Architecture (Go + SurrealDB)
@@ -86,7 +87,7 @@ Expose a single MCP toolset that queries the unified graph **AND** provides dire
 -   `redmine_get_issue(id)`: Direct fetch.
 -   `redmine_search_issues(query)`: Search tracker.
 -   `redmine_update_issue(id, notes)`: Write back.
-*Note: These allow the agent to interact with Redmine even if the Knowledge Graph is rebuilding or incomplete.*
+*Note: These allow the agent to interact with Redmine even if the Knowledge Graph is rebuilding or incomplete. **Requires `X-Redmine-API-Key` header for write actions.** *
 
 ## 7. Autonomous Agents (Imagination Analysis)
 These agents run alongside the server to actively maintain and use the knowledge.

@@ -5,12 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	"github.com/deckonline/knowledge_mcp/internal/ai"
+	"github.com/deckonline/knowledge_mcp/internal/auth"
 	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/discovery"
@@ -22,6 +24,19 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// AuthMiddleware extracts the X-Redmine-API-Key header and puts it in the context
+func AuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-Redmine-API-Key")
+		if key != "" {
+			ctx := context.WithValue(r.Context(), auth.RedmineKeyContextKey, key)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		} else {
+			next.ServeHTTP(w, r)
+		}
+	})
+}
 
 func main() {
 	// 1. Load Config (Defaults + Env)
@@ -204,7 +219,8 @@ func main() {
 		args := request.Params.Arguments.(map[string]interface{})
 		query, _ := args["query"].(string)
 
-		issues, err := redmineClient.SearchIssues(query)
+		// Pass context to use User Key if available
+		issues, err := redmineClient.SearchIssues(ctx, query)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
 		}
@@ -224,7 +240,8 @@ func main() {
 		args := request.Params.Arguments.(map[string]interface{})
 		id, _ := args["id"].(string)
 
-		issue, err := redmineClient.GetIssue(id)
+		// Pass context to use User Key if available
+		issue, err := redmineClient.GetIssue(ctx, id)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
 		}
@@ -247,7 +264,12 @@ func main() {
 		id, _ := args["id"].(string)
 		notes, _ := args["notes"].(string)
 
-		err := redmineClient.UpdateIssue(id, notes)
+		// ENFORCE: Update requires User Key
+		if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); !ok || k == "" {
+			return mcp.NewToolResultError("Permission denied: You must provide a valid X-Redmine-API-Key header to update issues."), nil
+		}
+
+		err := redmineClient.UpdateIssue(ctx, id, notes)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
 		}
@@ -281,9 +303,27 @@ func main() {
 		
 		// Run Server in Goroutine
 		go func() {
-			if err := sseServer.Start(fmt.Sprintf(":%d", cfg.Port)); err != nil {
+			// Wrap the SSE server's handler with our AuthMiddleware
+			// The SSEServer.Start method blocks and handles everything, but we need to intercept the handler.
+			// mcp-go SSEServer.Start unfortunately initializes its own Mux and listens. 
+			// We might need to use HandleSSE directly if we want middleware.
+			// Checking mcp-go docs/code (simulated):
+			// If SSEServer.Start() is rigid, we better construct a standard http.Server.
+			
+			mux := http.NewServeMux()
+			mux.Handle("/sse", sseServer.SSEHandler())
+			mux.Handle("/message", sseServer.MessageHandler())
+			
+			// Wrap the entire mux with AuthMiddleware
+			handler := AuthMiddleware(mux)
+			
+			server := &http.Server{
+				Addr:    fmt.Sprintf(":%d", cfg.Port),
+				Handler: handler,
+			}
+			
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Printf("Server error: %v", err)
-				// If server fails to start, we should exit
 				sigChan <- syscall.SIGTERM
 			}
 		}()

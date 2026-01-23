@@ -24,6 +24,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
     > **Download**: Scarica la versione Windows da [surrealdb.com/install](https://surrealdb.com/install) o dai [Release di GitHub](https://github.com/surrealdb/surrealdb/releases), estrai e copia `surreal.exe` nella cartella di questo progetto.
   * *Opzione Manuale*: SurrealDB pre-installato e in esecuzione.
 * **Git**: Installato e accessibile da terminale.
+* **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`) o via env (`GEMINI_API_KEY` separati da virgola).
+  * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Round-Robin**. Questo permette di distribuire il carico e superare i limiti di Rate Limit (RPM) imposti da Google, aumentando parallelamente il throughput di ingestione (es. 2 chiavi = 2x throughput).
 
 ### Setup
 
@@ -56,6 +58,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
      "auto_scan": true
    }
    ```
+   
+   > **Nota su Redmine**: La chiave `redmine_key` nel config è la **System Key**, utilizzata per operazioni di background (es. ingestion automatica). Per operazioni utente (es. aggiornare un ticket), il client deve fornire la propria chiave via header `X-Redmine-API-Key`.
 
 4. **Avvia il Server**:
    Se `surreal.exe` è nella cartella, basta lanciare:
@@ -83,6 +87,14 @@ Il Knowledge Server è installato centralmente su **`localhost`** e funge da ora
 
 **Endpoint Pubblico:** `http://localhost:3030/sse`
 
+### 🔑 Autenticazione Utente (Redmine)
+
+Per eseguire azioni che richiedono l'identità dell'utente (es. `redmine_update_issue`, `search_my_issues`), il client SSE **deve** passare la chiave API Redmine dell'utente corrente tramite l'header HTTP:
+
+`X-Redmine-API-Key: <USER_API_KEY>`
+
+Se questo header non è presente, il server utilizzerà la *System Key* (sola lettura/globale) definita in `config.json`. Le azioni di scrittura falliranno senza una chiave utente valida.
+
 #### 1. Claude Desktop
 
 Configura il client per connettersi allo stream SSE remoto.
@@ -92,11 +104,15 @@ File: `%APPDATA%\Claude\claude_desktop_config.json`
 {
   "mcpServers": {
     "knowledge-graph": {
-      "url": "http://localhost:3030/sse"
+      "url": "http://localhost:3030/sse",
+      "headers": {
+        "X-Redmine-API-Key": "YOUR_USER_KEY"
+      }
     }
   }
 }
 ```
+*Nota: Il supporto per gli header personalizzati dipende dalla versione di Claude Desktop / Client MCP.*
 
 *Nota*: Se la versione corrente di Claude Desktop supporta solo Stdio, utilizzare un bridge locale o attendere l'aggiornamento.
 
@@ -109,7 +125,10 @@ Nel `settings.json` o nelle impostazioni dell'estensione:
 "mcpServers": {
   "remote-knowledge": {
     "url": "http://localhost:3030/sse",
-    "transport": "sse"
+    "transport": "sse",
+    "headers": {
+      "X-Redmine-API-Key": "YOUR_USER_KEY"
+    }
   }
 }
 ```

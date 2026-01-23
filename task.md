@@ -1,16 +1,28 @@
-# Task Tracking
+# Task List
 
-- [x] Analyze existing `_local_knowledge_graph` implementation <!-- id: 0 -->
-- [x] Migrate `_local_knowledge_graph` to workspace root (`knowledge_server`) <!-- id: 4 -->
-- [x] Research/Design integration of Git Analysis and Project Analysis tools <!-- id: 1 -->
-    - [x] Analyze external Copilot shared page for inspiration (Done via user summary) <!-- id: 5 -->
-- [x] Design MCP Server architecture in Go <!-- id: 2 -->
-- [x] Create Implementation Plan <!-- id: 3 -->
-- [x] Analyze `redmine-mcp` source code <!-- id: 9 -->
-- [x] Implement SurrealDB Schema (Graph+Risk+Intent) <!-- id: 6 -->
-- [x] Implement Git Ingestion (Graph Builder) <!-- id: 7 -->
-- [x] Implement Codebase RAG (Delta Ingestion) <!-- id: 8 -->
-- [x] Implement Redmine Ingestion (Intent Layer) <!-- id: 10 -->
-- [x] Implement Unified Search Interface (Hybrid Query) <!-- id: 11 -->
-- [x] Build and Verify Server Execution <!-- id: 12 -->
-- [x] Refine Deployment & Configuration (Folder Scan, Submodules) <!-- id: 13 -->
+- [x] Analyze existing Redmine integration logic <!-- id: 0 -->
+    - [x] Check `config.json` structure <!-- id: 1 -->
+    - [x] Search for Redmine client initialization and usage in `internal` <!-- id: 2 -->
+    - [x] specific check for MCP actions related to Redmine <!-- id: 3 -->
+- [x] Design changes for API Key handling <!-- id: 4 -->
+    - [x] Inspect `SSEServer` methods to verify middleware injection strategy <!-- id: 16 -->
+    - [x] Create `implementation_plan.md` <!-- id: 17 -->
+    - [x] Determine how to pass API key via SSE (headers or query params?) <!-- id: 5 -->
+    - [x] Update `config.json` handling (treat existing key as "system" key) <!-- id: 6 -->
+    - [x] Modify `knowledge_server` to accept and use context-specific keys <!-- id: 7 -->
+- [x] Implement changes <!-- id: 8 -->
+    - [x] Create `internal/auth` package for Context Keys <!-- id: 20 -->
+    - [x] Refactor `internal/ingest/redmine` to be Context-aware <!-- id: 11 -->
+    - [x] Modify `main.go` to implement `AuthMiddleware` and context injection <!-- id: 18 -->
+    - [x] **Fix build error in `main.go` (SSEServer handling)** <!-- id: 22 -->
+    - [x] Update MCP Tools in `main.go` to check context for User Key <!-- id: 21 -->
+    - [x] Ensure background tasks use the system key <!-- id: 12 -->
+- [x] Verification <!-- id: 13 -->
+    - [x] Verify compilation (Tests passed, Build Verified) <!-- id: 14 -->
+    - [x] Fix build and verify <!-- id: 23 -->
+    - [x] Manual verification plan (describe how user can test) <!-- id: 15 -->
+- [x] Documentation <!-- id: 24 -->
+    - [x] Update `README.md` <!-- id: 25 -->
+        - [x] Add API Key header examples <!-- id: 28 -->
+    - [x] Update `walkthrough.md` <!-- id: 26 -->
+    - [x] Update any other relevant .md files (`implementation_plan.md`) <!-- id: 27 -->

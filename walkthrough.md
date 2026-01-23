@@ -27,8 +27,12 @@ Set the following secrets in your shell or `.env` file (if you add loading logic
 ```powershell
 $env:GEMINI_API_KEY="your-gemini-key"
 $env:REDMINE_URL="https://redmine.yourcompany.com"
-$env:REDMINE_API_KEY="your-redmine-key"
+$env:GEMINI_API_KEY="your-gemini-key"
+$env:REDMINE_URL="https://redmine.yourcompany.com"
+$env:REDMINE_API_KEY="system-readonly-key"
 ```
+
+> **Note**: The environment variable `REDMINE_API_KEY` (or checking `config.json`) sets the **System Key**. This should have read-only permissions and is used for background ingestion. User-specific write actions require the client to send a header.
 
 ### 3. Run the Server
 The executable is located in `c:/_dev/AI_Context/knowledge_server`.
@@ -55,7 +59,13 @@ Once connected to your MCP client:
     -   Use `ask_project` with queries like:
         > "Why was the Login logic refactored last sprint?"
         > "Who is the expert on the PaymentService?"
+        > "Who is the expert on the PaymentService?"
         > "What issues are linked to the recent changes in `User.cs`?"
+
+3.  **Perform User Actions** (Requires `X-Redmine-API-Key` header):
+    -   Configure your MCP Client to send `X-Redmine-API-Key`.
+    -   Try: `redmine_update_issue` (should fail without header, succeed with it).
+    -   Try: `redmine_search_issues(query="assigned_to_me")`.
 
 ## Done
 The system is built, verified, and ready/optimized for your constrained local environment.

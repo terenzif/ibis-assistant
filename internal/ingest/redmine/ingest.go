@@ -2,6 +2,7 @@ package redmine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckonline/knowledge_mcp/internal/auth"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
@@ -59,7 +61,8 @@ type NamedObj struct {
 func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
 	log.Printf("Fetching Redmine Issue #%s...", issueIDStr)
 	
-	issue, err := c.GetIssue(issueIDStr)
+	// Use Background context for ingestion (system key)
+	issue, err := c.GetIssue(context.Background(), issueIDStr)
 	if err != nil {
 		return err
 	}
@@ -94,14 +97,21 @@ func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
 }
 
 // GetIssue fetches a raw Issue from Redmine
-func (c *Client) GetIssue(id string) (*Issue, error) {
+func (c *Client) GetIssue(ctx context.Context, id string) (*Issue, error) {
 	endpoint := fmt.Sprintf("%s/issues/%s.json?include=journals", c.BaseURL, id)
 	
-	req, err := http.NewRequest("GET", endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+	
+	// Determine Key: Context > Client Config
+	apiKey := c.APIKey
+	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
+		apiKey = k
+	}
+
+	req.Header.Set("X-Redmine-API-Key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTP.Do(req)
@@ -132,7 +142,7 @@ func (c *Client) GetIssue(id string) (*Issue, error) {
 }
 
 // SearchIssues finds issues matching a query (subject contains)
-func (c *Client) SearchIssues(query string) ([]Issue, error) {
+func (c *Client) SearchIssues(ctx context.Context, query string) ([]Issue, error) {
 	// Redmine API filtering: https://www.redmine.org/projects/redmine/wiki/Rest_Issues
 	// Filtering by subject is not directly "search query" but we use `subject` filter if available or generic text search
 	// Usually `f[]=subject&op[subject]=~&v[subject]=<query>` logic.
@@ -141,11 +151,18 @@ func (c *Client) SearchIssues(query string) ([]Issue, error) {
 	
 	endpoint := fmt.Sprintf("%s/issues.json?subject=~%s&limit=10", c.BaseURL, query)
 	
-	req, err := http.NewRequest("GET", endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+	
+	// Determine Key: Context > Client Config
+	apiKey := c.APIKey
+	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
+		apiKey = k
+	}
+
+	req.Header.Set("X-Redmine-API-Key", apiKey)
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -166,7 +183,7 @@ func (c *Client) SearchIssues(query string) ([]Issue, error) {
 }
 
 // UpdateIssue updates an issue (e.g. adding notes)
-func (c *Client) UpdateIssue(id string, notes string) error {
+func (c *Client) UpdateIssue(ctx context.Context, id string, notes string) error {
 	endpoint := fmt.Sprintf("%s/issues/%s.json", c.BaseURL, id)
 	
 	payload := map[string]interface{}{
@@ -176,11 +193,18 @@ func (c *Client) UpdateIssue(id string, notes string) error {
 	}
 	
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest("PUT", endpoint, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "PUT", endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+	
+	// Determine Key: Context > Client Config
+	apiKey := c.APIKey
+	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
+		apiKey = k
+	}
+
+	req.Header.Set("X-Redmine-API-Key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	
 	resp, err := c.HTTP.Do(req)
