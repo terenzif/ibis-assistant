@@ -11,10 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
+
+type AIClient interface {
+	BatchEmbedText(texts []string) ([][]float32, error)
+}
 
 // SupportedExtensions filters which files we analyze
 var SupportedExtensions = map[string]bool{
@@ -24,7 +27,7 @@ var SupportedExtensions = map[string]bool{
 }
 
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) error {
+func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -73,11 +76,18 @@ func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) e
 		
 		// Query existing hash
 		ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
-		_, err = dbClient.Execute(ql)
-		// Parse response to see if hash matches. 
-		// Since our generic client returns interface{}, we'll skip deep parsing in this snippet 
-		// and use a simplified heuristic or just logging.
-		// For the sake of this file, we'll implement a "Force Update" mode or assuming it's needed.
+		res, err := dbClient.Execute(ql)
+		if err == nil {
+			// Parse response to see if hash matches.
+			// Result is typically []interface{} where each item is map[string]interface{}
+			if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
+				if row, ok := rows[0].(map[string]interface{}); ok {
+					if existingHash, ok := row["hash"].(string); ok && existingHash == hash {
+						return nil
+					}
+				}
+			}
+		}
 		
 		log.Printf("Processing %s...", filepath.Base(path))
 
