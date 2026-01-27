@@ -11,10 +11,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
+
+// Embedder abstracts the AI client for testing
+type Embedder interface {
+	EmbedText(text string) ([]float32, error)
+	BatchEmbedText(texts []string) ([][]float32, error)
+}
 
 // SupportedExtensions filters which files we analyze
 var SupportedExtensions = map[string]bool{
@@ -24,7 +29,7 @@ var SupportedExtensions = map[string]bool{
 }
 
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) error {
+func IngestCodebase(dbClient db.Executor, aiClient Embedder, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -127,6 +132,9 @@ func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) e
 			}
 
 			// Store Results
+			var batchQL strings.Builder
+			batchQL.WriteString("BEGIN TRANSACTION;\n")
+
 			for k, vec := range vectors {
 				originalIndex := validIndices[k]
 				chunkContentStr := validBatch[k]
@@ -134,10 +142,15 @@ func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) e
 				vecJson, _ := json.Marshal(vec)
 				chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
 				
-				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;", 
+				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;\n",
 					chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
 				
-				dbClient.Execute(ql)
+				batchQL.WriteString(ql)
+			}
+			batchQL.WriteString("COMMIT TRANSACTION;")
+
+			if _, err := dbClient.Execute(batchQL.String()); err != nil {
+				log.Printf("Error storing chunks for %s: %v", path, err)
 			}
 		}
 
