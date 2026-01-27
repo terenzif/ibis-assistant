@@ -17,6 +17,7 @@ import (
 
 type AIClient interface {
 	BatchEmbedText(texts []string) ([][]float32, error)
+	IsFunctional() bool
 }
 
 // SupportedExtensions filters which files we analyze
@@ -65,19 +66,6 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 		fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
 
 		// 2. Check if changed (using DB check)
-		// We'll store a 'hash' field on the file node.
-		// "SELECT hash FROM file:..."
-		// For simplicity/speed in this MVP, we assume if we upsert, we check existence or returned old val.
-		// Detailed check:
-		// existing, err := dbClient.Query("SELECT hash FROM " + fileID)
-		// ... logic to compare hash ...
-
-		// Let's assume we ALWAYS process for now, OR rely on a "last_modified" field.
-		// To implement "Delta" properly, we should query DB.
-		// But for now, to save implementation time, I will just do the processing logic
-		// and leave the "Delta Optimization" as a TODO or implicitly rely on overwrites (costly).
-		// WAIT: The user specifically asked for "Constrained". I MUST implement delta check.
-
 		// Query existing hash
 		ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
 		res, err := dbClient.Execute(ql)

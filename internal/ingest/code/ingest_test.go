@@ -45,6 +45,10 @@ func (m *MockAI) BatchEmbedText(texts []string) ([][]float32, error) {
 	return result, nil
 }
 
+func (m *MockAI) IsFunctional() bool {
+	return true
+}
+
 func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 	// Setup temp repo
 	tmpDir, err := os.MkdirTemp("", "repo_bench")
