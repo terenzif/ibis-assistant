@@ -11,10 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
+
+type AIEmbedder interface {
+	BatchEmbedText(texts []string) ([][]float32, error)
+}
 
 // SupportedExtensions filters which files we analyze
 var SupportedExtensions = map[string]bool{
@@ -24,13 +27,148 @@ var SupportedExtensions = map[string]bool{
 }
 
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) error {
+func IngestCodebase(dbClient db.Executor, aiClient AIEmbedder, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
 	}
 
 	log.Printf("Starting code analysis for: %s", absPath)
+
+	var batchQL strings.Builder
+
+	flushBatch := func() error {
+		if batchQL.Len() == 0 {
+			return nil
+		}
+		ql := "BEGIN TRANSACTION;\n" + batchQL.String() + "COMMIT TRANSACTION;"
+		_, err := dbClient.Execute(ql)
+		if err != nil {
+			return fmt.Errorf("batch execution failed: %w", err)
+		}
+		batchQL.Reset()
+		return nil
+	}
+
+	type pendingFile struct {
+		path string
+		hash string
+	}
+	var pendingFiles []pendingFile
+
+	processPending := func() error {
+		if len(pendingFiles) == 0 {
+			return nil
+		}
+
+		// 1. Build IDs for Bulk Query
+		ids := make([]string, 0, len(pendingFiles))
+		for _, pf := range pendingFiles {
+			fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(pf.path))
+			ids = append(ids, fileID)
+		}
+
+		// 2. Query Existing Hashes
+		// SurrealDB: SELECT id, hash FROM file WHERE id IN ['id1', 'id2']
+		idList := "'" + strings.Join(ids, "', '") + "'"
+		ql := fmt.Sprintf("SELECT id, hash FROM %s WHERE id IN [%s];", schema.TableFile, idList)
+		res, err := dbClient.Execute(ql)
+		if err != nil {
+			return fmt.Errorf("failed to check existing files: %w", err)
+		}
+
+		existingHashes := make(map[string]string)
+		// Parse result (interface{} -> []interface{} -> map[string]interface{})
+		if resSlice, ok := res.([]interface{}); ok {
+			for _, item := range resSlice {
+				if rec, ok := item.(map[string]interface{}); ok {
+					id, _ := rec["id"].(string)
+					hash, _ := rec["hash"].(string)
+					if id != "" && hash != "" {
+						existingHashes[id] = hash
+					}
+				}
+			}
+		}
+
+		// 3. Process Logic
+		for _, pf := range pendingFiles {
+			fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(pf.path))
+
+			// Delta Check
+			if existingHash, exists := existingHashes[fileID]; exists {
+				if existingHash == pf.hash {
+					continue // Unchanged
+				}
+			}
+
+			log.Printf("Processing %s...", filepath.Base(pf.path))
+
+			// Update File Node
+			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';\n", fileID, pf.hash, escapeSQL(pf.path)))
+
+			// Read & Chunk
+			content, err := os.ReadFile(pf.path)
+			if err != nil {
+				log.Printf("Error reading %s: %v", pf.path, err)
+				continue
+			}
+
+			// Delete old chunks
+			batchQL.WriteString(fmt.Sprintf("DELETE %s WHERE file = %s;\n", schema.TableFileChunk, fileID))
+
+			chunks := chunkContent(string(content), 1000)
+
+			// Embed & Store (Inner Batching for AI)
+			aiBatchSize := 100
+			for i := 0; i < len(chunks); i += aiBatchSize {
+				end := i + aiBatchSize
+				if end > len(chunks) {
+					end = len(chunks)
+				}
+				batch := chunks[i:end]
+
+				var validBatch []string
+				var validIndices []int
+				for k, c := range batch {
+					if strings.TrimSpace(c) != "" {
+						validBatch = append(validBatch, c)
+						validIndices = append(validIndices, i+k)
+					}
+				}
+				if len(validBatch) == 0 {
+					continue
+				}
+
+				vectors, err := aiClient.BatchEmbedText(validBatch)
+				if err != nil {
+					log.Printf("Embedding error for %s: %v", pf.path, err)
+					continue
+				}
+
+				for k, vec := range vectors {
+					originalIndex := validIndices[k]
+					chunkContentStr := validBatch[k]
+					vecJson, _ := json.Marshal(vec)
+					chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(pf.path), originalIndex)
+
+					ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;",
+						chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
+					batchQL.WriteString(ql + "\n")
+				}
+			}
+		}
+
+		pendingFiles = pendingFiles[:0]
+
+		// Flush DB Writes if buffer gets large
+		if batchQL.Len() > 64*1024 {
+			if err := flushBatch(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -48,103 +186,33 @@ func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) e
 			return nil
 		}
 
-		// 1. Calculate Hash
+		// Calculate Hash
 		hash, err := fileHash(path)
 		if err != nil {
 			log.Printf("Error hashing %s: %v", path, err)
 			return nil
 		}
 
-		fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
+		// Add to pending
+		pendingFiles = append(pendingFiles, pendingFile{path: path, hash: hash})
 		
-		// 2. Check if changed (using DB check)
-		// We'll store a 'hash' field on the file node.
-		// "SELECT hash FROM file:..."
-		// For simplicity/speed in this MVP, we assume if we upsert, we check existence or returned old val.
-		// Detailed check:
-		// existing, err := dbClient.Query("SELECT hash FROM " + fileID)
-		// ... logic to compare hash ...
-		
-		// Let's assume we ALWAYS process for now, OR rely on a "last_modified" field.
-		// To implement "Delta" properly, we should query DB.
-		// But for now, to save implementation time, I will just do the processing logic 
-		// and leave the "Delta Optimization" as a TODO or implicitly rely on overwrites (costly).
-		// WAIT: The user specifically asked for "Constrained". I MUST implement delta check.
-		
-		// Query existing hash
-		ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
-		_, err = dbClient.Execute(ql)
-		// Parse response to see if hash matches. 
-		// Since our generic client returns interface{}, we'll skip deep parsing in this snippet 
-		// and use a simplified heuristic or just logging.
-		// For the sake of this file, we'll implement a "Force Update" mode or assuming it's needed.
-		
-		log.Printf("Processing %s...", filepath.Base(path))
-
-		// 3. Update File Node
-		// Update hash
-		_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, escapeSQL(path)))
-
-		// Chunk & Embed
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		
-		chunks := chunkContent(string(content), 1000) // 1000 chars ~ 250 tokens
-		
-		// Delete old chunks
-		// DELETE file_chunk WHERE file = $fileID
-		dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID))
-
-		// Batching Logic (Gemini limit is 100 per batch)
-		batchSize := 100
-		for i := 0; i < len(chunks); i += batchSize {
-			end := i + batchSize
-			if end > len(chunks) {
-				end = len(chunks)
-			}
-			batch := chunks[i:end]
-			
-			// Filter empty
-			var validBatch []string
-			var validIndices []int
-			for k, c := range batch {
-				if strings.TrimSpace(c) != "" {
-					validBatch = append(validBatch, c)
-					validIndices = append(validIndices, i+k)
-				}
-			}
-			if len(validBatch) == 0 {
-				continue
-			}
-
-			// Call Batch API
-			vectors, err := aiClient.BatchEmbedText(validBatch)
-			if err != nil {
-				log.Printf("Batch embedding error for %s: %v", path, err)
-				continue
-			}
-
-			// Store Results
-			for k, vec := range vectors {
-				originalIndex := validIndices[k]
-				chunkContentStr := validBatch[k]
-				
-				vecJson, _ := json.Marshal(vec)
-				chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
-				
-				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;", 
-					chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
-				
-				dbClient.Execute(ql)
+		if len(pendingFiles) >= 50 {
+			if err := processPending(); err != nil {
+				return err
 			}
 		}
-
 		return nil
 	})
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Final process and flush
+	if err := processPending(); err != nil {
+		return err
+	}
+	return flushBatch()
 }
 
 func fileHash(path string) (string, error) {
