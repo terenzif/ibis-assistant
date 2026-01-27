@@ -10,15 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
-// Embedder abstracts the AI client for testing
-type Embedder interface {
-	EmbedText(text string) ([]float32, error)
+type AIClient interface {
 	BatchEmbedText(texts []string) ([][]float32, error)
 }
 
@@ -30,7 +27,7 @@ var SupportedExtensions = map[string]bool{
 }
 
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(dbClient db.Executor, aiClient Embedder, repoPath string) error {
+func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -79,11 +76,18 @@ func IngestCodebase(dbClient db.Executor, aiClient Embedder, repoPath string) er
 
 		// Query existing hash
 		ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
-		_, err = dbClient.Execute(ql)
-		// Parse response to see if hash matches.
-		// Since our generic client returns interface{}, we'll skip deep parsing in this snippet
-		// and use a simplified heuristic or just logging.
-		// For the sake of this file, we'll implement a "Force Update" mode or assuming it's needed.
+		res, err := dbClient.Execute(ql)
+		if err == nil {
+			// Parse response to see if hash matches.
+			// Result is typically []interface{} where each item is map[string]interface{}
+			if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
+				if row, ok := rows[0].(map[string]interface{}); ok {
+					if existingHash, ok := row["hash"].(string); ok && existingHash == hash {
+						return nil
+					}
+				}
+			}
+		}
 
 		log.Printf("Processing %s...", filepath.Base(path))
 
@@ -133,9 +137,6 @@ func IngestCodebase(dbClient db.Executor, aiClient Embedder, repoPath string) er
 			}
 
 			// Store Results
-			var batchQL strings.Builder
-			batchQL.WriteString("BEGIN TRANSACTION;\n")
-
 			for k, vec := range vectors {
 				originalIndex := validIndices[k]
 				chunkContentStr := validBatch[k]
@@ -143,15 +144,10 @@ func IngestCodebase(dbClient db.Executor, aiClient Embedder, repoPath string) er
 				vecJson, _ := json.Marshal(vec)
 				chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
 				
-				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;\n",
+				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;",
 					chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
 				
-				batchQL.WriteString(ql)
-			}
-			batchQL.WriteString("COMMIT TRANSACTION;")
-
-			if _, err := dbClient.Execute(batchQL.String()); err != nil {
-				log.Printf("Error storing chunks for %s: %v", path, err)
+				dbClient.Execute(ql)
 			}
 		}
 
@@ -196,13 +192,13 @@ func chunkContent(text string, size int) []string {
 
 // Duplicated helper (should move to shared utils)
 func sanitizeID(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch r {
-		case '/', '\\', '.', '-', ':', ' ':
-			return '_'
-		}
-		return unicode.ToLower(r)
-	}, s)
+	safe := strings.ReplaceAll(s, "/", "_")
+	safe = strings.ReplaceAll(safe, "\\", "_")
+	safe = strings.ReplaceAll(safe, ".", "_")
+	safe = strings.ReplaceAll(safe, "-", "_")
+	safe = strings.ReplaceAll(safe, ":", "_") // Drive letters
+	safe = strings.ReplaceAll(safe, " ", "_")
+	return strings.ToLower(safe)
 }
 
 func escapeSQL(s string) string {
