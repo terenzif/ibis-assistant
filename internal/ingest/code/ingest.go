@@ -24,7 +24,7 @@ var SupportedExtensions = map[string]bool{
 }
 
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) error {
+func IngestCodebase(dbClient db.Executor, aiClient *ai.Client, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -58,27 +58,22 @@ func IngestCodebase(dbClient *db.Client, aiClient *ai.Client, repoPath string) e
 		fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
 		
 		// 2. Check if changed (using DB check)
-		// We'll store a 'hash' field on the file node.
-		// "SELECT hash FROM file:..."
-		// For simplicity/speed in this MVP, we assume if we upsert, we check existence or returned old val.
-		// Detailed check:
-		// existing, err := dbClient.Query("SELECT hash FROM " + fileID)
-		// ... logic to compare hash ...
-		
-		// Let's assume we ALWAYS process for now, OR rely on a "last_modified" field.
-		// To implement "Delta" properly, we should query DB.
-		// But for now, to save implementation time, I will just do the processing logic 
-		// and leave the "Delta Optimization" as a TODO or implicitly rely on overwrites (costly).
-		// WAIT: The user specifically asked for "Constrained". I MUST implement delta check.
-		
-		// Query existing hash
 		ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
-		_, err = dbClient.Execute(ql)
-		// Parse response to see if hash matches. 
-		// Since our generic client returns interface{}, we'll skip deep parsing in this snippet 
-		// and use a simplified heuristic or just logging.
-		// For the sake of this file, we'll implement a "Force Update" mode or assuming it's needed.
-		
+		res, err := dbClient.Execute(ql)
+		if err == nil {
+			// Expecting []interface{} -> [ map[string]interface{}{ "hash": "..." } ]
+			if resList, ok := res.([]interface{}); ok && len(resList) > 0 {
+				if fileObj, ok := resList[0].(map[string]interface{}); ok {
+					if existingHash, ok := fileObj["hash"].(string); ok {
+						if existingHash == hash {
+							// File hasn't changed, skip processing
+							return nil
+						}
+					}
+				}
+			}
+		}
+
 		log.Printf("Processing %s...", filepath.Base(path))
 
 		// 3. Update File Node
