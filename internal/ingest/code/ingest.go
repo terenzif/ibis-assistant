@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
@@ -195,13 +196,13 @@ func chunkContent(text string, size int) []string {
 
 // Duplicated helper (should move to shared utils)
 func sanitizeID(s string) string {
-	safe := strings.ReplaceAll(s, "/", "_")
-	safe = strings.ReplaceAll(safe, "\\", "_")
-	safe = strings.ReplaceAll(safe, ".", "_")
-	safe = strings.ReplaceAll(safe, "-", "_")
-	safe = strings.ReplaceAll(safe, ":", "_") // Drive letters
-	safe = strings.ReplaceAll(safe, " ", "_")
-	return strings.ToLower(safe)
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', '.', '-', ':', ' ':
+			return '_'
+		}
+		return unicode.ToLower(r)
+	}, s)
 }
 
 func escapeSQL(s string) string {
