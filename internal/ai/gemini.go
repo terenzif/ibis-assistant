@@ -37,12 +37,15 @@ func NewClient(apiKeys []string, rpm int) *Client {
 	}
 
 	workers := make([]*worker, len(apiKeys))
-	// Distribute RPM across workers or assume RPM is PER KEY (usually the case for Gemini)
-	// If RPM is 60, does the user mean TOTAL or PER KEY?
-	// Usually limits are per Project/Key. We'll assume PER KEY for max throughput.
-	// If user meant "Global Limit", we should divide. But "Pool" implies parallelization.
-	// Let's stick to simple "Each worker respects the provided RPM".
-	interval := time.Minute / time.Duration(rpm)
+
+	// Distribute RPM across workers to ensure the global RPM limit is respected.
+	// If RPM is 60 and we have 2 keys, each worker gets 30 RPM.
+	workerRPM := rpm / len(apiKeys)
+	if workerRPM < 1 {
+		workerRPM = 1
+	}
+
+	interval := time.Minute / time.Duration(workerRPM)
 	if rpm <= 0 {
 		interval = time.Millisecond // No limit
 	}
