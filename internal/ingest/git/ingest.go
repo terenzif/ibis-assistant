@@ -210,5 +210,8 @@ func sanitizeID(s string) string {
 }
 
 func escapeSQL(s string) string {
-	return strings.ReplaceAll(s, "'", "\\'")
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	return s
 }
