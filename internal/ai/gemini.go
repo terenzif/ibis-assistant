@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	EmbeddingModel = "models/embedding-001"
+	EmbeddingModel = "models/gemini-embedding-001"
 )
 
 var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
