@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/auth"
 )
@@ -112,5 +113,12 @@ func TestContextKeyOverride(t *testing.T) {
 	_, err := client.GetIssue(ctx, "999")
 	if err != nil {
 		t.Fatalf("GetIssue failed: %v", err)
+	}
+}
+
+func TestClientTimeout(t *testing.T) {
+	client := NewClient("http://example.com", "key")
+	if client.HTTP.Timeout != 30*time.Second {
+		t.Errorf("Expected timeout to be 30s, got %v", client.HTTP.Timeout)
 	}
 }
