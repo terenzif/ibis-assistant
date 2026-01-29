@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,6 +98,67 @@ func TestIngestRepoIntegration(t *testing.T) {
 	}
 	if !foundIssueLink {
 		t.Errorf("Did not find 'implements->issue:42' relation in queries")
+	}
+}
+
+func TestIngestRepo_QuotedPaths(t *testing.T) {
+	// 1. Setup Temp Git Repo
+	repoDir := t.TempDir()
+
+	initCmd := exec.Command("git", "init")
+	initCmd.Dir = repoDir
+	if err := initCmd.Run(); err != nil {
+		t.Fatalf("Failed to git init: %v", err)
+	}
+
+	// Config user
+	cfgName := exec.Command("git", "config", "user.name", "Test User")
+	cfgName.Dir = repoDir
+	cfgName.Run()
+	cfgEmail := exec.Command("git", "config", "user.email", "test@example.com")
+	cfgEmail.Dir = repoDir
+	cfgEmail.Run()
+
+	// Create file with spaces (which git quotes as "file with spaces.txt")
+	fileName := "file with spaces.txt"
+	os.WriteFile(filepath.Join(repoDir, fileName), []byte("content"), 0644)
+	helperExec(t, repoDir, "git", "add", ".")
+	helperExec(t, repoDir, "git", "commit", "-m", "Add quoted file")
+
+	// 2. Setup Mock Clients
+	mockDB := &MockDB{}
+	mockRedmine := &MockRedmine{}
+
+	// 3. Run Ingest
+	err := IngestRepo(mockDB, mockRedmine, repoDir)
+	if err != nil {
+		t.Fatalf("IngestRepo failed: %v", err)
+	}
+
+	// 4. Assertions
+	// We expect the file ID to be sanitized without quotes: file:file_with_spaces_txt
+	// And the path update to use the clean name
+
+	foundFileUpdate := false
+	expectedPath := fileName
+	// sanitizeID("file with spaces.txt") -> "file_with_spaces_txt"
+	expectedID := "file:file_with_spaces_txt"
+
+	for _, qry := range mockDB.CapturedQueries {
+		// Check for UPDATE file:file_with_spaces_txt SET path = 'file with spaces.txt'
+		if strings.Contains(qry, fmt.Sprintf("UPDATE %s", expectedID)) {
+			if strings.Contains(qry, fmt.Sprintf("path = '%s'", expectedPath)) {
+				foundFileUpdate = true
+			}
+		}
+		// Also ensure no double quotes in the ID part of the query like file:"..."
+		if strings.Contains(qry, "file:\"") {
+			t.Errorf("Found double quotes in file ID in query: %s", qry)
+		}
+	}
+
+	if !foundFileUpdate {
+		t.Errorf("Did not find correct file update for quoted path. Queries: %v", mockDB.CapturedQueries)
 	}
 }
 
