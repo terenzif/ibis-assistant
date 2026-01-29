@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/logger"
@@ -22,13 +22,14 @@ var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
 // It supports multiple API Keys for simple round-robin pooling.
 type Client struct {
 	workers []*worker
-	next    uint32
 }
 
 type worker struct {
-	apiKey string
-	client *http.Client
-	ticker *time.Ticker
+	apiKey        string
+	client        *http.Client
+	costInterval  time.Duration // Time to wait per 1 item of cost
+	nextAvailable time.Time
+	mu            sync.Mutex
 }
 
 func NewClient(apiKeys []string, rpm int) *Client {
@@ -39,22 +40,24 @@ func NewClient(apiKeys []string, rpm int) *Client {
 	workers := make([]*worker, len(apiKeys))
 
 	// Distribute RPM across workers to ensure the global RPM limit is respected.
-	// If RPM is 60 and we have 2 keys, each worker gets 30 RPM.
 	workerRPM := rpm / len(apiKeys)
 	if workerRPM < 1 {
 		workerRPM = 1
 	}
 
-	interval := time.Minute / time.Duration(workerRPM)
+	// Calculate how much time each "item" costs.
+	// If RPM=60, then 60 items per minute.
+	// 1 item = 1 second.
+	costInterval := time.Minute / time.Duration(workerRPM)
 	if rpm <= 0 {
-		interval = time.Millisecond // No limit
+		costInterval = 0 // No limit
 	}
 
 	for i, key := range apiKeys {
 		workers[i] = &worker{
-			apiKey: key,
-			client: &http.Client{Timeout: 30 * time.Second},
-			ticker: time.NewTicker(interval),
+			apiKey:       key,
+			client:       &http.Client{Timeout: 30 * time.Second},
+			costInterval: costInterval,
 		}
 	}
 
@@ -69,26 +72,7 @@ func (c *Client) IsFunctional() bool {
 
 // EmbedText generates a vector embedding for the given text
 func (c *Client) EmbedText(text string) ([]float32, error) {
-	return c.getWorker().embedText(text)
-}
-
-// BatchEmbedText generates embeddings for multiple strings in one call
-func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
-	return c.getWorker().batchEmbedText(texts)
-}
-
-func (c *Client) getWorker() *worker {
-	if len(c.workers) == 0 {
-		return nil
-	}
-	idx := atomic.AddUint32(&c.next, 1)
-	return c.workers[idx%uint32(len(c.workers))]
-}
-
-// --- Worker Implementation ---
-
-func (w *worker) embedText(text string) ([]float32, error) {
-	res, err := w.batchEmbedText([]string{text})
+	res, err := c.BatchEmbedText([]string{text})
 	if err != nil {
 		return nil, err
 	}
@@ -98,16 +82,83 @@ func (w *worker) embedText(text string) ([]float32, error) {
 	return res[0], nil
 }
 
-func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
-	if w == nil {
+// BatchEmbedText generates embeddings for multiple strings in one call
+// It implements advanced rate limiting and failover across keys.
+func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
+	if len(c.workers) == 0 {
 		return nil, fmt.Errorf("no ai worker available (check API keys)")
 	}
 
-	// Rate Limit Wait
-	if w.ticker != nil {
-		<-w.ticker.C
+	cost := len(texts)
+	if cost == 0 {
+		return [][]float32{}, nil
 	}
 
+	// Retry loop (handled by Client orchestration)
+	for {
+		// 1. Find an available worker
+		var selectedWorker *worker
+		var earliestAvailable time.Time
+		now := time.Now()
+
+		for _, w := range c.workers {
+			w.mu.Lock()
+			if now.After(w.nextAvailable) || now.Equal(w.nextAvailable) {
+				// Found available!
+				// Reserve the time slot
+				// We advance nextAvailable by the cost of this request.
+				w.nextAvailable = now.Add(w.costInterval * time.Duration(cost))
+				selectedWorker = w
+				w.mu.Unlock()
+				break
+			} else {
+				// Keep track of earliest available for waiting
+				if earliestAvailable.IsZero() || w.nextAvailable.Before(earliestAvailable) {
+					earliestAvailable = w.nextAvailable
+				}
+			}
+			w.mu.Unlock()
+		}
+
+		// 2. If no worker available, wait
+		if selectedWorker == nil {
+			if earliestAvailable.IsZero() {
+				// Should not happen unless no workers
+				return nil, fmt.Errorf("no workers configured")
+			}
+			wait := time.Until(earliestAvailable)
+			if wait > 0 {
+				logger.Debug("AI: All keys busy, waiting %v...", wait)
+				time.Sleep(wait)
+			}
+			continue // Retry selection
+		}
+
+		// 3. Execute Request
+		res, retryDelay, err := selectedWorker.doEmbed(texts)
+		if err == nil {
+			return res, nil
+		}
+
+		// 4. Handle Failure
+		// If it's a 429 (Rate Limit), mark this worker as busy and retry loop
+		if retryDelay > 0 {
+			selectedWorker.mu.Lock()
+			// Push availability into the future
+			selectedWorker.nextAvailable = time.Now().Add(retryDelay)
+			selectedWorker.mu.Unlock()
+			logger.Warn("AI: Worker rate limited (429). Retrying on another key... (Wait: %v)", retryDelay)
+			continue // Loop will pick another worker
+		}
+
+		// Genuine error
+		return nil, err
+	}
+}
+
+// doEmbed performs the actual HTTP request. Returns (result, retryDelay, error).
+// It does NOT modify nextAvailable or sleep.
+func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
 	keyInfo := w.apiKey
 	if len(keyInfo) > 8 {
 		keyInfo = keyInfo[len(keyInfo)-4:]
@@ -127,63 +178,45 @@ func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
 	}
 
 	payload := BatchEmbedRequest{Requests: reqItems}
-
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	maxRetries := 3
-	var lastErr error
+	start := time.Now()
+	resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	duration := time.Since(start)
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		start := time.Now()
-		// Create new buffer for each attempt
-		resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
-		if err != nil {
-			return nil, err
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 200 {
+		logger.Debug("AI: Successfully received embeddings for %d items in %v", len(texts), duration)
+		var result BatchEmbedResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, 0, fmt.Errorf("parsing error: %w", err)
 		}
-
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		duration := time.Since(start)
-
-		if resp.StatusCode == 200 {
-			logger.Debug("AI: Successfully received embeddings for %d items in %v", len(texts), duration)
-
-			var result BatchEmbedResponse
-			if err := json.Unmarshal(body, &result); err != nil {
-				return nil, fmt.Errorf("parsing error: %w", err)
-			}
-
-			out := make([][]float32, len(result.Embeddings))
-			for i, e := range result.Embeddings {
-				out[i] = e.Values
-			}
-			return out, nil
+		// Extract values
+		out := make([][]float32, len(result.Embeddings))
+		for i, e := range result.Embeddings {
+			out[i] = e.Values
 		}
-
-		if resp.StatusCode == 429 {
-			if attempt < maxRetries {
-				retryDelay := parseRetryDelay(body)
-				if retryDelay == 0 {
-					// Exponential backoff: 2s, 4s, 8s
-					retryDelay = time.Duration(2<<attempt) * time.Second
-				}
-				logger.Warn("AI: Rate limit exceeded (429). Retrying in %v... (Attempt %d/%d)", retryDelay, attempt+1, maxRetries)
-				time.Sleep(retryDelay)
-				continue
-			}
-			lastErr = fmt.Errorf("gemini api error 429 (key ...%s) after %d retries: %s", keyInfo, maxRetries, string(body))
-			break
-		}
-
-		// Other errors - no retry
-		lastErr = fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, keyInfo, string(body))
-		break
+		return out, 0, nil
 	}
 
-	return nil, lastErr
+	if resp.StatusCode == 429 {
+		retryDelay := parseRetryDelay(body)
+		if retryDelay == 0 {
+			// Default backoff if parsing fails but 429 is present
+			retryDelay = 5 * time.Second
+		}
+		return nil, retryDelay, fmt.Errorf("rate limit exceeded")
+	}
+
+	return nil, 0, fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, keyInfo, string(body))
 }
 
 // --- DTOs ---
@@ -251,4 +284,3 @@ func parseRetryDelay(body []byte) time.Duration {
 	}
 	return 0
 }
-

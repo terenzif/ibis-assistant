@@ -56,98 +56,108 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 			return nil
 		}
 
-		// 1. Calculate Hash
-		hash, err := fileHash(path)
-		if err != nil {
-			logger.Error("Error hashing %s: %v", path, err)
-			return nil
+		if err := processFile(dbClient, aiClient, path); err != nil {
+			logger.Error("Error processing file %s: %v", path, err)
 		}
-
-		fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
-
-		// 2. Check if changed (using DB check)
-		// Query existing hash
-		ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
-		res, err := dbClient.Execute(ql)
-		if err == nil {
-			// Parse response to see if hash matches.
-			// Result is typically []interface{} where each item is map[string]interface{}
-			if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
-				if row, ok := rows[0].(map[string]interface{}); ok {
-					if existingHash, ok := row["hash"].(string); ok && existingHash == hash {
-						return nil
-					}
-				}
-			}
-		}
-
-		logger.Info("Processing %s...", filepath.Base(path))
-
-		// 3. Update File Node
-		// Update hash
-		_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, escapeSQL(path)))
-
-		// Chunk & Embed
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		chunks := chunkContent(string(content), 1000) // 1000 chars ~ 250 tokens
-		
-		// Delete old chunks
-		// DELETE file_chunk WHERE file = $fileID
-		dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID))
-
-		// Batching Logic (Gemini limit is 100 per batch)
-		batchSize := 100
-		for i := 0; i < len(chunks); i += batchSize {
-			end := i + batchSize
-			if end > len(chunks) {
-				end = len(chunks)
-			}
-			batch := chunks[i:end]
-			
-			// Filter empty
-			var validBatch []string
-			var validIndices []int
-			for k, c := range batch {
-				if strings.TrimSpace(c) != "" {
-					validBatch = append(validBatch, c)
-					validIndices = append(validIndices, i+k)
-				}
-			}
-			if len(validBatch) == 0 {
-				continue
-			}
-
-			vectors, err := aiClient.BatchEmbedText(validBatch)
-			if err != nil {
-				logger.Error("Batch embedding error for %s: %v", path, err)
-				continue
-			}
-
-			// Store Results
-			for k, vec := range vectors {
-				originalIndex := validIndices[k]
-				chunkContentStr := validBatch[k]
-				
-				vecJson, _ := json.Marshal(vec)
-				chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
-				
-				ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;",
-					chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
-				
-				dbClient.Execute(ql)
-			}
-			logger.Info("  - Embedded %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
-		}
-
 		return nil
 	})
 
 	logger.Info("Code analysis complete for %s", absPath)
 	return err
+}
+
+func processFile(dbClient db.Executor, aiClient AIClient, path string) error {
+	// 1. Calculate Hash
+	hash, err := fileHash(path)
+	if err != nil {
+		return fmt.Errorf("hashing error: %w", err)
+	}
+
+	fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
+
+	// 2. Check if changed (using DB check)
+	// Query existing hash
+	ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
+	res, err := dbClient.Execute(ql)
+	if err == nil {
+		// Parse response to see if hash matches.
+		// Result is typically []interface{} where each item is map[string]interface{}
+		if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
+			if row, ok := rows[0].(map[string]interface{}); ok {
+				if existingHash, ok := row["hash"].(string); ok && existingHash == hash {
+					return nil // Unchanged
+				}
+			}
+		}
+	}
+
+	logger.Info("Processing %s...", filepath.Base(path))
+
+	// 3. Update File Node
+	// Update hash
+	_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, escapeSQL(path)))
+	if err != nil {
+		return fmt.Errorf("db update error: %w", err)
+	}
+
+	// Chunk & Embed
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	chunks := chunkContent(string(content), 1000) // 1000 chars ~ 250 tokens
+
+	// Delete old chunks
+	// DELETE file_chunk WHERE file = $fileID
+	dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID))
+
+	// Batching Logic (Gemini limit is 100 per batch)
+	// We use a smaller batch size to avoid hitting RPM limits instantly if items count as requests.
+	batchSize := 10
+	for i := 0; i < len(chunks); i += batchSize {
+		end := i + batchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+		batch := chunks[i:end]
+
+		// Filter empty
+		var validBatch []string
+		var validIndices []int
+		for k, c := range batch {
+			if strings.TrimSpace(c) != "" {
+				validBatch = append(validBatch, c)
+				validIndices = append(validIndices, i+k)
+			}
+		}
+		if len(validBatch) == 0 {
+			continue
+		}
+
+		vectors, err := aiClient.BatchEmbedText(validBatch)
+		if err != nil {
+			logger.Error("Batch embedding error for %s: %v", path, err)
+			continue
+		}
+
+		// Store Results
+		for k, vec := range vectors {
+			originalIndex := validIndices[k]
+			chunkContentStr := validBatch[k]
+
+			vecJson, _ := json.Marshal(vec)
+			chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
+
+			ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;",
+				chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
+
+			dbClient.Execute(ql)
+		}
+		logger.Info("  - Embedded %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
+	}
+
+	return nil
 }
 
 func fileHash(path string) (string, error) {
