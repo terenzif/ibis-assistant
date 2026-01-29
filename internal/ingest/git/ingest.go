@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
@@ -157,6 +158,15 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 		} else {
 			// File line
 			path := line
+			// Handle quoted paths from git log (e.g. "path/to/file with spaces.txt")
+			if strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"") {
+				if unquoted, err := strconv.Unquote(path); err == nil {
+					path = unquoted
+				} else {
+					logger.Warn("Failed to unquote git path: %s, err: %v", path, err)
+				}
+			}
+
 			fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
 			
 			// 1. Upsert File
@@ -206,6 +216,7 @@ func sanitizeID(s string) string {
 	safe = strings.ReplaceAll(safe, "-", "_")
 	safe = strings.ReplaceAll(safe, " ", "_")
 	safe = strings.ReplaceAll(safe, "'", "")
+	safe = strings.ReplaceAll(safe, "\"", "")
 	return strings.ToLower(safe)
 }
 
