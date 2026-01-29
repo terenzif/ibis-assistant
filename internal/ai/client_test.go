@@ -1,7 +1,10 @@
 package ai
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // Accessing private fields for testing is allowed in same package
@@ -41,12 +44,64 @@ func TestClientRotation(t *testing.T) {
 	}
 }
 
-func TestEmbedMock(t *testing.T) {
-	// Since we can't easily mock the HTTP calls inside the struct without 
-	// changing the strict, we will skip mocking the actual API call 
-	// unless we refactor Client to accept an HTTPClient interface or 
-	// replace the http.Client field.
-	// Fortunately, the Client struct HAS an HTTP field we can swap if we make it public or use NewClient.
-	// But it's inside `worker`.
-	// For this task, validating the Rotation logic (above) is the critical part of the "new feature".
+func TestClientRetryOn429(t *testing.T) {
+	// Mock Server
+	var attempt int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		if attempt == 1 {
+			// First attempt: 429
+			w.WriteHeader(429)
+			w.Write([]byte(`{
+				"error": {
+					"code": 429,
+					"message": "Quota exceeded",
+					"status": "RESOURCE_EXHAUSTED",
+					"details": [
+						{
+							"@type": "type.googleapis.com/google.rpc.RetryInfo",
+							"retryDelay": "0.1s"
+						}
+					]
+				}
+			}`))
+			return
+		}
+		// Second attempt: Success
+		w.WriteHeader(200)
+		w.Write([]byte(`{
+			"embeddings": [
+				{"values": [0.1, 0.2, 0.3]}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	// Override BaseURL
+	originalBaseURL := BaseURL
+	BaseURL = server.URL
+	defer func() { BaseURL = originalBaseURL }()
+
+	// Create Client
+	client := NewClient([]string{"test-key"}, 1000) // High RPM to avoid ticker delay
+
+	// Call
+	start := time.Now()
+	embs, err := client.EmbedText("test")
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Expected success, got error: %v", err)
+	}
+	if len(embs) != 3 {
+		t.Errorf("Expected 3 values, got %d", len(embs))
+	}
+	if attempt != 2 {
+		t.Errorf("Expected 2 attempts (1 failure + 1 success), got %d", attempt)
+	}
+
+	// Check if we waited at least 0.1s
+	if duration < 100*time.Millisecond {
+		t.Errorf("Expected delay of at least 100ms, took %v", duration)
+	}
 }

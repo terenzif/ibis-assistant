@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	EmbeddingModel = "models/embedding-001"
-	BaseURL        = "https://generativelanguage.googleapis.com/v1beta"
+	EmbeddingModel = "models/gemini-embedding-001"
 )
+
+var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
 // Client abstracts interaction with the AI Provider
 // It supports multiple API Keys for simple round-robin pooling.
@@ -36,12 +37,15 @@ func NewClient(apiKeys []string, rpm int) *Client {
 	}
 
 	workers := make([]*worker, len(apiKeys))
-	// Distribute RPM across workers or assume RPM is PER KEY (usually the case for Gemini)
-	// If RPM is 60, does the user mean TOTAL or PER KEY?
-	// Usually limits are per Project/Key. We'll assume PER KEY for max throughput.
-	// If user meant "Global Limit", we should divide. But "Pool" implies parallelization.
-	// Let's stick to simple "Each worker respects the provided RPM".
-	interval := time.Minute / time.Duration(rpm)
+
+	// Distribute RPM across workers to ensure the global RPM limit is respected.
+	// If RPM is 60 and we have 2 keys, each worker gets 30 RPM.
+	workerRPM := rpm / len(apiKeys)
+	if workerRPM < 1 {
+		workerRPM = 1
+	}
+
+	interval := time.Minute / time.Duration(workerRPM)
 	if rpm <= 0 {
 		interval = time.Millisecond // No limit
 	}
@@ -98,7 +102,7 @@ func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
 	if w == nil {
 		return nil, fmt.Errorf("no ai worker available (check API keys)")
 	}
-	
+
 	// Rate Limit Wait
 	if w.ticker != nil {
 		<-w.ticker.C
@@ -121,41 +125,65 @@ func (w *worker) batchEmbedText(texts []string) ([][]float32, error) {
 			},
 		}
 	}
-	
+
 	payload := BatchEmbedRequest{Requests: reqItems}
-	
+
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	start := time.Now()
-	resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, err
+	maxRetries := 3
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		start := time.Now()
+		// Create new buffer for each attempt
+		resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return nil, err
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		duration := time.Since(start)
+
+		if resp.StatusCode == 200 {
+			logger.Debug("AI: Successfully received embeddings for %d items in %v", len(texts), duration)
+
+			var result BatchEmbedResponse
+			if err := json.Unmarshal(body, &result); err != nil {
+				return nil, fmt.Errorf("parsing error: %w", err)
+			}
+
+			out := make([][]float32, len(result.Embeddings))
+			for i, e := range result.Embeddings {
+				out[i] = e.Values
+			}
+			return out, nil
+		}
+
+		if resp.StatusCode == 429 {
+			if attempt < maxRetries {
+				retryDelay := parseRetryDelay(body)
+				if retryDelay == 0 {
+					// Exponential backoff: 2s, 4s, 8s
+					retryDelay = time.Duration(2<<attempt) * time.Second
+				}
+				logger.Warn("AI: Rate limit exceeded (429). Retrying in %v... (Attempt %d/%d)", retryDelay, attempt+1, maxRetries)
+				time.Sleep(retryDelay)
+				continue
+			}
+			lastErr = fmt.Errorf("gemini api error 429 (key ...%s) after %d retries: %s", keyInfo, maxRetries, string(body))
+			break
+		}
+
+		// Other errors - no retry
+		lastErr = fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, keyInfo, string(body))
+		break
 	}
-	defer resp.Body.Close()
-	duration := time.Since(start)
 
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, keyInfo, string(body))
-	}
-
-	logger.Debug("AI: Successfully received embeddings for %d items in %v", len(texts), duration)
-
-	var result BatchEmbedResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("parsing error: %w", err)
-	}
-
-	out := make([][]float32, len(result.Embeddings))
-	for i, e := range result.Embeddings {
-		out[i] = e.Values
-	}
-
-	return out, nil
+	return nil, lastErr
 }
 
 // --- DTOs ---
@@ -195,4 +223,32 @@ type BatchEmbedResponse struct {
 	} `json:"embeddings"`
 }
 
+type ErrorResponse struct {
+	Error struct {
+		Code    int           `json:"code"`
+		Message string        `json:"message"`
+		Status  string        `json:"status"`
+		Details []ErrorDetail `json:"details"`
+	} `json:"error"`
+}
+
+type ErrorDetail struct {
+	Type       string `json:"@type"`
+	RetryDelay string `json:"retryDelay,omitempty"`
+}
+
+func parseRetryDelay(body []byte) time.Duration {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		return 0
+	}
+	for _, d := range errResp.Error.Details {
+		if d.RetryDelay != "" {
+			if dur, err := time.ParseDuration(d.RetryDelay); err == nil {
+				return dur
+			}
+		}
+	}
+	return 0
+}
 
