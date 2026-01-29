@@ -31,7 +31,7 @@ var _ Ingester = (*Client)(nil)
 
 func NewClient(url, key string) *Client {
 	return &Client{
-		BaseURL: url,
+		BaseURL: strings.TrimRight(url, "/"),
 		APIKey:  key,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	}

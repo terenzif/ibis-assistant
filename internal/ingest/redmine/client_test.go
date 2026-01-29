@@ -122,3 +122,10 @@ func TestClientTimeout(t *testing.T) {
 		t.Errorf("Expected timeout to be 30s, got %v", client.HTTP.Timeout)
 	}
 }
+
+func TestClientURLTrimming(t *testing.T) {
+	client := NewClient("http://example.com/", "key")
+	if client.BaseURL != "http://example.com" {
+		t.Errorf("Expected BaseURL to be 'http://example.com', got '%s'", client.BaseURL)
+	}
+}
