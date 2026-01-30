@@ -10,6 +10,8 @@
     {
       "key": "",
       "rpm": 100,
+      "tpm": 30000,
+      "rpd": 1000,
       "owner": "Your Name"
     }
   ],

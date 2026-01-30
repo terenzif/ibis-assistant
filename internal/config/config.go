@@ -34,6 +34,8 @@ type Config struct {
 type GeminiKeyConfig struct {
 	Key   string `json:"key"`
 	RPM   int    `json:"rpm"`
+	TPM   int    `json:"tpm"`
+	RPD   int    `json:"rpd"`
 	Owner string `json:"owner"`
 }
 

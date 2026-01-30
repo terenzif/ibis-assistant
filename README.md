@@ -24,8 +24,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
     > **Download**: Scarica la versione Windows da [surrealdb.com/install](https://surrealdb.com/install) o dai [Release di GitHub](https://github.com/surrealdb/surrealdb/releases), estrai e copia `surreal.exe` nella cartella di questo progetto.
   * *Opzione Manuale*: SurrealDB pre-installato e in esecuzione.
 * **Git**: Installato e accessibile da terminale.
-* **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`, formato oggetto con `key`, `rpm` e `owner`) o via env (`GEMINI_API_KEY` separati da virgola, che useranno il `gemini_rpm` di default).
-  * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Round-Robin**. Questo permette di distribuire il carico e superare i limiti di Rate Limit (RPM) imposti da Google. Ogni chiave può avere un RPM specifico (es. Free Tier vs Pay-As-You-Go) e un proprietario associato per il monitoraggio.
+* **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`, formato oggetto con `key`, `rpm`, `tpm`, `rpd` e `owner`) o via env (`GEMINI_API_KEY` separati da virgola, che useranno il `gemini_rpm` di default).
+  * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Priority/Failover**. Il server proverà ad utilizzare la prima chiave disponibile che non ha superato i limiti (RPM, TPM, RPD). Se la prima chiave è limitata (o esaurita per il giorno), passerà alla successiva. Questo permette di definire una chiave "principale" (es. Free Tier) e usare le altre come backup.
 
 ### Setup
 
@@ -53,8 +53,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
      "db_user": "root",
      "db_password": "root",
      "gemini_keys": [
-       { "key": "", "rpm": 15, "owner": "User A" },
-       { "key": "", "rpm": 100, "owner": "Project Budget" }
+       { "key": "", "rpm": 15, "tpm": 30000, "rpd": 1500, "owner": "User A" },
+       { "key": "", "rpm": 100, "tpm": 100000, "rpd": 10000, "owner": "Project Budget" }
      ],
      "gemini_rpm": 100,
      "redmine_url": "https://redmine.tuodominio.com",

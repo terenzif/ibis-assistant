@@ -10,6 +10,11 @@ import (
 
 // Accessing private fields for testing is allowed in same package
 
+type MockDB struct{}
+func (m *MockDB) Execute(sql string) (interface{}, error) { return nil, nil }
+func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) { return nil, nil }
+func (m *MockDB) Close() {}
+
 func TestClientRotationAndFailover(t *testing.T) {
 	// Mock Server
 	// We want to simulate:
@@ -18,6 +23,12 @@ func TestClientRotationAndFailover(t *testing.T) {
 	var key1Attempts, key2Attempts int
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Ignore probe requests
+		if r.Method == "GET" {
+			w.WriteHeader(200)
+			return
+		}
+
 		key := r.URL.Query().Get("key")
 		if strings.Contains(key, "key1") {
 			key1Attempts++
@@ -57,9 +68,9 @@ func TestClientRotationAndFailover(t *testing.T) {
 
 	// Create Client with 2 keys
 	client := NewClient([]KeyConfig{
-		{Key: "key1", RPM: 60, Owner: "User1"},
-		{Key: "key2", RPM: 60, Owner: "User2"},
-	})
+		{Key: "key1", RPM: 60, TPM: 1000, RPD: 100, Owner: "User1"},
+		{Key: "key2", RPM: 60, TPM: 1000, RPD: 100, Owner: "User2"},
+	}, &MockDB{})
 
 	// Call
 	// Should try key1 -> 429 -> mark key1 busy for 2s -> try key2 -> success
@@ -103,7 +114,7 @@ func TestClientRateLimitingPacing(t *testing.T) {
 	// We use 1 key.
 	client := NewClient([]KeyConfig{
 		{Key: "key1", RPM: 60},
-	})
+	}, &MockDB{})
 
 	start := time.Now()
 	// 1st call: Should be immediate

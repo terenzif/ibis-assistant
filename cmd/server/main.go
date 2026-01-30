@@ -210,10 +210,12 @@ func runServer() {
 		aiKeys = append(aiKeys, ai.KeyConfig{
 			Key:   k.Key,
 			RPM:   rpm,
+			TPM:   k.TPM,
+			RPD:   k.RPD,
 			Owner: k.Owner,
 		})
 	}
-	aiClient := ai.NewClient(aiKeys)
+	aiClient := ai.NewClient(aiKeys, dbClient)
 	
 	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
 	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
