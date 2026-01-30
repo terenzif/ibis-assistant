@@ -1,24 +1,31 @@
 # Implementation Plan: Knowledge Server Hybrid Search
 **Target Developer:** Jules
+**Status:** Ingestion is COMPLETE. Retrieval is PENDING.
 **Objective:** Implement "AskProject" functionality combining Vector Search with Graph Traversal in `knowledge-server`.
 
-## 1. Context & Goal
-The `knowledge-server` currently ingests Git history and Codebase embeddings into SurrealDB. The `AskProject` tool is currently a stub.
-We need to implement the **retrieval logic** that answers questions like "Why was the login changed?" by:
-1.  **Vector Search**: Finding relevant code chunks.
-2.  **Graph Traversal**: Finding *who* changed that code, *when*, and *why* (linked Issues).
+## 1. Confirmed Codebase State
+-   **Ingestion (`internal/ingest/`)**:
+    -   `git`: Already populates `commit` nodes and links them to `file` (`changed`) and `issue` (`implements`).
+    -   `code`: Already populates `file_chunk` with embeddings.
+    -   `redmine`: Already populates `issue` details.
+-   **Service (`cmd/server/main.go`)**:
+    -   Fully wired with `auth`, `config`, and `background indexing`.
+    -   `AskProject` tool is registered but calls a stub in `search.go`.
+-   **Search (`internal/search/search.go`)**:
+    -   **STUB**: Currently performs a vector search but returns empty results.
+    -   Missing the logic to traverse from `file_chunk` back to `commit` and `issue`.
 
 ## 2. Architecture
 The logic resides in `internal/search/`.
 -   **`search.go`**: High-level orchestration.
 -   **`graph.go`** (New): Graph query construction and parsing.
 
-### Data Model (Existing in SurrealDB)
--   **Nodes**: `file_chunk` (has embedding), `file`, `commit`, `issue`, `author`.
+### Data Model (Verified in `internal/schema/schema.go`)
+-   **Nodes**: `file_chunk`, `file`, `commit`, `issue`, `author`.
 -   **Edges**: 
-    -   `file_chunk` -> `part_of` -> `file` (Implicit or Explicit, check schema)
     -   `commit` -> `changed` -> `file`
     -   `commit` -> `implements` -> `issue`
+    -   `author` -> `authored` -> `commit`
 
 ## 3. Implementation Steps
 
@@ -92,9 +99,9 @@ Implement the `AskProject` function.
         > - Modified by **Jules** on 2024-01-20: "Fix login bug" (Linked to Issue #123)
         > - Modified by **Admin** on 2024-01-15: "Init feature"
 
-### Step 3: Refine `cmd/server/main.go`
--   Ensure the `AskProject` tool outputs the formatted string to the user.
--   (Optional) If specific JSON output is needed for a frontend, struct it accordingly, but for MCP `CallToolResultText` is standard.
+### Step 3: Verify Integration in `cmd/server/main.go`
+-   The tool `ask_project` is already registered.
+-   Ensure the returned `CallToolResultText` properly displays the rich string returned by `AskProject`.
 
 ## 4. Verification
 Run the server and test with `ask_project("What recent changes were made to the search logic?")`.
