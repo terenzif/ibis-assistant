@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -319,12 +320,33 @@ func runServer() {
 			return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 		}
 
-		var out strings.Builder
-		out.WriteString(fmt.Sprintf("Found %d results for '%s':\n\n", len(results), query))
-		for i, r := range results {
-			out.WriteString(fmt.Sprintf("%d. [%s] %s (Score: %.2f)\n%s\n\n", i+1, r.Type, r.ID, r.Score, r.Content))
+		bytes, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
-		return mcp.NewToolResultText(out.String()), nil
+		return mcp.NewToolResultText(string(bytes)), nil
+	})
+
+	s.AddTool(mcp.NewTool("reinforce_path",
+		mcp.WithDescription("Reinforce a specific connection in the knowledge graph based on user feedback."),
+		mcp.WithString("source", mcp.Description("ID of the source node (e.g., commit:xyz)")),
+		mcp.WithString("target", mcp.Description("ID of the target node (e.g., issue:123)")),
+		mcp.WithNumber("score", mcp.Description("Feedback score (positive to reinforce, negative to decay)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: reinforce_path")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok { return mcp.NewToolResultError("Invalid arguments"), nil }
+
+		source, _ := args["source"].(string)
+		target, _ := args["target"].(string)
+		score, _ := args["score"].(float64)
+
+		err := searchService.ReinforcePath(source, target, score)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Reinforcement failed: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully reinforced path %s -> %s (Delta: %.2f)", source, target, score)), nil
 	})
 
 	// --- Redmine Direct Tools ---
