@@ -17,7 +17,7 @@ import (
 )
 
 type Ingester interface {
-	IngestIssue(dbClient db.Executor, issueIDStr string) error
+	IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error
 }
 
 type Client struct {
@@ -58,11 +58,15 @@ type NamedObj struct {
 
 // IngestIssue fetches a single issue by ID and updates the graph
 // This is called "On-Demand" when a commit references an issue.
-func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
+func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error {
 	logger.Info("Fetching Redmine Issue #%s...", issueIDStr)
 	
-	// Use Background context for ingestion (system key)
-	issue, err := c.GetIssue(context.Background(), issueIDStr)
+	// Use provided context or Background
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	issue, err := c.GetIssue(ctx, issueIDStr)
 	if err != nil {
 		return err
 	}
@@ -75,15 +79,23 @@ func (c *Client) IngestIssue(dbClient db.Executor, issueIDStr string) error {
 	authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, sanitizeID(issue.Author.Name))
 
 	// 1. Create/Update Tracker
-	dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", trackerID, escapeSQL(issue.Tracker.Name)))
+	dbClient.SmartQuery(fmt.Sprintf("UPDATE %s SET name = $name;", trackerID), map[string]interface{}{
+		"name": issue.Tracker.Name,
+	})
 
 	// 2. Create/Update Author (Redmine user)
-	dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", authorID, escapeSQL(issue.Author.Name)))
+	dbClient.SmartQuery(fmt.Sprintf("UPDATE %s SET name = $name;", authorID), map[string]interface{}{
+		"name": issue.Author.Name,
+	})
 
 	// 3. Update Issue
-	ql := fmt.Sprintf("UPDATE %s SET subject = '%s', description = '%s', status = '%s', updated_on = '%s';", 
-		issueID, escapeSQL(issue.Subject), escapeSQL(issue.Description), escapeSQL(issue.Status.Name), issue.UpdatedOn)
-	dbClient.Execute(ql)
+	ql := fmt.Sprintf("UPDATE %s SET subject = $subject, description = $description, status = $status, updated_on = $updated_on;", issueID)
+	dbClient.SmartQuery(ql, map[string]interface{}{
+		"subject":     issue.Subject,
+		"description": issue.Description,
+		"status":      issue.Status.Name,
+		"updated_on":  issue.UpdatedOn,
+	})
 
 	// 4. Link Issue -> Tracker
 	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", issueID, schema.EdgePartOf, trackerID))

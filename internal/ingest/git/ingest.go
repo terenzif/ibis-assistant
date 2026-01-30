@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"math"
 	"os/exec"
@@ -142,7 +143,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 						// In-Band Ingestion: Trigger Redmine fetch if client is available
 						if redmineClient != nil {
 							go func(id string) {
-								if err := redmineClient.IngestIssue(client, id); err != nil {
+								if err := redmineClient.IngestIssue(context.Background(), client, id); err != nil {
 									logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
 								}
 							}(issueIDStr)
