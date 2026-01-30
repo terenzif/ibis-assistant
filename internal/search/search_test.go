@@ -55,17 +55,23 @@ func TestAskProject(t *testing.T) {
 	// 2. Mock Data for Graph Context
 	graphHistory := []map[string]interface{}{
 		{
-			"hash": "abc", "message": "init", "date": "2024-01-01",
+			"id": "commit:abc", "hash": "abc", "message": "init", "date": "2024-01-01",
 			"author": []string{"me"},
 			"issues": []map[string]interface{}{
-				{"id": "1", "subject": "Fix", "status": "Closed"},
+				{"id": "1", "subject": "Fix", "status": "Closed", "weight": []float64{1.2}},
 			},
 		},
+	}
+
+	// change_edges for impact
+	changeEdges := []map[string]interface{}{
+		{"in": "commit:abc", "out": "file:main", "impact": 0.5},
 	}
 
 	graphResponse := []interface{}{
 		map[string]interface{}{
 			"history": graphHistory,
+			"change_edges": changeEdges,
 		},
 	}
 
@@ -95,16 +101,20 @@ func TestAskProject(t *testing.T) {
 	if results[0].Path != "/src/main.go" {
 		t.Errorf("Expected top result path /src/main.go, got %s", results[0].Path)
 	}
-	if results[0].Context == nil || len(results[0].Context.Commits) == 0 {
-		t.Error("Expected context for top result, got empty/nil")
+	// Check Context Data
+	if len(results[0].Context.ExpertAuthors) == 0 {
+		t.Error("Expected expert authors, got empty")
 	}
-	if results[0].Context.Commits[0].Hash != "abc" {
-		t.Errorf("Expected commit hash 'abc', got %s", results[0].Context.Commits[0].Hash)
+	if results[0].Context.ExpertAuthors[0] != "me" {
+		t.Errorf("Expected author 'me', got %s", results[0].Context.ExpertAuthors[0])
 	}
 
-	// Check issue parsing
-	if results[0].Context.Issues[0].Status != "Closed" {
-		t.Errorf("Expected issue status 'Closed', got %s", results[0].Context.Issues[0].Status)
+	if len(results[0].Context.RelatedIssues) == 0 {
+		t.Error("Expected related issues, got empty")
+	}
+	// Check weight
+	if results[0].Context.RelatedIssues[0].UsageWeight != 1.2 {
+		t.Errorf("Expected issue weight 1.2, got %f", results[0].Context.RelatedIssues[0].UsageWeight)
 	}
 
 	// Check limit (Top 3 files)
@@ -122,7 +132,7 @@ func TestAskProject(t *testing.T) {
 		t.Fatal("Could not find /src/extra.go in results")
 	}
 
-	if len(extraRes.Context.Commits) != 0 {
-		t.Errorf("Expected 0 commits for 4th file, got %d", len(extraRes.Context.Commits))
+	if len(extraRes.Context.ExpertAuthors) != 0 {
+		t.Errorf("Expected 0 authors for 4th file, got %d", len(extraRes.Context.ExpertAuthors))
 	}
 }

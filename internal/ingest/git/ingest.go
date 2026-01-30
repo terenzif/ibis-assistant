@@ -3,6 +3,7 @@ package git
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -26,7 +27,12 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 
 	// 1. Run Git Log
 	// Format: COMMIT|Hash|Parents|Author|Date|Subject
-	cmd := exec.Command("git", "log", "--all", "--name-only", "--reverse", "--format=COMMIT|%H|%P|%an|%aI|%s")
+	// We use --numstat to get lines changed.
+	// Output format will be:
+	// COMMIT|Hash|Parents|Author|Date|Subject
+	// Added Deleted Path
+	// ...
+	cmd := exec.Command("git", "log", "--all", "--numstat", "--reverse", "--format=COMMIT|%H|%P|%an|%aI|%s")
 	cmd.Dir = absPath
 	// Increase buffer for large repos if needed, but standard pipe is usually fine for streaming
 	stdout, err := cmd.StdoutPipe()
@@ -51,10 +57,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	)
 
 	// Register Repo Node
-	// Upsert query for Repo
-	// In SurrealDB, ID can be `repo:deckonline`
 	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, sanitizeID(repoName))
-	// We init the repo node
 	logger.Debug("Upserting repo node: %s", repoID)
 	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, escapeSQL(absPath)))
 	if err != nil {
@@ -148,23 +151,83 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 						    batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
 						}
 
-						// Link Commit -> Issue
-						batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", commitID, schema.EdgeImplements, issueID))
+						// Link Commit -> Issue with default confidence/weight
+						// Spec: 0.5 if just mentioned. 1.0 if "Fixes".
+						// For now, default to 1.0 for simplicity or parse properly.
+						// Let's do simple keyword check.
+						confidence := 0.5
+						lowerSub := strings.ToLower(subject)
+						if strings.Contains(lowerSub, "fix") || strings.Contains(lowerSub, "close") || strings.Contains(lowerSub, "resolve") {
+							confidence = 1.0
+						}
+
+						batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET confidence = %f, usage_weight = 1.0;\n",
+							commitID, schema.EdgeImplements, issueID, confidence))
 					}
 					i = end // Advance
 				}
 			}
 
 		} else {
-			// File line
-			path := line
-			// Handle quoted paths from git log (e.g. "path/to/file with spaces.txt")
+			// Numstat line: Added Deleted Path
+			// e.g. "5       3       src/main.go"
+			// Binary files: "-       -       image.png"
+			parts := strings.Fields(line)
+			if len(parts) < 3 {
+				continue
+			}
+
+			addedStr := parts[0]
+			deletedStr := parts[1]
+			// Path is the rest (could have spaces if not properly separated, but fields splits by whitespace)
+			// Wait, Fields splits by whitespace. Git --numstat output uses TABS between numbers and path,
+			// but path can contain spaces. If path contains spaces, it is NOT quoted in numstat unless weird config.
+			// Actually, git log --numstat separates by TAB.
+
+			// Let's re-parse using Tab delimiter for safety if possible, but scanner.Text() gives a string.
+			// Standard git numstat: <added>\t<deleted>\t<path>
+			// Let's try splitting by tab.
+			tabParts := strings.Split(line, "\t")
+			var path string
+			var added, deleted int
+
+			if len(tabParts) >= 3 {
+				addedStr = tabParts[0]
+				deletedStr = tabParts[1]
+				path = tabParts[2]
+			} else {
+				// Fallback to Fields if tabs missing (e.g. ecosystem quirks)
+				// But path with spaces will break Fields logic.
+				// Assuming standard git output.
+				// If we fail to parse, skip.
+				continue
+			}
+
+			// Handle binary
+			if addedStr == "-" { added = 0 } else { a, _ := strconv.Atoi(addedStr); added = a }
+			if deletedStr == "-" { deleted = 0 } else { d, _ := strconv.Atoi(deletedStr); deleted = d }
+
+			// Handle quoted paths
 			if strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"") {
 				if unquoted, err := strconv.Unquote(path); err == nil {
 					path = unquoted
-				} else {
-					logger.Warn("Failed to unquote git path: %s, err: %v", path, err)
 				}
+			}
+
+			// Calculate Impact
+			// Logic: log(lines_changed + 1) normalized?
+			// Spec says: "Calculate based on lines changed".
+			// Let's use log10 to dampen huge diffs.
+			totalChanged := float64(added + deleted)
+			impact := 0.0
+			if totalChanged > 0 {
+				impact = math.Log10(totalChanged + 1)
+				if impact > 1.0 { impact = 1.0 } // Normalize? Log10(10)=1, Log10(100)=2.
+				// Maybe sigmoid? Or just raw log.
+				// Spec says "float 0.0-1.0".
+				// Let's limit it. If > 100 lines, impact = 1.0?
+				// Let's use a sigmoid-like: x / (x + 20) -> 20 lines = 0.5 impact. 100 lines = 0.83.
+				impact = totalChanged / (totalChanged + 50.0)
 			}
 
 			fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
@@ -172,9 +235,10 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			// 1. Upsert File
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, escapeSQL(path)))
 			
-			// 3. Link Commit -> File (Changed)
+			// 3. Link Commit -> File (Changed) with Impact
 			if currentCommitID != "" {
-				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", currentCommitID, schema.EdgeChanged, fileID))
+				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET impact = %f, added = %d, deleted = %d;\n",
+					currentCommitID, schema.EdgeChanged, fileID, impact, added, deleted))
 			}
 		}
 
@@ -203,13 +267,6 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 
 
 func sanitizeID(s string) string {
-	// Simple sanitizer for SurrealDB IDs (alphanumeric + _ ideally)
-	// We'll just replace bad chars with _
-	// This is critical because `file:path/to/file` is valid ONLY if escaped with ⟨ ⟩, 
-	// but standard IDs easiest if safe.
-	// Actually, Surreal handles `table:⟨complex value⟩`.
-	// For simplicity in this generated code, we'll just hash or safe-encode if it gets complex.
-	// Let's rely on ReplaceAll for now.
 	safe := strings.ReplaceAll(s, "/", "_")
 	safe = strings.ReplaceAll(safe, "\\", "_")
 	safe = strings.ReplaceAll(safe, ".", "_")

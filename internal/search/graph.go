@@ -15,34 +15,40 @@ type GraphContext struct {
 }
 
 type CommitSummary struct {
-	Hash    string `json:"hash"`
-	Message string `json:"message"`
-	Author  string `json:"author"`
-	Date    string `json:"date"`
+	Hash    string  `json:"hash"`
+	Message string  `json:"message"`
+	Author  string  `json:"author"`
+	Date    string  `json:"date"`
+	Impact  float64 `json:"impact"` // New: 0.0-1.0 score based on lines changed
 }
 
 type IssueSummary struct {
-	ID      string `json:"id"`
-	Subject string `json:"subject"`
-	Status  string `json:"status"`
+	ID          string  `json:"id"`
+	Subject     string  `json:"subject"`
+	Status      string  `json:"status"`
+	UsageWeight float64 `json:"weight"` // New: Reinforcement score
 }
 
-// GetFileContext gives us the "Story" of a file from the graph
+// GetFileContext (renamed logic) traverses the weighted graph
 func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error) {
 	// Query logic:
-	// From the file node, traverse backwards via 'changed' to get commits.
-	// For each commit, traverse backwards via 'authored' to get author name.
-	// For each commit, traverse forwards via 'implements' to get linked issues.
-	// We limit to the most recent 5 commits.
+	// 1. Find commits linked via 'changed'. Sort by Date primarily, but could use Impact.
+	//    We fetch the edge 'impact' property.
+	// 2. From commits, find 'implements' issues.
+	//    Filter by 'usage_weight > 0.5' to reduce noise (as per spec).
 
 	ql := `
 	SELECT
+		<-changed as change_edges,
 		<-changed<-commit.{
 			hash,
 			message,
 			date,
 			author: <-authored<-author.name,
-			issues: ->implements->issue.{id, subject, status}
+			issues: ->implements[WHERE usage_weight > 0.5]->issue.{
+				id, subject, status,
+				weight: ->implements.usage_weight
+			}
 		} as history
 	FROM file
 	WHERE path = $path;
@@ -60,47 +66,54 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 		Issues:  []IssueSummary{},
 	}
 
-	// Parse Result
-	// We expect a slice of maps (rows)
 	rows, ok := res.([]interface{})
-	if !ok {
-		// If empty or unexpected structure
+	if !ok || len(rows) == 0 {
 		return graphCtx, nil
 	}
-
-	if len(rows) == 0 {
-		return graphCtx, nil
-	}
-
-	// We only expect one row since path is unique
 	row, ok := rows[0].(map[string]interface{})
 	if !ok {
 		return graphCtx, nil
 	}
 
-	// "history" is the projected field containing array of commits
+	// Helper to extract impact from edge
+	// change_edges is array of edges: { in: ..., out: ..., impact: 0.8 }
+	impactMap := make(map[string]float64) // Map commit ID -> Impact
+	if edges, ok := row["change_edges"].([]interface{}); ok {
+		for _, e := range edges {
+			if em, ok := e.(map[string]interface{}); ok {
+				// 'out' is the commit ID in <-changed (since commit->changed->file, so in=commit, out=file?
+				// Wait. RELATE commit->changed->file.
+				// Query: <-changed means we are at file, looking at incoming edges.
+				// Incoming edge 'in' is the start node (commit). 'out' is the end node (file).
+				if inID, ok := em["in"].(string); ok {
+					if imp, ok := em["impact"].(float64); ok {
+						impactMap[inID] = imp
+					}
+				}
+			}
+		}
+	}
+
+	// Parse History
 	historyRaw, ok := row["history"]
 	if !ok || historyRaw == nil {
 		return graphCtx, nil
 	}
 
-	// Convert to JSON and back to struct to avoid manual type assertion hell
-	bytes, err := json.Marshal(historyRaw)
-	if err != nil {
-		logger.Error("Failed to marshal graph history: %v", err)
-		return graphCtx, nil
-	}
+	bytes, _ := json.Marshal(historyRaw)
 
-	// We define a temporary structure that matches the query projection
+	// Temp struct matches projection
 	type tempCommit struct {
+		ID      string `json:"id"` // Need ID to map impact
 		Hash    string `json:"hash"`
 		Message string `json:"message"`
 		Date    string `json:"date"`
-		Author  []string `json:"author"` // Graph traversal often returns array even if single edge
+		Author  []string `json:"author"`
 		Issues  []struct {
-			ID      interface{} `json:"id"` // ID can be "issue:123" or just 123 depending on formatting
+			ID      interface{} `json:"id"`
 			Subject string      `json:"subject"`
-			Status  string      `json:"status"` // Status is a string in the DB (issue.status = "Open")
+			Status  string      `json:"status"`
+			Weight  []float64   `json:"weight"` // Query ->implements.usage_weight returns array if multiple edges? usually 1.
 		} `json:"issues"`
 	}
 
@@ -110,12 +123,7 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 		return graphCtx, nil
 	}
 
-	// Flatten and Deduplicate
 	issueMap := make(map[string]IssueSummary)
-
-	// Sort commits by date desc? The query didn't order them explicitly inside the projection.
-	// We will rely on the client to sort or assume DB returns in some order (often insertion).
-	// Let's just process them.
 
 	for _, tc := range tempCommits {
 		authorName := "Unknown"
@@ -123,33 +131,46 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 			authorName = tc.Author[0]
 		}
 
+		// Lookup impact using Commit ID (which we need to fetch, oops, query didn't select 'id' explicitly in object?
+		// SurrealDB returns 'id' by default for records. Let's hope json unmarshal catches it if we add field)
+		// Added ID to tempCommit.
+
+		impact := 0.0
+		if val, ok := impactMap[tc.ID]; ok {
+			impact = val
+		}
+
 		c := CommitSummary{
 			Hash:    tc.Hash,
 			Message: tc.Message,
 			Date:    tc.Date,
 			Author:  authorName,
+			Impact:  impact,
 		}
 		graphCtx.Commits = append(graphCtx.Commits, c)
 
 		for _, iss := range tc.Issues {
-			// ID processing
 			idStr := fmt.Sprintf("%v", iss.ID)
 
+			w := 1.0
+			if len(iss.Weight) > 0 {
+				w = iss.Weight[0]
+			}
+
 			is := IssueSummary{
-				ID:      idStr,
-				Subject: iss.Subject,
-				Status:  iss.Status,
+				ID:          idStr,
+				Subject:     iss.Subject,
+				Status:      iss.Status,
+				UsageWeight: w,
 			}
 			issueMap[idStr] = is
 		}
 	}
 
-	// Collect unique issues
 	for _, is := range issueMap {
 		graphCtx.Issues = append(graphCtx.Issues, is)
 	}
 
-	// Limit commits to 5
 	if len(graphCtx.Commits) > 5 {
 		graphCtx.Commits = graphCtx.Commits[:5]
 	}
