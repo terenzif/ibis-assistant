@@ -24,6 +24,11 @@ type Client struct {
 	workers []*worker
 }
 
+type KeyConfig struct {
+	Key string
+	RPM int
+}
+
 type worker struct {
 	apiKey        string
 	client        *http.Client
@@ -32,30 +37,26 @@ type worker struct {
 	mu            sync.Mutex
 }
 
-func NewClient(apiKeys []string, rpm int) *Client {
+func NewClient(apiKeys []KeyConfig) *Client {
 	if len(apiKeys) == 0 {
 		return &Client{}
 	}
 
 	workers := make([]*worker, len(apiKeys))
 
-	// Distribute RPM across workers to ensure the global RPM limit is respected.
-	workerRPM := rpm / len(apiKeys)
-	if workerRPM < 1 {
-		workerRPM = 1
-	}
+	for i, cfg := range apiKeys {
+		// Calculate how much time each "item" costs.
+		// If RPM=60, then 60 items per minute.
+		// 1 item = 1 second.
+		var costInterval time.Duration
+		if cfg.RPM <= 0 {
+			costInterval = 0 // No limit
+		} else {
+			costInterval = time.Minute / time.Duration(cfg.RPM)
+		}
 
-	// Calculate how much time each "item" costs.
-	// If RPM=60, then 60 items per minute.
-	// 1 item = 1 second.
-	costInterval := time.Minute / time.Duration(workerRPM)
-	if rpm <= 0 {
-		costInterval = 0 // No limit
-	}
-
-	for i, key := range apiKeys {
 		workers[i] = &worker{
-			apiKey:       key,
+			apiKey:       cfg.Key,
 			client:       &http.Client{Timeout: 30 * time.Second},
 			costInterval: costInterval,
 		}

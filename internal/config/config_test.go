@@ -30,8 +30,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Mode != "sse" {
 		t.Errorf("Expected default Mode sse, got %s", cfg.Mode)
 	}
-	if cfg.GeminiRPM != 60 {
-		t.Errorf("Expected default RPM 60, got %d", cfg.GeminiRPM)
+	if cfg.GeminiDefaultRPM != 100 {
+		t.Errorf("Expected default RPM 100, got %d", cfg.GeminiDefaultRPM)
 	}
 }
 
@@ -52,15 +52,18 @@ func TestLoadEnvOverrides(t *testing.T) {
 	if cfg.Mode != "stdio" {
 		t.Errorf("Expected Mode stdio, got %s", cfg.Mode)
 	}
-	if cfg.GeminiRPM != 120 {
-		t.Errorf("Expected RPM 120, got %d", cfg.GeminiRPM)
+	if cfg.GeminiDefaultRPM != 120 {
+		t.Errorf("Expected RPM 120, got %d", cfg.GeminiDefaultRPM)
 	}
 	
 	if len(cfg.GeminiKeys) != 2 {
 		t.Errorf("Expected 2 Gemini Keys, got %d", len(cfg.GeminiKeys))
 	}
-	if cfg.GeminiKeys[0] != "key1" || cfg.GeminiKeys[1] != "key2" {
+	if cfg.GeminiKeys[0].Key != "key1" || cfg.GeminiKeys[1].Key != "key2" {
 		t.Errorf("Keys parsed incorrectly: %v", cfg.GeminiKeys)
+	}
+	if cfg.GeminiKeys[0].RPM != 120 {
+		t.Errorf("Expected Key RPM 120, got %d", cfg.GeminiKeys[0].RPM)
 	}
 }
 
@@ -87,8 +90,8 @@ func TestLoadFileOverrides(t *testing.T) {
 		t.Errorf("Expected Port 5050 from file, got %d", cfg.Port)
 	}
 	// Defaults should persist if not in file
-	if cfg.GeminiRPM != 60 {
-		t.Errorf("Expected default RPM 60, got %d", cfg.GeminiRPM)
+	if cfg.GeminiDefaultRPM != 100 {
+		t.Errorf("Expected default RPM 100, got %d", cfg.GeminiDefaultRPM)
 	}
 }
 

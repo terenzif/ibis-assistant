@@ -6,8 +6,13 @@
   "db_database": "analysis",
   "db_user": "root",
   "db_password": "root",
-  "gemini_keys": [],
-  "gemini_rpm": 60,
+  "gemini_keys": [
+    {
+      "key": "",
+      "rpm": 100
+    }
+  ],
+  "gemini_rpm": 100,
   "redmine_url": "https://redmine.users.noreply.github.com/",
   "redmine_key": "",
   "discovery_root": "./repos",

@@ -200,7 +200,19 @@ func runServer() {
 
 	// 6. Initialize Clients
 	logger.Info("Initializing Gemini AI Client with %d keys...", len(cfg.GeminiKeys))
-	aiClient := ai.NewClient(cfg.GeminiKeys, cfg.GeminiRPM)
+	var aiKeys []ai.KeyConfig
+	for _, k := range cfg.GeminiKeys {
+		// Use specific RPM if set, otherwise default
+		rpm := k.RPM
+		if rpm <= 0 {
+			rpm = cfg.GeminiDefaultRPM
+		}
+		aiKeys = append(aiKeys, ai.KeyConfig{
+			Key: k.Key,
+			RPM: rpm,
+		})
+	}
+	aiClient := ai.NewClient(aiKeys)
 	
 	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
 	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)

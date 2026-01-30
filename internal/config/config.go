@@ -11,18 +11,18 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	Port          int      `json:"port"`
-	Mode          string   `json:"mode"` // sse, stdio
-	DBUrl         string   `json:"db_url"`
-	DBNamespace   string   `json:"db_namespace"`
-	DBDatabase    string   `json:"db_database"`
-	DBUser        string   `json:"db_user"`
-	DBPassword    string   `json:"db_password"`
-	GeminiKeys    []string `json:"gemini_keys"`
-	GeminiRPM     int      `json:"gemini_rpm"`
-	RedmineURL    string   `json:"redmine_url"`
-	RedmineKey    string   `json:"redmine_key"`
-	DiscoveryRoot string   `json:"discovery_root"`
+	Port          int               `json:"port"`
+	Mode          string            `json:"mode"` // sse, stdio
+	DBUrl         string            `json:"db_url"`
+	DBNamespace   string            `json:"db_namespace"`
+	DBDatabase    string            `json:"db_database"`
+	DBUser        string            `json:"db_user"`
+	DBPassword    string            `json:"db_password"`
+	GeminiKeys    []GeminiKeyConfig `json:"gemini_keys"`
+	GeminiDefaultRPM int            `json:"gemini_rpm"`
+	RedmineURL    string            `json:"redmine_url"`
+	RedmineKey    string            `json:"redmine_key"`
+	DiscoveryRoot string            `json:"discovery_root"`
 	AutoScan      bool     `json:"auto_scan"`
 	GitRepos      []string `json:"git_repos"` // Manual list override
 	LogFile       string   `json:"log_file"`
@@ -31,22 +31,27 @@ type Config struct {
 	ConfigPath    string   `json:"-"`         // Path to the file that was loaded
 }
 
+type GeminiKeyConfig struct {
+	Key string `json:"key"`
+	RPM int    `json:"rpm"`
+}
+
 // Load returns the configuration loaded from Defaults + File + Env.
 // It accepts optional config search paths.
 func Load(paths ...string) *Config {
 	// 1. Defaults
 	cfg := &Config{
-		Port:          3030,
-		Mode:          "sse",
-		DBUrl:         "ws://localhost:8000/rpc",
-		DBNamespace:   "deckonline",
-		DBDatabase:    "analysis",
-		DBUser:        "root",
-		DBPassword:    "root",
-		GeminiRPM:     60,
-		DiscoveryRoot: ".",
-		AutoScan:      true,
-		LogLevel:      "INFO",
+		Port:             3030,
+		Mode:             "sse",
+		DBUrl:            "ws://localhost:8000/rpc",
+		DBNamespace:      "deckonline",
+		DBDatabase:       "analysis",
+		DBUser:           "root",
+		DBPassword:       "root",
+		GeminiDefaultRPM: 100,
+		DiscoveryRoot:    ".",
+		AutoScan:         true,
+		LogLevel:         "INFO",
 	}
 
 	// 2. Candidate paths
@@ -108,22 +113,26 @@ func Load(paths ...string) *Config {
 	}
 
 	// AI
+	if v := os.Getenv("KNOWLEDGE_RPM"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.GeminiDefaultRPM = p
+		}
+	}
+
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		// Split by comma for pooling
 		parts := strings.Split(v, ",")
-		var keys []string
+		var keys []GeminiKeyConfig
 		for _, p := range parts {
 			clean := strings.TrimSpace(p)
 			if clean != "" {
-				keys = append(keys, clean)
+				keys = append(keys, GeminiKeyConfig{
+					Key: clean,
+					RPM: cfg.GeminiDefaultRPM,
+				})
 			}
 		}
 		cfg.GeminiKeys = keys // Replace file keys if ENV is set
-	}
-	if v := os.Getenv("KNOWLEDGE_RPM"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.GeminiRPM = p
-		}
 	}
 
 	// Redmine

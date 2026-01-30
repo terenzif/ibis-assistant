@@ -24,8 +24,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
     > **Download**: Scarica la versione Windows da [surrealdb.com/install](https://surrealdb.com/install) o dai [Release di GitHub](https://github.com/surrealdb/surrealdb/releases), estrai e copia `surreal.exe` nella cartella di questo progetto.
   * *Opzione Manuale*: SurrealDB pre-installato e in esecuzione.
 * **Git**: Installato e accessibile da terminale.
-* **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`) o via env (`GEMINI_API_KEY` separati da virgola).
-  * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Round-Robin**. Questo permette di distribuire il carico e superare i limiti di Rate Limit (RPM) imposti da Google, aumentando parallelamente il throughput di ingestione (es. 2 chiavi = 2x throughput).
+* **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`, formato oggetto con `key` e `rpm`) o via env (`GEMINI_API_KEY` separati da virgola, che useranno il `gemini_rpm` di default).
+  * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Round-Robin**. Questo permette di distribuire il carico e superare i limiti di Rate Limit (RPM) imposti da Google. Ogni chiave può avere un RPM specifico (es. Free Tier vs Pay-As-You-Go).
 
 ### Setup
 
@@ -52,7 +52,11 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
      "mode": "sse",
      "db_user": "root",
      "db_password": "root",
-     "gemini_keys": ["YOUR_API_KEY_HERE"],
+     "gemini_keys": [
+       { "key": "", "rpm": 15 },
+       { "key": "", "rpm": 100 }
+     ],
+     "gemini_rpm": 100,
      "redmine_url": "https://redmine.tuodominio.com",
      "redmine_key": "",
      "auto_scan": true

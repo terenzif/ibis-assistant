@@ -56,7 +56,10 @@ func TestClientRotationAndFailover(t *testing.T) {
 	defer func() { BaseURL = originalBaseURL }()
 
 	// Create Client with 2 keys
-	client := NewClient([]string{"key1", "key2"}, 60)
+	client := NewClient([]KeyConfig{
+		{"key1", 60},
+		{"key2", 60},
+	})
 
 	// Call
 	// Should try key1 -> 429 -> mark key1 busy for 2s -> try key2 -> success
@@ -98,7 +101,9 @@ func TestClientRateLimitingPacing(t *testing.T) {
 
 	// RPM = 60 => 1 req/sec per worker if 1 key
 	// We use 1 key.
-	client := NewClient([]string{"key1"}, 60)
+	client := NewClient([]KeyConfig{
+		{"key1", 60},
+	})
 
 	start := time.Now()
 	// 1st call: Should be immediate
