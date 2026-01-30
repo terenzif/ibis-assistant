@@ -57,8 +57,8 @@ func TestClientRotationAndFailover(t *testing.T) {
 
 	// Create Client with 2 keys
 	client := NewClient([]KeyConfig{
-		{"key1", 60},
-		{"key2", 60},
+		{Key: "key1", RPM: 60, Owner: "User1"},
+		{Key: "key2", RPM: 60, Owner: "User2"},
 	})
 
 	// Call
@@ -102,7 +102,7 @@ func TestClientRateLimitingPacing(t *testing.T) {
 	// RPM = 60 => 1 req/sec per worker if 1 key
 	// We use 1 key.
 	client := NewClient([]KeyConfig{
-		{"key1", 60},
+		{Key: "key1", RPM: 60},
 	})
 
 	start := time.Now()

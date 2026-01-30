@@ -208,8 +208,9 @@ func runServer() {
 			rpm = cfg.GeminiDefaultRPM
 		}
 		aiKeys = append(aiKeys, ai.KeyConfig{
-			Key: k.Key,
-			RPM: rpm,
+			Key:   k.Key,
+			RPM:   rpm,
+			Owner: k.Owner,
 		})
 	}
 	aiClient := ai.NewClient(aiKeys)

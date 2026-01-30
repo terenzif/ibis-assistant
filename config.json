@@ -9,7 +9,8 @@
   "gemini_keys": [
     {
       "key": "",
-      "rpm": 100
+      "rpm": 100,
+      "owner": "Your Name"
     }
   ],
   "gemini_rpm": 100,

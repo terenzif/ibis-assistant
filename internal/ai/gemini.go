@@ -25,12 +25,14 @@ type Client struct {
 }
 
 type KeyConfig struct {
-	Key string
-	RPM int
+	Key   string
+	RPM   int
+	Owner string
 }
 
 type worker struct {
 	apiKey        string
+	owner         string
 	client        *http.Client
 	costInterval  time.Duration // Time to wait per 1 item of cost
 	nextAvailable time.Time
@@ -57,6 +59,7 @@ func NewClient(apiKeys []KeyConfig) *Client {
 
 		workers[i] = &worker{
 			apiKey:       cfg.Key,
+			owner:        cfg.Owner,
 			client:       &http.Client{Timeout: 30 * time.Second},
 			costInterval: costInterval,
 		}
@@ -164,7 +167,11 @@ func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
 	if len(keyInfo) > 8 {
 		keyInfo = keyInfo[len(keyInfo)-4:]
 	}
-	logger.Debug("AI: Sending batch embedding request (size: %d) using key ...%s", len(texts), keyInfo)
+	ownerInfo := w.owner
+	if ownerInfo == "" {
+		ownerInfo = "unknown"
+	}
+	logger.Debug("AI: Sending batch embedding request (size: %d) using key ...%s (%s)", len(texts), keyInfo, ownerInfo)
 
 	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", BaseURL, EmbeddingModel, w.apiKey)
 

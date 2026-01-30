@@ -65,6 +65,10 @@ func TestLoadEnvOverrides(t *testing.T) {
 	if cfg.GeminiKeys[0].RPM != 120 {
 		t.Errorf("Expected Key RPM 120, got %d", cfg.GeminiKeys[0].RPM)
 	}
+	// Env keys have no owner set
+	if cfg.GeminiKeys[0].Owner != "" {
+		t.Errorf("Expected empty owner for env keys, got %s", cfg.GeminiKeys[0].Owner)
+	}
 }
 
 func TestLoadFileOverrides(t *testing.T) {

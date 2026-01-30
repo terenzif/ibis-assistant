@@ -32,8 +32,9 @@ type Config struct {
 }
 
 type GeminiKeyConfig struct {
-	Key string `json:"key"`
-	RPM int    `json:"rpm"`
+	Key   string `json:"key"`
+	RPM   int    `json:"rpm"`
+	Owner string `json:"owner"`
 }
 
 // Load returns the configuration loaded from Defaults + File + Env.
