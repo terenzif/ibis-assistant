@@ -169,19 +169,26 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 	}
 
 	// Try 'implements' (Commit -> Issue)
+	var err error
 	if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "issue") {
-		return runUpdate(schema.EdgeImplements)
+		err = runUpdate(schema.EdgeImplements)
+	} else if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "file") {
+		// Try 'changed' (Commit -> File)
+		err = runUpdate(schema.EdgeChanged)
 	}
-	// Try 'changed' (Commit -> File)
-	if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "file") {
-		return runUpdate(schema.EdgeChanged)
+
+	if err != nil {
+		return err
 	}
 
 	// Also update target node access_count
 	// UPDATE target SET access_count += 1
 	if score > 0 {
 		ql := "UPDATE $target SET access_count = (access_count OR 0) + 1, last_accessed = time::now();"
-		s.DB.SmartQuery(ql, map[string]interface{}{"target": targetID})
+		_, err = s.DB.SmartQuery(ql, map[string]interface{}{"target": targetID})
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

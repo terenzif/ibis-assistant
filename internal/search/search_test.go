@@ -3,6 +3,8 @@ package search
 import (
 	"strings"
 	"testing"
+
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // MockDB implements db.Executor
@@ -134,5 +136,64 @@ func TestAskProject(t *testing.T) {
 
 	if len(extraRes.Context.ExpertAuthors) != 0 {
 		t.Errorf("Expected 0 authors for 4th file, got %d", len(extraRes.Context.ExpertAuthors))
+	}
+}
+
+func TestReinforcePath(t *testing.T) {
+	mockDB := &MockDB{}
+	svc := &Service{
+		DB: mockDB,
+		AI: &MockAI{},
+	}
+
+	// Test Case 1: Implements Edge (Commit -> Issue) with Positive Score
+	err := svc.ReinforcePath("commit:1", "issue:1", 0.8)
+	if err != nil {
+		t.Fatalf("ReinforcePath failed: %v", err)
+	}
+
+	// Expect 2 SmartQuery calls:
+	// 1. UPDATE edge_implements ... (weight + 0.1)
+	// 2. UPDATE issue:1 ... (access_count + 1)
+	if len(mockDB.SmartCalls) != 2 {
+		t.Errorf("Expected 2 SmartCalls, got %d: %v", len(mockDB.SmartCalls), mockDB.SmartCalls)
+	}
+
+	if !strings.Contains(mockDB.SmartCalls[0], schema.EdgeImplements) {
+		t.Errorf("Expected call 1 to update %s, got %s", schema.EdgeImplements, mockDB.SmartCalls[0])
+	}
+	if !strings.Contains(mockDB.SmartCalls[0], "+ 0.10") {
+		t.Errorf("Expected call 1 to add 0.1, got %s", mockDB.SmartCalls[0])
+	}
+
+	if !strings.Contains(mockDB.SmartCalls[1], "access_count") {
+		t.Errorf("Expected call 2 to update access_count, got %s", mockDB.SmartCalls[1])
+	}
+
+	// Reset
+	mockDB.SmartCalls = nil
+
+	// Test Case 2: Changed Edge (Commit -> File) with Negative Score
+	err = svc.ReinforcePath("commit:1", "file:1", -0.5)
+	if err != nil {
+		t.Fatalf("ReinforcePath failed: %v", err)
+	}
+
+	// Expect 1 SmartQuery call:
+	// 1. UPDATE edge_changed ... (weight - 0.1)
+	// (No access_count update for negative score)
+	if len(mockDB.SmartCalls) != 1 {
+		t.Errorf("Expected 1 SmartCall, got %d: %v", len(mockDB.SmartCalls), mockDB.SmartCalls)
+	}
+
+	if !strings.Contains(mockDB.SmartCalls[0], schema.EdgeChanged) {
+		t.Errorf("Expected call to update %s, got %s", schema.EdgeChanged, mockDB.SmartCalls[0])
+	}
+	if !strings.Contains(mockDB.SmartCalls[0], "- 0.10") { // might be formatted
+		// The code uses %f, so it might be -0.100000.
+		// " + -0.100000" because the query is `... + %f` and delta is -0.1.
+		if !strings.Contains(mockDB.SmartCalls[0], "-0.1") {
+			t.Errorf("Expected call to sub 0.1, got %s", mockDB.SmartCalls[0])
+		}
 	}
 }
