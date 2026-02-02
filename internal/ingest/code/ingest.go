@@ -1,6 +1,7 @@
 package code
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -67,8 +68,14 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 }
 
 func processFile(dbClient db.Executor, aiClient AIClient, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open error: %w", err)
+	}
+	defer f.Close()
+
 	// 1. Calculate Hash
-	hash, err := fileHash(path)
+	hash, err := fileHash(f)
 	if err != nil {
 		return fmt.Errorf("hashing error: %w", err)
 	}
@@ -100,13 +107,16 @@ func processFile(dbClient db.Executor, aiClient AIClient, path string) error {
 		return fmt.Errorf("db update error: %w", err)
 	}
 
-	// Chunk & Embed
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return err
+	// Reset file pointer to beginning for chunking
+	if _, err := f.Seek(0, 0); err != nil {
+		return fmt.Errorf("seek error: %w", err)
 	}
 
-	chunks := chunkContent(string(content), 1000) // 1000 chars ~ 250 tokens
+	// Chunk & Embed
+	chunks, err := chunkContent(f, 1000) // 1000 chars ~ 250 tokens
+	if err != nil {
+		return fmt.Errorf("chunking error: %w", err)
+	}
 
 	// Delete old chunks
 	// DELETE file_chunk WHERE file = $fileID
@@ -160,27 +170,23 @@ func processFile(dbClient db.Executor, aiClient AIClient, path string) error {
 	return nil
 }
 
-func fileHash(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
+func fileHash(r io.Reader) (string, error) {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func chunkContent(text string, size int) []string {
+func chunkContent(r io.Reader, size int) ([]string, error) {
 	// Very naive chunking by lines/size. 
 	// Production should use a tokenizer or smarter splitter.
 	var chunks []string
-	lines := strings.Split(text, "\n")
+	scanner := bufio.NewScanner(r)
 	var currentChunk strings.Builder
 	
-	for _, line := range lines {
+	for scanner.Scan() {
+		line := scanner.Text()
 		if currentChunk.Len() + len(line) > size {
 			chunks = append(chunks, currentChunk.String())
 			currentChunk.Reset()
@@ -190,7 +196,10 @@ func chunkContent(text string, size int) []string {
 	if currentChunk.Len() > 0 {
 		chunks = append(chunks, currentChunk.String())
 	}
-	return chunks
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return chunks, nil
 }
 
 // Duplicated helper (should move to shared utils)
