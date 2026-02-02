@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/deckonline/knowledge_mcp/internal/db"
 )
 
 // MockDB implements db.Executor
@@ -72,7 +74,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := fmt.Sprintf("file:%s", sanitizeID(filePath))
+	fileID := fmt.Sprintf("file:%s", db.SanitizeID(filePath))
 
 	// We want to benchmark the loop where DB says "Hash Matches".
 	// In the unoptimized version, this will still chunk and embed.
@@ -115,7 +117,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := fmt.Sprintf("file:%s", sanitizeID(filePath))
+	fileID := fmt.Sprintf("file:%s", db.SanitizeID(filePath))
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
 		mockDB := &MockDB{
@@ -137,6 +139,31 @@ func TestIngestCodebase_Delta(t *testing.T) {
 			t.Log("Skipped embedding (Optimized)")
 		} else {
 			t.Errorf("Processed embedding (Unoptimized) - Expected 0 calls, got %d", len(mockAI.BatchEmbedCalls))
+		}
+	})
+
+	t.Run("Update Chunks", func(t *testing.T) {
+		// Force update by not returning hash match
+		mockDB := &MockDB{
+			ReturnData: map[string]interface{}{},
+		}
+		mockAI := &MockAI{}
+
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		if err != nil {
+			t.Fatalf("IngestCodebase failed: %v", err)
+		}
+
+		// Verify UPDATE is called for chunks
+		foundUpdate := false
+		for _, sql := range mockDB.ExecuteCalls {
+			if strings.HasPrefix(sql, "UPDATE file_chunk") {
+				foundUpdate = true
+				break
+			}
+		}
+		if !foundUpdate {
+			t.Errorf("Expected UPDATE file_chunk statement, but not found. Calls: %v", mockDB.ExecuteCalls)
 		}
 	})
 }
