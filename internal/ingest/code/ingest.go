@@ -185,7 +185,8 @@ func chunkContent(text string, size int) []string {
 			chunks = append(chunks, currentChunk.String())
 			currentChunk.Reset()
 		}
-		currentChunk.WriteString(line + "\n")
+		currentChunk.WriteString(line)
+		currentChunk.WriteByte('\n')
 	}
 	if currentChunk.Len() > 0 {
 		chunks = append(chunks, currentChunk.String())
