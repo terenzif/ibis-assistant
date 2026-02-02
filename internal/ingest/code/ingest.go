@@ -2,6 +2,7 @@ package code
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -30,7 +31,7 @@ var SupportedExtensions = map[string]bool{
 }
 
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) error {
+func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -52,9 +53,17 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for path := range pathsChan {
-				if err := processFile(dbClient, aiClient, path); err != nil {
-					logger.Error("Error processing file %s: %v", path, err)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case path, ok := <-pathsChan:
+					if !ok {
+						return
+					}
+					if err := processFile(ctx, dbClient, aiClient, path); err != nil {
+						logger.Error("Error processing file %s: %v", path, err)
+					}
 				}
 			}
 		}()
@@ -64,6 +73,9 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		if info.IsDir() {
 			if strings.HasPrefix(info.Name(), ".") || info.Name() == "node_modules" || info.Name() == "bin" || info.Name() == "obj" {
@@ -77,18 +89,27 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 			return nil
 		}
 
-		pathsChan <- path
+		select {
+		case pathsChan <- path:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		return nil
 	})
 
 	close(pathsChan) // Signal workers to finish
 	wg.Wait()        // Wait for all workers
 
+	if ctx.Err() != nil {
+		logger.Info("Code analysis cancelled for %s", absPath)
+		return ctx.Err()
+	}
+
 	logger.Info("Code analysis complete for %s", absPath)
 	return err
 }
 
-func processFile(dbClient db.Executor, aiClient AIClient, path string) error {
+func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open error: %w", err)
@@ -164,6 +185,10 @@ func processFile(dbClient db.Executor, aiClient AIClient, path string) error {
 		}
 		if len(validBatch) == 0 {
 			continue
+		}
+
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
 		vectors, err := aiClient.BatchEmbedText(validBatch)

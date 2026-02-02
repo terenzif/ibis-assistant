@@ -1,6 +1,7 @@
 package code
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,7 +93,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		mockDB.ExecuteCalls = nil
 		mockAI.BatchEmbedCalls = nil
 
-		err := IngestCodebase(mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
 		if err != nil {
 			b.Fatalf("Error: %v", err)
 		}
@@ -126,7 +127,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
