@@ -41,6 +41,7 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 	SELECT
 		<-changed as change_edges,
 		<-changed<-commit.{
+			id,
 			hash,
 			message,
 			date,
