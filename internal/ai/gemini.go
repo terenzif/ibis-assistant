@@ -289,7 +289,7 @@ func (w *worker) updateUsageID() {
 	h := sha256.New()
 	h.Write([]byte(w.apiKey))
 	hash := hex.EncodeToString(h.Sum(nil))[:8] // Short hash
-	date := time.Now().Format("2006-01-02")
+	date := time.Now().Format("20060102")
 	w.usageID = fmt.Sprintf("%s:%s_%s", TableKeyUsage, hash, date)
 }
 
