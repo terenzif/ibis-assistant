@@ -3,6 +3,8 @@ package code
 import (
 	"strings"
 	"testing"
+
+	"github.com/deckonline/knowledge_mcp/internal/db"
 )
 
 func TestChunkContent(t *testing.T) {
@@ -46,7 +48,7 @@ func TestChunkContent(t *testing.T) {
 func TestSanitizeID(t *testing.T) {
 	input := "c:\\Users\\Foo\\Code.cs"
 	expected := "c__users_foo_code_cs"
-	got := sanitizeID(input)
+	got := db.SanitizeID(input)
 	if got != expected {
 		t.Errorf("Sanitize failed. Got %s, want %s", got, expected)
 	}

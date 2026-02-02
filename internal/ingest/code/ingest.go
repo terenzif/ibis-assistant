@@ -122,7 +122,7 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 		return fmt.Errorf("hashing error: %w", err)
 	}
 
-	fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
+	fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(path))
 
 	// 2. Check if changed (using DB check)
 	// Query existing hash
@@ -144,7 +144,7 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 
 	// 3. Update File Node
 	// Update hash
-	_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, escapeSQL(path)))
+	_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, db.EscapeSQL(path)))
 	if err != nil {
 		return fmt.Errorf("db update error: %w", err)
 	}
@@ -162,7 +162,9 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 
 	// Delete old chunks
 	// DELETE file_chunk WHERE file = $fileID
-	dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID))
+	if _, err := dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID)); err != nil {
+		return fmt.Errorf("failed to delete old chunks: %w", err)
+	}
 
 	// Batching Logic (Gemini limit is 100 per batch)
 	// We use a smaller batch size to avoid hitting RPM limits instantly if items count as requests.
@@ -203,12 +205,14 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			chunkContentStr := validBatch[k]
 
 			vecJson, _ := json.Marshal(vec)
-			chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, sanitizeID(path), originalIndex)
+			chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, db.SanitizeID(path), originalIndex)
 
-			ql := fmt.Sprintf("CREATE %s SET file = %s, content = '%s', embedding = %s;",
-				chunkID, fileID, escapeSQL(chunkContentStr), string(vecJson))
+			ql := fmt.Sprintf("UPDATE %s SET file = %s, content = '%s', embedding = %s;",
+				chunkID, fileID, db.EscapeSQL(chunkContentStr), string(vecJson))
 
-			dbClient.Execute(ql)
+			if _, err := dbClient.Execute(ql); err != nil {
+				logger.Error("Failed to update chunk %s: %v", chunkID, err)
+			}
 		}
 		logger.Info("  - Embedded %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
 	}
@@ -247,22 +251,4 @@ func chunkContent(r io.Reader, size int) ([]string, error) {
 		return nil, err
 	}
 	return chunks, nil
-}
-
-// Duplicated helper (should move to shared utils)
-func sanitizeID(s string) string {
-	safe := strings.ReplaceAll(s, "/", "_")
-	safe = strings.ReplaceAll(safe, "\\", "_")
-	safe = strings.ReplaceAll(safe, ".", "_")
-	safe = strings.ReplaceAll(safe, "-", "_")
-	safe = strings.ReplaceAll(safe, ":", "_") // Drive letters
-	safe = strings.ReplaceAll(safe, " ", "_")
-	return strings.ToLower(safe)
-}
-
-func escapeSQL(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "'", "\\'")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	return s
 }
