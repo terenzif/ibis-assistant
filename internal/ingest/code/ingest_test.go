@@ -49,6 +49,13 @@ func (m *MockAI) IsFunctional() bool {
 	return true
 }
 
+func getFileHashHelper(path string) string {
+	f, _ := os.Open(path)
+	defer f.Close()
+	h, _ := fileHash(f)
+	return h
+}
+
 func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 	// Setup temp repo
 	tmpDir, err := os.MkdirTemp("", "repo_bench")
@@ -63,7 +70,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	expectedHash, _ := fileHash(filePath)
+	expectedHash := getFileHashHelper(filePath)
 	fileID := fmt.Sprintf("file:%s", sanitizeID(filePath))
 
 	// We want to benchmark the loop where DB says "Hash Matches".
@@ -106,7 +113,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedHash, _ := fileHash(filePath)
+	expectedHash := getFileHashHelper(filePath)
 	fileID := fmt.Sprintf("file:%s", sanitizeID(filePath))
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
