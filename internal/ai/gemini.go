@@ -64,6 +64,12 @@ type worker struct {
 	usedTPM      int
 	lastResetTPM time.Time
 
+	// Token Bucket for TPM
+	tpmBucket  float64
+	maxBucket  float64
+	refillRate float64
+	lastRefill time.Time
+
 	// RPD (Requests Per Day)
 	limitRPD     int
 	usedRPD      int
@@ -152,13 +158,24 @@ func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
 // --- Worker Implementation ---
 
 func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
+	// Apply Safety Factor (0.9) to prevent edge-case overages
+	safeRPM := int(float64(cfg.RPM) * 0.9)
+	safeTPM := int(float64(cfg.TPM) * 0.9)
+	if safeRPM < 1 && cfg.RPM > 0 {
+		safeRPM = 1
+	}
+
 	// Calculate how much time each request costs based on RPM.
 	var costInterval time.Duration
-	if cfg.RPM <= 0 {
+	if safeRPM <= 0 {
 		costInterval = 0 // No limit
 	} else {
-		costInterval = time.Minute / time.Duration(cfg.RPM)
+		costInterval = time.Minute / time.Duration(safeRPM)
 	}
+
+	// TPM Token Bucket Init
+	refillRate := float64(safeTPM) / 60.0
+	maxBucket := float64(safeTPM)
 
 	w := &worker{
 		apiKey:       cfg.Key,
@@ -166,11 +183,16 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 		client:       &http.Client{Timeout: 30 * time.Second},
 		dbClient:     dbClient,
 		costInterval: costInterval,
-		limitTPM:     cfg.TPM,
+		limitTPM:     safeTPM,
 		limitRPD:     cfg.RPD,
 		lastResetTPM: time.Now(),
 		lastResetRPD: time.Now(),
 		nextAvailable: time.Now(),
+
+		tpmBucket:  maxBucket,
+		maxBucket:  maxBucket,
+		refillRate: refillRate,
+		lastRefill: time.Now(),
 	}
 
 	w.updateUsageID()
@@ -234,7 +256,7 @@ func (w *worker) processJob(job EmbedJob) {
 func (w *worker) waitRateLimits(texts []string) {
 	estimatedTokens := 0
 	for _, t := range texts {
-		estimatedTokens += len(t) / 4
+		estimatedTokens += len(t) / 3 // More conservative estimation (was / 4)
 		if len(t) > 0 {
 			estimatedTokens++
 		}
@@ -248,18 +270,10 @@ func (w *worker) waitRateLimits(texts []string) {
 		w.lastResetRPD = now
 		w.updateUsageID()
 	}
-	if now.Sub(w.lastResetTPM) >= time.Minute {
-		w.usedTPM = 0
-		w.lastResetTPM = now
-	}
 
 	// Check RPD (Hard Stop)
 	if w.limitRPD > 0 && w.usedRPD+1 > w.limitRPD {
 		// This worker is done for the day.
-		// In a real system, we might want to resign from the pool or block until tomorrow.
-		// For simplicity, we sleep until tomorrow? No, that blocks a thread.
-		// We just sleep for a minute and retry checking (spinning slowly),
-		// essentially taking this worker out of commission.
 		logger.Warn("AI Worker (...%s) exhausted RPD (%d). Pausing...", w.shortKey(), w.limitRPD)
 		for {
 			time.Sleep(10 * time.Minute)
@@ -274,15 +288,37 @@ func (w *worker) waitRateLimits(texts []string) {
 		}
 	}
 
-	// Check TPM (Wait)
-	if w.limitTPM > 0 && w.usedTPM+estimatedTokens > w.limitTPM {
-		wait := w.lastResetTPM.Add(time.Minute).Sub(now)
-		if wait > 0 {
-			time.Sleep(wait)
+	// Check TPM (Token Bucket)
+	if w.limitTPM > 0 {
+		// Refill
+		now = time.Now()
+		elapsed := now.Sub(w.lastRefill).Seconds()
+		w.tpmBucket += elapsed * w.refillRate
+		if w.tpmBucket > w.maxBucket {
+			w.tpmBucket = w.maxBucket
 		}
-		// Reset after sleep
-		w.usedTPM = 0
-		w.lastResetTPM = time.Now()
+		w.lastRefill = now
+
+		cost := float64(estimatedTokens)
+		if w.tpmBucket >= cost {
+			w.tpmBucket -= cost
+		} else {
+			// Need to wait
+			needed := cost - w.tpmBucket
+			if w.refillRate > 0 {
+				waitTimeSeconds := needed / w.refillRate
+				wait := time.Duration(waitTimeSeconds * float64(time.Second))
+
+				if wait > 5*time.Second {
+					logger.Debug("AI: Rate limit throttling ...%s. Waiting %v (Cost: %d)", w.shortKey(), wait, estimatedTokens)
+				}
+				time.Sleep(wait)
+
+				// Reset bucket to 0 (consumed what we waited for)
+				w.tpmBucket = 0
+				w.lastRefill = time.Now()
+			}
+		}
 	}
 
 	// Check RPM (Interval)
@@ -291,10 +327,8 @@ func (w *worker) waitRateLimits(texts []string) {
 		time.Sleep(w.nextAvailable.Sub(now))
 	}
 
-	// Update State for AFTER the request (Optimistic or we update here?)
-	// Let's update here to reserve the slot.
+	// Update State
 	w.nextAvailable = time.Now().Add(w.costInterval)
-	w.usedTPM += estimatedTokens
 	w.usedRPD++
 
 	// Update DB (Async)

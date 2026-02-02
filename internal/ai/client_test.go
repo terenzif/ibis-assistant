@@ -113,3 +113,107 @@ func TestClientRateLimitingPacing(t *testing.T) {
 		t.Errorf("Expected pacing delay (~1s), but took %v", duration)
 	}
 }
+
+func TestTPMTokenBucket(t *testing.T) {
+	// This test verifies that we throttle based on TPM
+
+	// Create a worker manually to test waitRateLimits directly if possible,
+	// or use NewClient with mocks.
+
+	// Let's use a very low TPM limit.
+	// TPM = 600 => 10 tokens / second.
+	// We want to send a text that is estimated to be ~20 tokens.
+	// It should take ~2 seconds to refill.
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte(`{"embeddings": [{"values": [0.1]}]}`))
+	}))
+	defer server.Close()
+
+	originalBaseURL := BaseURL
+	BaseURL = server.URL
+	defer func() { BaseURL = originalBaseURL }()
+
+	// We'll rely on the estimation logic which we plan to change to len/3.
+	// 60 chars -> 20 tokens.
+	text60 := strings.Repeat("a", 60)
+
+	client := NewClient([]KeyConfig{
+		{Key: "keyTPM", RPM: 600, TPM: 600}, // RPM is high (10/s), TPM is limiter (10 tok/s)
+	}, &MockDB{})
+
+	// Allow the bucket to fill (it starts full usually).
+	// Current impl: Fixed window. Starts at 0 used.
+	// Proposed impl: Bucket starts full (maxBucket).
+
+	// 1. First Request: 60 chars ~ 20 tokens.
+	// Should pass immediately (burst).
+	start := time.Now()
+	_, err := client.EmbedText(text60)
+	if err != nil {
+		t.Fatalf("First request failed: %v", err)
+	}
+	dur1 := time.Since(start)
+	if dur1 > 500*time.Millisecond {
+		t.Logf("First request took long: %v (Expected fast burst)", dur1)
+	}
+
+	// 2. Burst depletion.
+	// Limit is 600 TPM -> 10/sec.
+	// If maxBucket is 600, we can burst 600 tokens.
+	// That's 30 requests of 20 tokens.
+	// This test might be tricky if we set maxBucket = limitTPM.
+
+	// Let's force a wait by using a smaller TPM limit or larger request.
+	// TPM = 60 -> 1 token/sec.
+	// Text = 60 chars -> 20 tokens.
+	// Limit 60 TPM.
+	// 1. Req (20 tokens). Burst OK.
+	// 2. Req (20 tokens). Burst OK.
+	// 3. Req (20 tokens). Burst OK.
+	// 4. Req (20 tokens). Empty?
+	// If maxBucket = 60, we can do 3 reqs. 4th should block for ~20s?
+
+	// Let's try TPM = 120 (2 tokens/sec).
+	// Text = 60 chars (~20 tokens).
+	// MaxBucket = 120.
+	// We can do 6 requests immediately.
+	// Then we are blocked.
+
+	// We use TPM = 134.
+	// Internal logic applies 0.9 safety factor -> Limit = ~120.6.
+	// Refill Rate = 120.6 / 60 = 2.01 tok/sec.
+	client2 := NewClient([]KeyConfig{
+		{Key: "keyLowTPM", RPM: 1000, TPM: 134},
+	}, &MockDB{})
+
+	// Helper to eat tokens
+	eatTokens := func(n int) {
+		for i := 0; i < n; i++ {
+			_, err := client2.EmbedText(text60)
+			if err != nil {
+				t.Errorf("Eat request %d failed: %v", i, err)
+			}
+		}
+	}
+
+	// Eat 6 requests.
+	// New estimation: 60 chars / 3 = 20 + 1 = 21 tokens per req.
+	// 6 * 21 = 126 tokens.
+	// Limit (safe) is ~120.6.
+	// Excess = 126 - 120.6 = 5.4 tokens.
+	// Wait time = 5.4 / 2.01 = ~2.7 seconds.
+
+	startEat := time.Now()
+	eatTokens(6)
+	durEat := time.Since(startEat)
+	t.Logf("Consumed 6 requests in %v", durEat)
+
+	// With Fixed Window (current), this should take ~60 seconds (waiting for reset).
+	// With Token Bucket (future), this should take ~4 seconds.
+
+	if durEat < 2*time.Second {
+		t.Errorf("Rate limit failed! Should have waited > 2s, but took %v", durEat)
+	}
+}
