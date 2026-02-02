@@ -12,8 +12,8 @@
 - [x] Implement Git Ingestion (Graph Builder) <!-- id: 7 -->
 - [x] Implement Codebase RAG (Delta Ingestion) <!-- id: 8 -->
 - [x] Implement Redmine Ingestion (Intent Layer) <!-- id: 10 -->
-- [ ] Implement Cognitive Architecture (Weighted Graph + Feedback Loop) <!-- id: 15 -->
-- [/] Implement Unified Search Interface (Hybrid Query) <!-- id: 11 -->
+- [x] Implement Cognitive Architecture (Weighted Graph + Feedback Loop) <!-- id: 15 -->
+- [x] Implement Unified Search Interface (Hybrid Query) <!-- id: 11 -->
 - [x] Build and Verify Server Execution <!-- id: 12 -->
 - [x] Refine Deployment & Configuration (Folder Scan, Submodules) <!-- id: 13 -->
 - [x] Evaluate "Why Similarity Isn’t Enough for Memory" and apply to project <!-- id: 14 -->
