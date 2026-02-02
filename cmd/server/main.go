@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -51,7 +52,7 @@ func main() {
 		// Normal interactive run or service run
 		// We shift the arguments to skip the command for flag parsing
 		os.Args = append(os.Args[:1], os.Args[2:]...)
-		runServer()
+		runServer(context.Background())
 	case "/install", "/uninstall":
 		handleService(cmd)
 	default:
@@ -60,7 +61,7 @@ func main() {
 		// But the request says "without params it will print a syntetic --help guide"
 		// And add 3 commands.
 		if strings.HasPrefix(cmd, "-") {
-			runServer()
+			runServer(context.Background())
 		} else {
 			fmt.Printf("Unknown command: %s\n", cmd)
 			printHelp()
@@ -93,7 +94,7 @@ func printHelp() {
 	fmt.Println("  knowledge_server.exe /run -port 9000 -mode sse")
 }
 
-func runServer() {
+func runServer(ctx context.Context) {
 	// 1. Initial check for custom config path in raw args
 	configPath := ""
 	for i, arg := range os.Args {
@@ -139,6 +140,15 @@ func runServer() {
 		fmt.Printf("Error initializing logger: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Configure structured logging (used by dependencies like mcp-go) to use TextHandler (Console friendly)
+	// We map it to the same output writer if possible, but for now stdout/stderr is fine.
+	// mcp-go uses slog.Default().
+	var logHandler slog.Handler
+	logHandler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	slog.SetDefault(slog.New(logHandler))
 
 	if cfg.ConfigLoaded {
 		logger.Info("Configuration loaded from: %s", cfg.ConfigPath)
@@ -234,15 +244,35 @@ func runServer() {
 	}
 
 	// --- [NEW] Background Indexing ---
+
+	// Context for graceful shutdown of other components if needed
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if len(activeRepos) > 0 {
 		logger.Info("Triggering background indexing for %d repositories...", len(activeRepos))
 		go func() {
 			for _, r := range activeRepos {
+				// Check for cancellation
+				select {
+				case <-ctx.Done():
+					logger.Info("Background indexing cancelled.")
+					return
+				default:
+				}
+
 				logger.Info("Background: Indexing Git history for %s...", r)
 				if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
 					logger.Error("Background: Git ingestion error for %s: %v", r, err)
 				}
 				
+				// Check again
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
 				logger.Info("Background: Vectorizing codebase for %s...", r)
 				if err := code.IngestCodebase(dbClient, aiClient, r); err != nil {
 					logger.Error("Background: Code ingestion error for %s: %v", r, err)
@@ -422,20 +452,6 @@ func runServer() {
 
 	// 8. Start Server
 	
-	// Ensure DB is stopped on exit (even if via signal)
-	defer func() {
-		if dbProcess != nil {
-			logger.Info("Cleaning up embedded database...")
-			if err := dbProcess.Stop(); err != nil {
-				logger.Error("Error stopping database: %v", err)
-			}
-		}
-	}()
-
-	// Context for graceful shutdown of other components if needed
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Handle Signals in Main Thread
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -464,9 +480,13 @@ func runServer() {
 			}
 		}()
 
-		// Wait for signal
-		<-sigChan
-		logger.Info("Shutting down...")
+		// Wait for signal or context cancellation
+		select {
+		case <-sigChan:
+			logger.Info("Received signal, shutting down...")
+		case <-ctx.Done():
+			logger.Info("Context cancelled, shutting down...")
+		}
 
 	} else {
 		logger.Info("Starting STDIO server...")
@@ -479,7 +499,33 @@ func runServer() {
 			sigChan <- syscall.SIGTERM
 		}()
 		
-		<-sigChan
-		logger.Info("Shutting down...")
+		select {
+		case <-sigChan:
+			logger.Info("Received signal, shutting down...")
+		case <-ctx.Done():
+			logger.Info("Context cancelled, shutting down...")
+		}
+	}
+
+	// GRACEFUL SHUTDOWN SEQUENCE
+	// 1. Cancel background context (stops ingestion loops)
+	cancel()
+
+	// 2. Stop AI Workers (waits for them to finish current job)
+	logger.Info("Stopping AI workers...")
+	aiClient.Stop()
+
+	// 3. Close DB Connection (now safe as no workers are using it)
+	if dbClient != nil {
+		logger.Info("Closing database connection...")
+		dbClient.Close()
+	}
+
+	// 4. Stop DB Process
+	if dbProcess != nil {
+		logger.Info("Stopping embedded database process...")
+		if err := dbProcess.Stop(); err != nil {
+			logger.Error("Error stopping database: %v", err)
+		}
 	}
 }

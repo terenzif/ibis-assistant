@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
@@ -37,6 +38,8 @@ type EmbedResult struct {
 type Client struct {
 	jobQueue chan EmbedJob
 	dbClient db.Executor
+	workers  []*worker
+	wg       sync.WaitGroup
 }
 
 type KeyConfig struct {
@@ -81,11 +84,17 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 	c := &Client{
 		jobQueue: jobQueue,
 		dbClient: dbClient,
+		workers:  make([]*worker, 0, len(apiKeys)),
 	}
 
 	for _, cfg := range apiKeys {
 		w := newWorker(cfg, dbClient)
-		go w.startLoop(jobQueue)
+		c.workers = append(c.workers, w)
+		c.wg.Add(1)
+		go func(w *worker) {
+			defer c.wg.Done()
+			w.startLoop(jobQueue)
+		}(w)
 	}
 
 	return c
@@ -93,6 +102,15 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 
 func (c *Client) IsFunctional() bool {
 	return c.jobQueue != nil
+}
+
+// Stop gracefully shuts down the AI client and waits for workers to finish
+func (c *Client) Stop() {
+	if c.jobQueue != nil {
+		close(c.jobQueue)
+		c.wg.Wait()
+		c.jobQueue = nil
+	}
 }
 
 // EmbedText generates a vector embedding for the given text

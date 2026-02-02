@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 )
@@ -76,6 +77,9 @@ func TestIngestRepoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}
+
+	// Wait for background Redmine goroutine to finish
+	time.Sleep(100 * time.Millisecond)
 
 	// 4. Assertions
 	// Check Redmine trigger
