@@ -11,6 +11,7 @@ import (
 type MockDB struct {
 	ExecuteCalls []string
 	SmartCalls   []string
+	SmartVars    []interface{}
 	ReturnData   map[string]interface{}
 }
 
@@ -27,6 +28,7 @@ func (m *MockDB) Execute(sql string) (interface{}, error) {
 
 func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 	m.SmartCalls = append(m.SmartCalls, sql)
+	m.SmartVars = append(m.SmartVars, vars)
 	for k, v := range m.ReturnData {
 		if strings.Contains(sql, k) {
 			return v, nil
