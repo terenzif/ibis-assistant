@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/deckonline/knowledge_mcp/internal/ai"
@@ -249,9 +250,13 @@ func runServer(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var bgWg sync.WaitGroup
+
 	if len(activeRepos) > 0 {
 		logger.Info("Triggering background indexing for %d repositories...", len(activeRepos))
+		bgWg.Add(1)
 		go func() {
+			defer bgWg.Done()
 			for _, r := range activeRepos {
 				// Check for cancellation
 				select {
@@ -265,7 +270,7 @@ func runServer(ctx context.Context) {
 				if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
 					logger.Error("Background: Git ingestion error for %s: %v", r, err)
 				}
-				
+
 				// Check again
 				select {
 				case <-ctx.Done():
@@ -274,7 +279,7 @@ func runServer(ctx context.Context) {
 				}
 
 				logger.Info("Background: Vectorizing codebase for %s...", r)
-				if err := code.IngestCodebase(dbClient, aiClient, r); err != nil {
+				if err := code.IngestCodebase(ctx, dbClient, aiClient, r); err != nil {
 					logger.Error("Background: Code ingestion error for %s: %v", r, err)
 				}
 			}
@@ -327,7 +332,7 @@ func runServer(ctx context.Context) {
 		
 		var output strings.Builder
 		for _, r := range targets {
-			if err := code.IngestCodebase(dbClient, aiClient, r); err != nil {
+			if err := code.IngestCodebase(ctx, dbClient, aiClient, r); err != nil {
 				output.WriteString(fmt.Sprintf("Error scanning %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully scanned %s\n", r))
@@ -510,6 +515,10 @@ func runServer(ctx context.Context) {
 	// GRACEFUL SHUTDOWN SEQUENCE
 	// 1. Cancel background context (stops ingestion loops)
 	cancel()
+
+	// Wait for background tasks to finish (prevents panic in AI client)
+	logger.Info("Waiting for background tasks to finish...")
+	bgWg.Wait()
 
 	// 2. Stop AI Workers (waits for them to finish current job)
 	logger.Info("Stopping AI workers...")
