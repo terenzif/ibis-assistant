@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,7 +31,7 @@ func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 type MockRedmine struct {
 	IngestedIDs []string
 }
-func (m *MockRedmine) IngestIssue(dbClient db.Executor, issueIDStr string) error {
+func (m *MockRedmine) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error {
 	m.IngestedIDs = append(m.IngestedIDs, issueIDStr)
 	return nil
 }
