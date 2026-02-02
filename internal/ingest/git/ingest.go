@@ -58,9 +58,9 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	)
 
 	// Register Repo Node
-	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, sanitizeID(repoName))
+	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, db.SanitizeID(repoName))
 	logger.Debug("Upserting repo node: %s", repoID)
-	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, escapeSQL(absPath)))
+	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, db.EscapeSQL(absPath)))
 	if err != nil {
 		return fmt.Errorf("failed to upsert repo node: %w", err)
 	}
@@ -103,16 +103,16 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			currentCommitID = commitID
 
 			// Author Node
-			authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, sanitizeID(authorName))
+			authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, db.SanitizeID(authorName))
 
 			// --- Batch Construction ---
 			
 			// 1. Upsert Author
-			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET name = '%s';\n", authorID, escapeSQL(authorName)))
+			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET name = '%s';\n", authorID, db.EscapeSQL(authorName)))
 
 			// 2. Create Commit
 			batchQL.WriteString(fmt.Sprintf("CREATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s;\n", 
-				commitID, hash, date, escapeSQL(subject), repoID))
+				commitID, hash, date, db.EscapeSQL(subject), repoID))
 			
 			// 3. Link Author -> Commit
 			batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", authorID, schema.EdgeAuthored, commitID))
@@ -231,10 +231,10 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 				impact = totalChanged / (totalChanged + 50.0)
 			}
 
-			fileID := fmt.Sprintf("%s:%s", schema.TableFile, sanitizeID(path))
+			fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(path))
 			
 			// 1. Upsert File
-			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, escapeSQL(path)))
+			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, db.EscapeSQL(path)))
 			
 			// 3. Link Commit -> File (Changed) with Impact
 			if currentCommitID != "" {
@@ -267,20 +267,3 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 }
 
 
-func sanitizeID(s string) string {
-	safe := strings.ReplaceAll(s, "/", "_")
-	safe = strings.ReplaceAll(safe, "\\", "_")
-	safe = strings.ReplaceAll(safe, ".", "_")
-	safe = strings.ReplaceAll(safe, "-", "_")
-	safe = strings.ReplaceAll(safe, " ", "_")
-	safe = strings.ReplaceAll(safe, "'", "")
-	safe = strings.ReplaceAll(safe, "\"", "")
-	return strings.ToLower(safe)
-}
-
-func escapeSQL(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "'", "\\'")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	return s
-}

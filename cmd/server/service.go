@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/deckonline/knowledge_mcp/internal/logger"
@@ -8,24 +9,30 @@ import (
 )
 
 type program struct {
-	exit chan struct{}
+	cancel context.CancelFunc
 }
 
 func (p *program) Start(s service.Service) error {
-	p.exit = make(chan struct{})
-	go p.run()
+	// Create a context that can be cancelled to stop the server
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel = cancel
+
+	go p.run(ctx)
 	return nil
 }
 
-func (p *program) run() {
+func (p *program) run(ctx context.Context) {
 	logger.Info("Knowledge Server Service started.")
-	// Here we will call the main server logic
-	runServer()
+	// Here we will call the main server logic, passing the context
+	runServer(ctx)
 }
 
 func (p *program) Stop(s service.Service) error {
 	logger.Info("Knowledge Server Service stopping.")
-	close(p.exit)
+	// Signal the server to stop
+	if p.cancel != nil {
+		p.cancel()
+	}
 	return nil
 }
 

@@ -76,7 +76,7 @@ func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDS
 
 	issueID := fmt.Sprintf("%s:%d", schema.TableIssue, issue.ID)
 	trackerID := fmt.Sprintf("%s:%d", schema.TableTracker, issue.Tracker.ID)
-	authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, sanitizeID(issue.Author.Name))
+	authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, db.SanitizeID(issue.Author.Name))
 
 	// Combined Update Transaction
 	// 1. Create/Update Tracker
@@ -238,15 +238,3 @@ func (c *Client) UpdateIssue(ctx context.Context, id string, notes string) error
 }
 
 
-func sanitizeID(s string) string {
-	safe := strings.ReplaceAll(s, " ", "_")
-	safe = strings.ReplaceAll(safe, "'", "")
-	return strings.ToLower(safe)
-}
-
-func escapeSQL(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "'", "\\'")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	return s
-}
