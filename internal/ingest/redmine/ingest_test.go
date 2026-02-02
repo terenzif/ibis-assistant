@@ -70,65 +70,39 @@ func TestIngestIssue_Integration(t *testing.T) {
 	}
 
 	// 5. Verify Queries
-	if len(mockDB.CapturedQueries) == 0 {
-		t.Fatal("Expected DB queries, got none")
+	if len(mockDB.CapturedQueries) != 1 {
+		t.Fatalf("Expected 1 combined DB query, got %d", len(mockDB.CapturedQueries))
 	}
 
-	// Check for SmartQuery updates
+	query := mockDB.CapturedQueries[0]
 
-	// Tracker
-	// SMART: UPDATE tracker:2 SET name = $name; | VARS: map[name:Bug]
-	foundTracker := false
-	for _, q := range mockDB.CapturedQueries {
-		if strings.Contains(q, "SMART: UPDATE tracker:2") && strings.Contains(q, "name:Bug") {
-			foundTracker = true
-			break
+	// Check for SQL parts
+	mustContain := []string{
+		"UPDATE tracker:2 SET name = $tracker_name",
+		"UPDATE author:john_doe SET name = $author_name",
+		"UPDATE issue:123 SET subject = $subject",
+		"RELATE issue:123->part_of->tracker:2",
+		"RELATE author:john_doe->authored->issue:123",
+	}
+
+	for _, s := range mustContain {
+		if !strings.Contains(query, s) {
+			t.Errorf("Combined query missing: %s\nGot: %s", s, query)
 		}
 	}
-	if !foundTracker {
-		t.Errorf("Missing tracker update (SmartQuery). Got: %v", mockDB.CapturedQueries)
+
+	// Check for Variable bindings
+	mustContainVars := []string{
+		"tracker_name:Bug",
+		"author_name:John Doe",
+		"subject:Test Issue with 'Quote'",
+		"description:Desc\nLine 2",
+		"status:New",
 	}
 
-	// Author
-	foundAuthor := false
-	for _, q := range mockDB.CapturedQueries {
-		if strings.Contains(q, "SMART: UPDATE author:john_doe") && strings.Contains(q, "name:John Doe") {
-			foundAuthor = true
-			break
+	for _, s := range mustContainVars {
+		if !strings.Contains(query, s) {
+			t.Errorf("Combined query missing variable: %s\nGot: %s", s, query)
 		}
 	}
-	if !foundAuthor {
-		t.Errorf("Missing author update (SmartQuery). Got: %v", mockDB.CapturedQueries)
-	}
-
-	// Issue
-	foundIssue := false
-	for _, q := range mockDB.CapturedQueries {
-		if strings.Contains(q, "SMART: UPDATE issue:123") {
-			// Check vars map string representation
-			if strings.Contains(q, "Test Issue with 'Quote'") && strings.Contains(q, "Desc\nLine 2") {
-				foundIssue = true
-				break
-			}
-		}
-	}
-	if !foundIssue {
-		t.Errorf("Missing issue update (SmartQuery). Got: %v", mockDB.CapturedQueries)
-	}
-
-	// Links
-	// RELATE issue:123->part_of->tracker:2;
-	expectedLink1 := "RELATE issue:123->part_of->tracker:2;"
-	if !contains(mockDB.CapturedQueries, expectedLink1) {
-		t.Errorf("Missing link issue->tracker")
-	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

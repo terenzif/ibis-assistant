@@ -78,30 +78,30 @@ func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDS
 	trackerID := fmt.Sprintf("%s:%d", schema.TableTracker, issue.Tracker.ID)
 	authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, sanitizeID(issue.Author.Name))
 
+	// Combined Update Transaction
 	// 1. Create/Update Tracker
-	dbClient.SmartQuery(fmt.Sprintf("UPDATE %s SET name = $name;", trackerID), map[string]interface{}{
-		"name": issue.Tracker.Name,
-	})
-
-	// 2. Create/Update Author (Redmine user)
-	dbClient.SmartQuery(fmt.Sprintf("UPDATE %s SET name = $name;", authorID), map[string]interface{}{
-		"name": issue.Author.Name,
-	})
-
+	// 2. Create/Update Author
 	// 3. Update Issue
-	ql := fmt.Sprintf("UPDATE %s SET subject = $subject, description = $description, status = $status, updated_on = $updated_on;", issueID)
-	dbClient.SmartQuery(ql, map[string]interface{}{
-		"subject":     issue.Subject,
-		"description": issue.Description,
-		"status":      issue.Status.Name,
-		"updated_on":  issue.UpdatedOn,
-	})
-
 	// 4. Link Issue -> Tracker
-	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", issueID, schema.EdgePartOf, trackerID))
-	
-	// 5. Link Issue -> Author (Reported By) -- Optional but good
-	dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", authorID, schema.EdgeAuthored, issueID)) 
+	// 5. Link Issue -> Author
+	ql := fmt.Sprintf(`
+		UPDATE %s SET name = $tracker_name;
+		UPDATE %s SET name = $author_name;
+		UPDATE %s SET subject = $subject, description = $description, status = $status, updated_on = $updated_on;
+		RELATE %s->%s->%s;
+		RELATE %s->%s->%s;
+	`, trackerID, authorID, issueID, issueID, schema.EdgePartOf, trackerID, authorID, schema.EdgeAuthored, issueID)
+
+	if _, err := dbClient.SmartQuery(ql, map[string]interface{}{
+		"tracker_name": issue.Tracker.Name,
+		"author_name":  issue.Author.Name,
+		"subject":      issue.Subject,
+		"description":  issue.Description,
+		"status":       issue.Status.Name,
+		"updated_on":   issue.UpdatedOn,
+	}); err != nil {
+		return fmt.Errorf("failed to ingest issue graph: %w", err)
+	}
 	
 	logger.Info("Successfully ingested Issue #%d", issue.ID)
 	
