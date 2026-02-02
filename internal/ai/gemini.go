@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
@@ -22,10 +21,22 @@ const (
 
 var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-// Client abstracts interaction with the AI Provider
-// It supports multiple API Keys for simple round-robin pooling.
+// EmbedJob represents a work item for the AI workers
+type EmbedJob struct {
+	Texts      []string
+	ResultChan chan EmbedResult
+}
+
+// EmbedResult represents the outcome of an embedding job
+type EmbedResult struct {
+	Embeddings [][]float32
+	Error      error
+}
+
+// Client abstracts interaction with the AI Provider using a Worker Pool
 type Client struct {
-	workers []*worker
+	jobQueue chan EmbedJob
+	dbClient db.Executor
 }
 
 type KeyConfig struct {
@@ -36,12 +47,13 @@ type KeyConfig struct {
 	Owner string
 }
 
+// worker holds the state for a single API key
 type worker struct {
 	apiKey        string
 	owner         string
 	client        *http.Client
 	dbClient      db.Executor
-	costInterval  time.Duration // Time to wait per 1 item of cost
+	costInterval  time.Duration // Time to wait per 1 request (based on RPM)
 	nextAvailable time.Time
 
 	// TPM (Tokens Per Minute)
@@ -54,9 +66,7 @@ type worker struct {
 	usedRPD      int
 	lastResetRPD time.Time
 
-	usageID      string // Cached DB ID for today
-
-	mu sync.Mutex
+	usageID string // Cached DB ID for today
 }
 
 func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
@@ -64,45 +74,25 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 		return &Client{}
 	}
 
-	workers := make([]*worker, len(apiKeys))
+	// Create a buffered channel to hold pending jobs
+	// Buffer size can be adjusted, keeping it reasonable to prevent OOM but allow burst
+	jobQueue := make(chan EmbedJob, 100)
 
-	for i, cfg := range apiKeys {
-		// Calculate how much time each "item" costs based on RPM.
-		var costInterval time.Duration
-		if cfg.RPM <= 0 {
-			costInterval = 0 // No limit
-		} else {
-			costInterval = time.Minute / time.Duration(cfg.RPM)
-		}
-
-		w := &worker{
-			apiKey:       cfg.Key,
-			owner:        cfg.Owner,
-			client:       &http.Client{Timeout: 30 * time.Second},
-			dbClient:     dbClient,
-			costInterval: costInterval,
-			limitTPM:     cfg.TPM,
-			limitRPD:     cfg.RPD,
-			lastResetTPM: time.Now(),
-			lastResetRPD: time.Now(),
-		}
-
-		// Determine DB ID for usage tracking
-		w.updateUsageID()
-
-		// Synchronously load usage (blocking slightly at startup is safer than racing)
-		w.loadUsageFromDB()
-
-		workers[i] = w
+	c := &Client{
+		jobQueue: jobQueue,
+		dbClient: dbClient,
 	}
 
-	return &Client{
-		workers: workers,
+	for _, cfg := range apiKeys {
+		w := newWorker(cfg, dbClient)
+		go w.startLoop(jobQueue)
 	}
+
+	return c
 }
 
 func (c *Client) IsFunctional() bool {
-	return len(c.workers) > 0
+	return c.jobQueue != nil
 }
 
 // EmbedText generates a vector embedding for the given text
@@ -117,144 +107,182 @@ func (c *Client) EmbedText(text string) ([]float32, error) {
 	return res[0], nil
 }
 
-// BatchEmbedText generates embeddings for multiple strings in one call
-// It implements advanced rate limiting and failover across keys.
+// BatchEmbedText submits a batch of texts to the worker pool and waits for the result
 func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
-	if len(c.workers) == 0 {
-		return nil, fmt.Errorf("no ai worker available (check API keys)")
+	if c.jobQueue == nil {
+		return nil, fmt.Errorf("AI client not initialized or no keys available")
 	}
 
-	cost := len(texts)
-	if cost == 0 {
+	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
 
-	// Estimate token cost (conservative estimate: 1 token ~ 4 chars)
+	resultChan := make(chan EmbedResult, 1)
+	job := EmbedJob{
+		Texts:      texts,
+		ResultChan: resultChan,
+	}
+
+	// Submit job
+	c.jobQueue <- job
+
+	// Wait for result
+	result := <-resultChan
+	return result.Embeddings, result.Error
+}
+
+// --- Worker Implementation ---
+
+func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
+	// Calculate how much time each request costs based on RPM.
+	var costInterval time.Duration
+	if cfg.RPM <= 0 {
+		costInterval = 0 // No limit
+	} else {
+		costInterval = time.Minute / time.Duration(cfg.RPM)
+	}
+
+	w := &worker{
+		apiKey:       cfg.Key,
+		owner:        cfg.Owner,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		dbClient:     dbClient,
+		costInterval: costInterval,
+		limitTPM:     cfg.TPM,
+		limitRPD:     cfg.RPD,
+		lastResetTPM: time.Now(),
+		lastResetRPD: time.Now(),
+		nextAvailable: time.Now(),
+	}
+
+	w.updateUsageID()
+	w.loadUsageFromDB()
+
+	return w
+}
+
+func (w *worker) startLoop(queue <-chan EmbedJob) {
+	logger.Info("AI Worker started for key ...%s", w.shortKey())
+
+	for job := range queue {
+		w.processJob(job)
+	}
+}
+
+func (w *worker) processJob(job EmbedJob) {
+	// 1. Rate Limiting Logic
+	w.waitRateLimits(job.Texts)
+
+	// 2. Execute Request
+	// Retry logic is simplified here: we retry only on 429 internally in the loop?
+	// Or we just fail and let the caller handle?
+	// The original code had complex retry logic searching for other workers.
+	// In a worker pool, if *this* worker fails with 429, we should probably backoff and retry
+	// inside this worker, because putting it back in the queue might just fail again if all keys are busy.
+	// However, if one key is bad, we don't want to block the job forever if others are free.
+	// But simply: "Up to n keys * 100 rpm" implies each key manages its own stream.
+	// We will implement a simple retry loop for 429s on this key.
+
+	var embeddings [][]float32
+	var err error
+	maxRetries := 3
+
+	for i := 0; i <= maxRetries; i++ {
+		var retryDelay time.Duration
+		embeddings, retryDelay, err = w.doEmbed(job.Texts)
+
+		if err == nil {
+			break
+		}
+
+		if retryDelay > 0 {
+			// Rate limit hit
+			logger.Warn("AI Worker (...%s) rate limited. Waiting %v...", w.shortKey(), retryDelay)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		// Non-retriable error
+		break
+	}
+
+	// 3. Send Result
+	job.ResultChan <- EmbedResult{
+		Embeddings: embeddings,
+		Error:      err,
+	}
+}
+
+func (w *worker) waitRateLimits(texts []string) {
 	estimatedTokens := 0
 	for _, t := range texts {
 		estimatedTokens += len(t) / 4
 		if len(t) > 0 {
-			estimatedTokens++ // Minimum 1 token
+			estimatedTokens++
 		}
 	}
 
-	// Retry loop (handled by Client orchestration)
-	for {
-		// 1. Find an available worker
-		var selectedWorker *worker
-		var earliestAvailable time.Time
-		now := time.Now()
+	now := time.Now()
 
-		for _, w := range c.workers {
-			w.mu.Lock()
+	// Reset Counters if needed
+	if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
+		w.usedRPD = 0
+		w.lastResetRPD = now
+		w.updateUsageID()
+	}
+	if now.Sub(w.lastResetTPM) >= time.Minute {
+		w.usedTPM = 0
+		w.lastResetTPM = now
+	}
 
-			// Check Day boundary for RPD
+	// Check RPD (Hard Stop)
+	if w.limitRPD > 0 && w.usedRPD+1 > w.limitRPD {
+		// This worker is done for the day.
+		// In a real system, we might want to resign from the pool or block until tomorrow.
+		// For simplicity, we sleep until tomorrow? No, that blocks a thread.
+		// We just sleep for a minute and retry checking (spinning slowly),
+		// essentially taking this worker out of commission.
+		logger.Warn("AI Worker (...%s) exhausted RPD (%d). Pausing...", w.shortKey(), w.limitRPD)
+		for {
+			time.Sleep(10 * time.Minute)
+			now = time.Now()
 			if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
-				w.usedRPD = 0 // Reset local counter for new day
+				// New Day!
+				w.usedRPD = 0
 				w.lastResetRPD = now
-				w.updateUsageID() // New DB ID
-			}
-
-			// Reset TPM counters if minute window passed
-			if now.Sub(w.lastResetTPM) >= time.Minute {
-				w.usedTPM = 0
-				w.lastResetTPM = now
-			}
-
-			// --- Check Limits ---
-
-			// 1. RPD (Hard limit, skip worker if exceeded)
-			// One HTTP request for the batch
-			if w.limitRPD > 0 && w.usedRPD+1 > w.limitRPD {
-				w.mu.Unlock()
-				continue // Worker exhausted for the day
-			}
-
-			// 2. TPM (Skip if exceeded for this minute, or wait)
-			tpmExceeded := false
-			if w.limitTPM > 0 && w.usedTPM+estimatedTokens > w.limitTPM {
-				tpmExceeded = true
-			}
-
-			// 3. RPM (Time based availability)
-			rpmAvailable := !now.Before(w.nextAvailable)
-
-			// Decision Logic
-			if !tpmExceeded && rpmAvailable {
-				// Available now!
-				w.nextAvailable = now.Add(w.costInterval * time.Duration(cost))
-				selectedWorker = w
-				w.mu.Unlock()
+				w.updateUsageID()
 				break
-			} else {
-				// Calculate wait time
-				var waitTime time.Time
-
-				// Wait for RPM?
-				if w.nextAvailable.After(waitTime) {
-					waitTime = w.nextAvailable
-				}
-
-				// Wait for TPM? (Start of next minute window)
-				if tpmExceeded {
-					nextMin := w.lastResetTPM.Add(time.Minute)
-					if nextMin.After(waitTime) {
-						waitTime = nextMin
-					}
-				}
-
-				// Keep track of earliest available for waiting
-				if earliestAvailable.IsZero() || waitTime.Before(earliestAvailable) {
-					earliestAvailable = waitTime
-				}
 			}
-			w.mu.Unlock()
 		}
-
-		// 2. If no worker available, wait
-		if selectedWorker == nil {
-			if earliestAvailable.IsZero() {
-				// If earliestAvailable is zero, it means all workers are RPD exhausted
-				// or no workers configured.
-				return nil, fmt.Errorf("all keys exhausted daily quotas (RPD) or unavailable")
-			}
-			wait := time.Until(earliestAvailable)
-			if wait > 0 {
-				logger.Debug("AI: All keys busy/limited, waiting %v...", wait)
-				time.Sleep(wait)
-			}
-			continue // Retry selection
-		}
-
-		// 3. Execute Request
-		res, retryDelay, err := selectedWorker.doEmbed(texts)
-		if err == nil {
-			// Update Usage Stats on Success
-			selectedWorker.mu.Lock()
-			selectedWorker.usedTPM += estimatedTokens
-			selectedWorker.usedRPD += 1 // 1 HTTP Request
-
-			// Fire-and-forget DB update (Pass by value to avoid race condition)
-			go selectedWorker.updateDBUsage(selectedWorker.usageID, selectedWorker.usedRPD, selectedWorker.owner)
-
-			selectedWorker.mu.Unlock()
-
-			return res, nil
-		}
-
-		// 4. Handle Failure
-		if retryDelay > 0 {
-			selectedWorker.mu.Lock()
-			selectedWorker.nextAvailable = time.Now().Add(retryDelay)
-			selectedWorker.mu.Unlock()
-			logger.Warn("AI: Worker rate limited (429). Retrying on another key... (Wait: %v)", retryDelay)
-			continue
-		}
-
-		// Genuine error
-		return nil, err
 	}
+
+	// Check TPM (Wait)
+	if w.limitTPM > 0 && w.usedTPM+estimatedTokens > w.limitTPM {
+		wait := w.lastResetTPM.Add(time.Minute).Sub(now)
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		// Reset after sleep
+		w.usedTPM = 0
+		w.lastResetTPM = time.Now()
+	}
+
+	// Check RPM (Interval)
+	now = time.Now()
+	if now.Before(w.nextAvailable) {
+		time.Sleep(w.nextAvailable.Sub(now))
+	}
+
+	// Update State for AFTER the request (Optimistic or we update here?)
+	// Let's update here to reserve the slot.
+	w.nextAvailable = time.Now().Add(w.costInterval)
+	w.usedTPM += estimatedTokens
+	w.usedRPD++
+
+	// Update DB (Async)
+	go w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
 }
+
 
 func (w *worker) updateUsageID() {
 	// ID: key_usage:<hash>_<date>
@@ -290,11 +318,6 @@ func (w *worker) updateDBUsage(id string, count int, owner string) {
 		return
 	}
 
-	// Using SmartQuery to prevent SQL Injection and handle parameters safely.
-	// Note: record ID handling in parameters can be driver specific,
-	// so we construct the ID string safely (it's a hash, so it's safe-ish, but let's be strict).
-	// We will try UPDATE first, then CREATE.
-
 	// Update
 	updateQL := fmt.Sprintf("UPDATE %s SET requests = $req, last_updated = time::now();", id)
 	vars := map[string]interface{}{
@@ -313,18 +336,16 @@ func (w *worker) updateDBUsage(id string, count int, owner string) {
 	}
 }
 
+func (w *worker) shortKey() string {
+	if len(w.apiKey) > 8 {
+		return w.apiKey[len(w.apiKey)-4:]
+	}
+	return "????"
+}
+
 // doEmbed performs the actual HTTP request. Returns (result, retryDelay, error).
-// It does NOT modify nextAvailable or sleep.
 func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
-	keyInfo := w.apiKey
-	if len(keyInfo) > 8 {
-		keyInfo = keyInfo[len(keyInfo)-4:]
-	}
-	ownerInfo := w.owner
-	if ownerInfo == "" {
-		ownerInfo = "unknown"
-	}
-	logger.Debug("AI: Sending batch embedding request (size: %d) using key ...%s (%s)", len(texts), keyInfo, ownerInfo)
+	logger.Debug("AI: Worker ...%s processing batch (size: %d)", w.shortKey(), len(texts))
 
 	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", BaseURL, EmbeddingModel, w.apiKey)
 
@@ -355,7 +376,7 @@ func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode == 200 {
-		logger.Debug("AI: Successfully received embeddings for %d items in %v", len(texts), duration)
+		logger.Debug("AI: Worker ...%s success (%v)", w.shortKey(), duration)
 		var result BatchEmbedResponse
 		if err := json.Unmarshal(body, &result); err != nil {
 			return nil, 0, fmt.Errorf("parsing error: %w", err)
@@ -371,13 +392,12 @@ func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
 	if resp.StatusCode == 429 {
 		retryDelay := parseRetryDelay(body)
 		if retryDelay == 0 {
-			// Default backoff if parsing fails but 429 is present
 			retryDelay = 5 * time.Second
 		}
 		return nil, retryDelay, fmt.Errorf("rate limit exceeded")
 	}
 
-	return nil, 0, fmt.Errorf("gemini api error %d (key ...%s): %s", resp.StatusCode, keyInfo, string(body))
+	return nil, 0, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
 }
 
 // --- DTOs ---
@@ -391,16 +411,6 @@ type Content struct {
 }
 type Part struct {
 	Text string `json:"text"`
-}
-
-type EmbeddingResponse struct {
-	Embedding struct {
-		Values []float32 `json:"values"`
-	} `json:"embedding"`
-	Error *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
 }
 
 type BatchEmbedRequest struct {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,86 +16,72 @@ func (m *MockDB) Execute(sql string) (interface{}, error) { return nil, nil }
 func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) { return nil, nil }
 func (m *MockDB) Close() {}
 
-func TestClientRotationAndFailover(t *testing.T) {
+func TestClientWorkerPool(t *testing.T) {
 	// Mock Server
-	// We want to simulate:
-	// Key1 -> 429
-	// Key2 -> 200
-	var key1Attempts, key2Attempts int
+	// Simulate 2 keys. Both working.
+	var key1Count, key2Count int
+	var mu sync.Mutex
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Ignore probe requests
-		if r.Method == "GET" {
-			w.WriteHeader(200)
-			return
-		}
-
 		key := r.URL.Query().Get("key")
+		mu.Lock()
 		if strings.Contains(key, "key1") {
-			key1Attempts++
-			w.WriteHeader(429)
-			w.Write([]byte(`{
-				"error": {
-					"code": 429,
-					"message": "Quota exceeded",
-					"details": [
-						{
-							"@type": "type.googleapis.com/google.rpc.RetryInfo",
-							"retryDelay": "2s"
-						}
-					]
-				}
-			}`))
-			return
+			key1Count++
 		}
 		if strings.Contains(key, "key2") {
-			key2Attempts++
-			w.WriteHeader(200)
-			w.Write([]byte(`{
-				"embeddings": [
-					{"values": [0.1, 0.2, 0.3]}
-				]
-			}`))
-			return
+			key2Count++
 		}
-		w.WriteHeader(400) // Should not reach here
+		mu.Unlock()
+
+		// Simulate latency
+		time.Sleep(50 * time.Millisecond)
+
+		w.WriteHeader(200)
+		w.Write([]byte(`{
+			"embeddings": [
+				{"values": [0.1, 0.2, 0.3]}
+			]
+		}`))
 	}))
 	defer server.Close()
 
-	// Override BaseURL
 	originalBaseURL := BaseURL
 	BaseURL = server.URL
 	defer func() { BaseURL = originalBaseURL }()
 
 	// Create Client with 2 keys
 	client := NewClient([]KeyConfig{
-		{Key: "key1", RPM: 60, TPM: 1000, RPD: 100, Owner: "User1"},
-		{Key: "key2", RPM: 60, TPM: 1000, RPD: 100, Owner: "User2"},
+		{Key: "key1", RPM: 600, TPM: 1000, RPD: 1000},
+		{Key: "key2", RPM: 600, TPM: 1000, RPD: 1000},
 	}, &MockDB{})
 
-	// Call
-	// Should try key1 -> 429 -> mark key1 busy for 2s -> try key2 -> success
-	embs, err := client.EmbedText("test")
+	// Submit 10 requests
+	count := 10
+	var wg sync.WaitGroup
+	wg.Add(count)
 
-	if err != nil {
-		t.Fatalf("Expected success, got error: %v", err)
-	}
-	if len(embs) != 3 {
-		t.Errorf("Expected 3 values, got %d", len(embs))
-	}
-
-	if key1Attempts != 1 {
-		t.Errorf("Expected 1 attempt for key1, got %d", key1Attempts)
-	}
-	if key2Attempts != 1 {
-		t.Errorf("Expected 1 attempt for key2, got %d", key2Attempts)
+	for i := 0; i < count; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := client.EmbedText("test")
+			if err != nil {
+				t.Errorf("Embed failed: %v", err)
+			}
+		}()
 	}
 
-	// Verify key1 is "busy"
-	// client.workers[0] corresponds to key1 (assuming order preserved)
-	w1 := client.workers[0]
-	if time.Now().After(w1.nextAvailable) {
-		t.Errorf("Expected worker 1 to be busy in the future")
+	wg.Wait()
+
+	mu.Lock()
+	total := key1Count + key2Count
+	mu.Unlock()
+
+	if total != count {
+		t.Errorf("Expected %d requests, got %d", count, total)
+	}
+
+	if key1Count == 0 || key2Count == 0 {
+		t.Logf("Warning: One key did all work (key1: %d, key2: %d). Workers might not be competing fairly due to low load.", key1Count, key2Count)
 	}
 }
 
@@ -110,16 +97,15 @@ func TestClientRateLimitingPacing(t *testing.T) {
 	BaseURL = server.URL
 	defer func() { BaseURL = originalBaseURL }()
 
-	// RPM = 60 => 1 req/sec per worker if 1 key
-	// We use 1 key.
+	// RPM = 60 => 1 req/sec per worker
 	client := NewClient([]KeyConfig{
 		{Key: "key1", RPM: 60},
 	}, &MockDB{})
 
 	start := time.Now()
-	// 1st call: Should be immediate
+	// 1st call: Should be immediate (or very fast)
 	client.EmbedText("1")
-	// 2nd call: Should wait 1s (cost=1)
+	// 2nd call: Should wait ~1s
 	client.EmbedText("2")
 	duration := time.Since(start)
 

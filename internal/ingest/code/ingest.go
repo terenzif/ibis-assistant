@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
@@ -41,6 +42,25 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 		return fmt.Errorf("AI vectorization is disabled: no Gemini API keys provided (set GEMINI_API_KEY or gemini_keys in config.json)")
 	}
 
+	pathsChan := make(chan string, 1000)
+	var wg sync.WaitGroup
+
+	// Start Worker Pool
+	// 20 workers is a reasonable default for concurrent IO + DB + AI wait
+	numWorkers := 20
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range pathsChan {
+				if err := processFile(dbClient, aiClient, path); err != nil {
+					logger.Error("Error processing file %s: %v", path, err)
+				}
+			}
+		}()
+	}
+
+	// Walk the directory and feed the channel
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -57,11 +77,12 @@ func IngestCodebase(dbClient db.Executor, aiClient AIClient, repoPath string) er
 			return nil
 		}
 
-		if err := processFile(dbClient, aiClient, path); err != nil {
-			logger.Error("Error processing file %s: %v", path, err)
-		}
+		pathsChan <- path
 		return nil
 	})
+
+	close(pathsChan) // Signal workers to finish
+	wg.Wait()        // Wait for all workers
 
 	logger.Info("Code analysis complete for %s", absPath)
 	return err

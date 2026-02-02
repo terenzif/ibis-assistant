@@ -20,6 +20,6 @@ func BenchmarkChunkContent(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		chunkContent(text, chunkSize)
+		chunkContent(strings.NewReader(text), chunkSize)
 	}
 }
