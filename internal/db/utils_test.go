@@ -1,27 +1,30 @@
 package db
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestSanitizeID(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
 	}{
-		{"simple", "simple"},
-		{"Space Name", "space_name"},
-		{"Jean-Luc", "jean_luc"},
-		{"file.txt", "file_txt"},
-		{"path/to/file", "path_to_file"},
-		{"win\\path", "win_path"},
-		{"O'Connor", "oconnor"},
-		{"Quote\"Check", "quotecheck"},
-		{"2026-02-02", "2026_02_02"},
+		{"simple.txt", "simple_txt"},
+		{"path/to/file.go", "path_to_file_go"},
+		{"weird char's", "weird_chars"}, // quotes removed, space to underscore
+		{"file-with-dashes", "file_with_dashes"},
+		// The failing case
+		{"deckonline_documenti_{scadenzadocumento_aspx_=>_scadenzedocumento}", "deckonline_documenti_scadenzadocumento_aspx_scadenzedocumento"},
+		// Other potential issues
+		{"key=value", "key_value"},
+		{"pointer->value", "pointer_value"},
+		{"__start_end__", "start_end"}, // trimming
 	}
 
-	for _, test := range tests {
-		got := SanitizeID(test.input)
-		if got != test.expected {
-			t.Errorf("SanitizeID(%q) = %q; want %q", test.input, got, test.expected)
+	for _, tt := range tests {
+		got := SanitizeID(tt.input)
+		if got != tt.expected {
+			t.Errorf("SanitizeID(%q) = %q; want %q", tt.input, got, tt.expected)
 		}
 	}
 }
@@ -31,16 +34,17 @@ func TestEscapeSQL(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"normal", "normal"},
-		{"it's me", "it\\'s me"},
-		{"line\nbreak", "line\\nbreak"},
-		{"back\\slash", "back\\\\slash"},
+		{"simple string", "simple string"},
+		{"It's a test", "It\\'s a test"},
+		{"C:\\Path\\To\\File", "C:\\\\Path\\\\To\\\\File"},
+		{"Line 1\nLine 2", "Line 1\\nLine 2"},
+		{"Mixed: 'C:\\test\n'", "Mixed: \\'C:\\\\test\\n\\'"},
 	}
 
-	for _, test := range tests {
-		got := EscapeSQL(test.input)
-		if got != test.expected {
-			t.Errorf("EscapeSQL(%q) = %q; want %q", test.input, got, test.expected)
+	for _, tt := range tests {
+		got := EscapeSQL(tt.input)
+		if got != tt.expected {
+			t.Errorf("EscapeSQL(%q) = %q; want %q", tt.input, got, tt.expected)
 		}
 	}
 }

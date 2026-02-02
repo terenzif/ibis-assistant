@@ -1,26 +1,39 @@
 package db
 
 import (
+	"regexp"
 	"strings"
+)
+
+var (
+	// invalidIDChars matches any character that is NOT lowercase alphanumeric or underscore.
+	invalidIDChars = regexp.MustCompile(`[^a-z0-9_]`)
+	// multiUnderscore matches sequences of underscores to collapse them.
+	multiUnderscore = regexp.MustCompile(`_+`)
 )
 
 // SanitizeID makes a string safe for use as a SurrealDB record ID suffix.
 // It replaces characters that are illegal in unquoted identifiers (-, ., /, \, space, etc.) with underscores.
 func SanitizeID(s string) string {
-	// Replace common separators and illegal chars with underscore
-	safe := strings.ReplaceAll(s, "/", "_")
-	safe = strings.ReplaceAll(safe, "\\", "_")
-	safe = strings.ReplaceAll(safe, ".", "_")
-	safe = strings.ReplaceAll(safe, "-", "_")
-	safe = strings.ReplaceAll(safe, " ", "_")
-	safe = strings.ReplaceAll(safe, ":", "_") // Colons are separators in Table:ID
+	// 1. Convert to lowercase
+	s = strings.ToLower(s)
 
-	// Remove quotes completely
-	safe = strings.ReplaceAll(safe, "'", "")
-	safe = strings.ReplaceAll(safe, "\"", "")
-	safe = strings.ReplaceAll(safe, "`", "")
+	// 2. Remove quotes completely (heuristic: they are often inside words)
+	s = strings.ReplaceAll(s, "'", "")
+	s = strings.ReplaceAll(s, "\"", "")
+	s = strings.ReplaceAll(s, "`", "")
 
-	return strings.ToLower(safe)
+	// 3. Replace all other invalid characters with underscore
+	// This covers /, \, ., -, :, {, }, =, >, space, etc.
+	s = invalidIDChars.ReplaceAllString(s, "_")
+
+	// 4. Collapse multiple underscores
+	s = multiUnderscore.ReplaceAllString(s, "_")
+
+	// 5. Trim leading/trailing underscores (optional but clean)
+	s = strings.Trim(s, "_")
+
+	return s
 }
 
 // EscapeSQL escapes a string for use in a SurrealDB single-quoted string literal.
