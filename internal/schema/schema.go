@@ -1,6 +1,9 @@
 package schema
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	// Nodes
@@ -35,9 +38,10 @@ var Definition = []string{
 
 // GenerateInitSQL returns the full SQL script to initialize the DB
 func GenerateInitSQL() string {
-	sql := ""
+	var sb strings.Builder
 	for _, s := range Definition {
-		sql += s + "\n"
+		sb.WriteString(s)
+		sb.WriteString("\n")
 	}
-	return sql
+	return sb.String()
 }
