@@ -3,6 +3,7 @@ package git
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os/exec"
@@ -55,6 +56,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 		currentCommitID string
 		batchQL         strings.Builder
 		batchCount      int
+		skipping        bool
 	)
 
 	// Register Repo Node
@@ -63,6 +65,24 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, db.EscapeSQL(absPath)))
 	if err != nil {
 		return fmt.Errorf("failed to upsert repo node: %w", err)
+	}
+
+	// Fetch existing commits to support incremental ingestion
+	existingCommits := make(map[string]bool)
+	// We use SmartQuery to get the IDs. Result is []interface{} (list of maps)
+	resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE repo = $repo", map[string]interface{}{"repo": repoID})
+	if err == nil {
+		bytes, _ := json.Marshal(resRaw)
+		var commits []struct {
+			ID string `json:"id"`
+		}
+		// If unmarshal fails (e.g. empty result or unexpected format), we just proceed (empty map -> ingest everything)
+		if err := json.Unmarshal(bytes, &commits); err == nil {
+			for _, c := range commits {
+				existingCommits[c.ID] = true
+			}
+			logger.Info("Found %d existing commits for repo %s. These will be skipped.", len(commits), repoName)
+		}
 	}
 
 	flushBatch := func() error {
@@ -100,6 +120,13 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			subject := parts[5]
 
 			commitID := fmt.Sprintf("%s:%s", schema.TableCommit, hash)
+
+			if existingCommits[commitID] {
+				skipping = true
+				currentCommitID = ""
+				continue
+			}
+			skipping = false
 			currentCommitID = commitID
 
 			// Author Node
@@ -110,8 +137,8 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			// 1. Upsert Author
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET name = '%s';\n", authorID, db.EscapeSQL(authorName)))
 
-			// 2. Create Commit
-			batchQL.WriteString(fmt.Sprintf("CREATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s;\n", 
+			// 2. Create Commit (Using UPDATE to be safe/idempotent)
+			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s;\n",
 				commitID, hash, date, db.EscapeSQL(subject), repoID))
 			
 			// 3. Link Author -> Commit
@@ -170,6 +197,9 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			}
 
 		} else {
+			if skipping {
+				continue
+			}
 			// Numstat line: Added Deleted Path
 			// e.g. "5       3       src/main.go"
 			// Binary files: "-       -       image.png"

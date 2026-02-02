@@ -25,7 +25,7 @@ func (m *MockDB) Execute(sql string) (interface{}, error) {
 }
 func (m *MockDB) Close() {}
 func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
-	return nil, nil
+	return m.MockResult, nil
 }
 
 // MockRedmineIngester for Git Ingestion
@@ -164,6 +164,93 @@ func TestIngestRepo_QuotedPaths(t *testing.T) {
 
 	if !foundFileUpdate {
 		t.Errorf("Did not find correct file update for quoted path. Queries: %v", mockDB.CapturedQueries)
+	}
+}
+
+func TestIngestRepo_Incremental(t *testing.T) {
+	// 1. Setup Temp Git Repo
+	repoDir := t.TempDir()
+
+	initCmd := exec.Command("git", "init")
+	initCmd.Dir = repoDir
+	if err := initCmd.Run(); err != nil {
+		t.Fatalf("Failed to git init: %v", err)
+	}
+
+	// Config user
+	cfgName := exec.Command("git", "config", "user.name", "Test User")
+	cfgName.Dir = repoDir
+	cfgName.Run()
+	cfgEmail := exec.Command("git", "config", "user.email", "test@example.com")
+	cfgEmail.Dir = repoDir
+	cfgEmail.Run()
+
+	// Commit 1 (Already Ingested)
+	os.WriteFile(filepath.Join(repoDir, "file1.go"), []byte("package main"), 0644)
+	helperExec(t, repoDir, "git", "add", ".")
+	helperExec(t, repoDir, "git", "commit", "-m", "Commit One")
+
+	// Get Hash of Commit 1
+	out, _ := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
+	hash1 := strings.TrimSpace(string(out))
+
+	// Commit 2 (New)
+	os.WriteFile(filepath.Join(repoDir, "file2.go"), []byte("package main\n// new"), 0644)
+	helperExec(t, repoDir, "git", "add", ".")
+	helperExec(t, repoDir, "git", "commit", "-m", "Commit Two")
+
+	// Get Hash of Commit 2
+	out2, _ := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
+	hash2 := strings.TrimSpace(string(out2))
+
+	// 2. Setup Mock Clients
+	mockDB := &MockDB{}
+	mockRedmine := &MockRedmine{}
+
+	// Mock Result: Commit 1 exists
+	// SmartQuery returns a list of existing commit IDs
+	mockDB.MockResult = []interface{}{
+		map[string]interface{}{"id": fmt.Sprintf("commit:%s", hash1)},
+	}
+
+	// 3. Run Ingest
+	err := IngestRepo(mockDB, mockRedmine, repoDir)
+	if err != nil {
+		t.Fatalf("IngestRepo failed: %v", err)
+	}
+
+	// 4. Assertions
+	// We expect Commit 1 to be skipped (no UPDATE/CREATE commit:hash1)
+	// We expect Commit 2 to be ingested (UPDATE/CREATE commit:hash2)
+
+	foundCommit1 := false
+	foundCommit2 := false
+
+	for _, qry := range mockDB.CapturedQueries {
+		// Check for hash1 usage in CREATE/UPDATE
+		if strings.Contains(qry, fmt.Sprintf("commit:%s", hash1)) {
+			// It might be referenced as parent of commit 2?
+			// RELATE commit:hash1->parent_of->commit:hash2
+			// But the CREATE/UPDATE statement for hash1 itself should be missing if skipped.
+			// The existing logic generates: "CREATE commit:hash1 ..."
+			// We check specifically for setting hash/date/message for hash1
+			if strings.Contains(qry, fmt.Sprintf("hash = '%s'", hash1)) {
+				foundCommit1 = true
+			}
+		}
+
+		if strings.Contains(qry, fmt.Sprintf("commit:%s", hash2)) {
+			if strings.Contains(qry, fmt.Sprintf("hash = '%s'", hash2)) {
+				foundCommit2 = true
+			}
+		}
+	}
+
+	if foundCommit1 {
+		t.Errorf("Expected Commit 1 to be skipped, but found SQL for it")
+	}
+	if !foundCommit2 {
+		t.Errorf("Expected Commit 2 to be ingested, but found no SQL for it")
 	}
 }
 
