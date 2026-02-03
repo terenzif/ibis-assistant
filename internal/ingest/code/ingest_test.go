@@ -226,14 +226,6 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 
 	// Analyze Calls
 	// We expect processFile to be called only for main.go
-	// Since IngestCodebase calls processFile which calls DB, we can check DB calls.
-	// But MockDB only tracks Execute calls.
-	// processFile does: "SELECT hash FROM file:..."
-	// We can check which file IDs were queried.
-
-	// Let's look at the arguments passed to processFile. Wait, we can't seeing that easily.
-	// But we can check if DB was touched for the excluded files.
-
 	// Helper to check if a path was processed
 	wasProcessed := func(path string) bool {
 		sanitized := db.SanitizeID(path)
@@ -264,5 +256,72 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 
 	if wasProcessed(txtFile) {
 		t.Errorf("readme.txt should have been ignored (Unsupported Ext)")
+	}
+}
+
+func TestIngestCodebase_Pruning(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Create a file that is ignored by .knowledgeignore
+	ignoredFile := filepath.Join(tmpDir, "secret.go")
+	os.WriteFile(ignoredFile, []byte("secret"), 0644)
+
+	// 2. Create .knowledgeignore
+	os.WriteFile(filepath.Join(tmpDir, ".knowledgeignore"), []byte("secret.go"), 0644)
+
+	// 3. Setup Config
+	cfg := config.Load()
+
+	// 4. Setup MockDB with existing files
+	ignoredID := fmt.Sprintf("file:%s", db.SanitizeID(ignoredFile))
+
+	// deletedFile (not on disk)
+	deletedFile := filepath.Join(tmpDir, "gone.go")
+	deletedID := fmt.Sprintf("file:%s", db.SanitizeID(deletedFile))
+
+	// existingFile (should be kept)
+	existingFile := filepath.Join(tmpDir, "main.go")
+	os.WriteFile(existingFile, []byte("package main"), 0644)
+	existingID := fmt.Sprintf("file:%s", db.SanitizeID(existingFile))
+
+	// Mock Response
+	mockDB := &MockDB{
+		ReturnData: map[string]interface{}{
+			"SELECT id, path FROM file": []interface{}{
+				map[string]interface{}{"id": ignoredID, "path": ignoredFile},
+				map[string]interface{}{"id": deletedID, "path": deletedFile},
+				map[string]interface{}{"id": existingID, "path": existingFile},
+			},
+		},
+	}
+	mockAI := &MockAI{}
+
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("Error: %v", err)
+	}
+
+	// Verify Deletes
+	deletedIDs := make(map[string]bool)
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.HasPrefix(sql, "DELETE") && !strings.Contains(sql, "file_chunk") {
+			// This is a file record delete (PruneRepo)
+			if strings.Contains(sql, ignoredID) {
+				deletedIDs[ignoredID] = true
+			}
+			if strings.Contains(sql, deletedID) {
+				deletedIDs[deletedID] = true
+			}
+			if strings.Contains(sql, existingID) {
+				t.Errorf("Existing file %s was deleted! SQL: %s", existingID, sql)
+			}
+		}
+	}
+
+	if !deletedIDs[ignoredID] {
+		t.Errorf("Ignored file was not deleted. Calls: %v", mockDB.ExecuteCalls)
+	}
+	if !deletedIDs[deletedID] {
+		t.Errorf("Deleted file was not deleted. Calls: %v", mockDB.ExecuteCalls)
 	}
 }

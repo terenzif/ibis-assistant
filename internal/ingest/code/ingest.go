@@ -37,6 +37,12 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		return fmt.Errorf("AI vectorization is disabled: no Gemini API keys provided (set GEMINI_API_KEY or gemini_keys in config.json)")
 	}
 
+	// Load Ignore Patterns
+	ignorePatterns, err := loadIgnorePatterns(absPath)
+	if err != nil {
+		logger.Warn("Failed to load ignore patterns for %s: %v", absPath, err)
+	}
+
 	// Prepare lookup maps from config
 	supportedExts := make(map[string]bool)
 	if cfg != nil {
@@ -98,6 +104,8 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+
+		// Directory Checks
 		if info.IsDir() {
 			if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
 				return filepath.SkipDir
@@ -105,10 +113,17 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 			if ignoredDirs[info.Name()] {
 				return filepath.SkipDir
 			}
+			if isIgnored(path, absPath, ignorePatterns, true) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
+		// File Checks
 		if ignoredFiles[info.Name()] {
+			return nil
+		}
+		if isIgnored(path, absPath, ignorePatterns, false) {
 			return nil
 		}
 
@@ -138,8 +153,166 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		return ctx.Err()
 	}
 
+	// Prune Phase: Delete files from DB that are no longer present or are ignored
+	if err := pruneRepo(ctx, dbClient, absPath, cfg, ignorePatterns); err != nil {
+		logger.Error("Error pruning obsolete files for %s: %v", absPath, err)
+	}
+
 	logger.Info("Code analysis complete for %s", absPath)
 	return err
+}
+
+func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *config.Config, patterns []string) error {
+	logger.Info("Pruning obsolete files for %s...", repoPath)
+
+	// Fetch all files in this repo from DB
+	separator := string(os.PathSeparator)
+	// Query: path starts with repoPath + separator
+	// Note: We assume repoPath is absolute and normalized by filepath.Abs
+
+	queryPrefix := db.EscapeSQL(repoPath + separator)
+	ql := fmt.Sprintf("SELECT id, path FROM %s WHERE path BEGINSWITH '%s';", schema.TableFile, queryPrefix)
+
+	res, err := dbClient.Execute(ql)
+	if err != nil {
+		return fmt.Errorf("failed to fetch files for pruning: %w", err)
+	}
+
+	rows, ok := res.([]interface{})
+	if !ok {
+		return nil // No results
+	}
+
+	// Config lookups
+	supportedExts := make(map[string]bool)
+	ignoredDirs := make(map[string]bool)
+	ignoredFiles := make(map[string]bool)
+	maxSize := int64(10 * 1024 * 1024)
+
+	if cfg != nil {
+		for _, ext := range cfg.SupportedExtensions {
+			supportedExts[strings.ToLower(ext)] = true
+		}
+		for _, dir := range cfg.IgnoredDirs {
+			ignoredDirs[dir] = true
+		}
+		for _, file := range cfg.IgnoredFiles {
+			ignoredFiles[file] = true
+		}
+		if cfg.MaxFileSize > 0 {
+			maxSize = cfg.MaxFileSize
+		}
+	}
+
+	var toDelete []string
+
+	for _, r := range rows {
+		row, ok := r.(map[string]interface{})
+		if !ok { continue }
+
+		id, _ := row["id"].(string)
+		path, _ := row["path"].(string)
+
+		if id == "" || path == "" { continue }
+
+		shouldDelete := false
+
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			shouldDelete = true // Deleted from disk
+		} else if err == nil {
+			name := info.Name()
+
+			// Check Ignore Patterns
+			if isIgnored(path, repoPath, patterns, info.IsDir()) {
+				logger.Debug("Deleting %s (Ignored Pattern)", path)
+				shouldDelete = true
+			}
+			// Check Config Exclusions
+			if info.IsDir() {
+				// Should not happen as file table contains files, but sanity check
+				if ignoredDirs[name] {
+					shouldDelete = true
+				}
+			} else {
+				if ignoredFiles[name] {
+					shouldDelete = true
+				}
+				if info.Size() > maxSize {
+					shouldDelete = true
+				}
+				ext := strings.ToLower(filepath.Ext(path))
+				if !supportedExts[ext] {
+					logger.Debug("Deleting %s (Unsupported Ext: %s)", path, ext)
+					shouldDelete = true
+				}
+			}
+
+			// Check Parent Directories for Global Ignores (simple check)
+			// If a parent dir is in ignoredDirs, we should delete this file.
+			// isIgnored handles patterns recursively, but ignoredDirs matches only name.
+			// We need to walk up path to check against ignoredDirs?
+			// This might be expensive. But filepath.Walk handles this during ingestion.
+			// For pruning, if we added "node_modules" to ignoredDirs, we need to detect files inside it.
+			// Simple heuristic: check path components?
+			// Let's rely on isIgnored mostly, but for Config.IgnoredDirs:
+			if !shouldDelete && len(ignoredDirs) > 0 {
+				rel, _ := filepath.Rel(repoPath, path)
+				parts := strings.Split(rel, string(os.PathSeparator))
+				for _, part := range parts {
+					if ignoredDirs[part] {
+						logger.Debug("Deleting %s (Ignored Dir Part: %s)", path, part)
+						shouldDelete = true
+						break
+					}
+				}
+			}
+		}
+
+		if shouldDelete {
+			toDelete = append(toDelete, id)
+		}
+	}
+
+	if len(toDelete) == 0 {
+		return nil
+	}
+
+	logger.Info("Deleting %d obsolete files...", len(toDelete))
+
+	// Batch Delete
+	batchSize := 50
+	for i := 0; i < len(toDelete); i += batchSize {
+		end := i + batchSize
+		if end > len(toDelete) {
+			end = len(toDelete)
+		}
+		batch := toDelete[i:end]
+
+		// Construct [id1, id2]
+		var idListBuilder strings.Builder
+		idListBuilder.WriteString("[")
+		for j, id := range batch {
+			if j > 0 { idListBuilder.WriteString(", ") }
+			idListBuilder.WriteString(id)
+		}
+		idListBuilder.WriteString("]")
+		idList := idListBuilder.String()
+
+		// 1. Delete Chunks
+		chunkQL := fmt.Sprintf("DELETE %s WHERE file IN %s;", schema.TableFileChunk, idList)
+		if _, err := dbClient.Execute(chunkQL); err != nil {
+			logger.Warn("Failed to delete chunks: %v", err)
+		}
+
+		// 2. Delete Files
+		fileQL := fmt.Sprintf("DELETE %s;", idList) // DELETE [id1, id2]; works in SurrealDB
+		if _, err := dbClient.Execute(fileQL); err != nil {
+			logger.Warn("Failed to delete files: %v", err)
+		}
+	}
+
+	return nil
 }
 
 func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, path string) error {
