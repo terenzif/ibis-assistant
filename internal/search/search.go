@@ -31,8 +31,9 @@ type Result struct {
 }
 
 type ContextData struct {
-	RelatedIssues []IssueSummary `json:"related_issues"`
-	ExpertAuthors []string       `json:"expert_authors"`
+	RelatedIssues []IssueSummary  `json:"related_issues"`
+	Commits       []CommitSummary `json:"commits"`
+	ExpertAuthors []string        `json:"expert_authors"`
 }
 
 // AskProject performs a hybrid search:
@@ -125,6 +126,7 @@ func (s *Service) AskProject(query string) ([]Result, error) {
 
 			if gCtx != nil {
 				r.Context.RelatedIssues = gCtx.Issues
+				r.Context.Commits = gCtx.Commits
 				// Aggregate Authors (Experts)
 				authorMap := make(map[string]bool)
 				for _, c := range gCtx.Commits {
