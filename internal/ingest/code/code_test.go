@@ -47,7 +47,7 @@ func TestChunkContent(t *testing.T) {
 
 func TestSanitizeID(t *testing.T) {
 	input := "c:\\Users\\Foo\\Code.cs"
-	expected := "c__users_foo_code_cs"
+	expected := "c_users_foo_code_cs"
 	got := db.SanitizeID(input)
 	if got != expected {
 		t.Errorf("Sanitize failed. Got %s, want %s", got, expected)
