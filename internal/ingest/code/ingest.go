@@ -153,7 +153,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		return ctx.Err()
 	}
 
-	// Prune Phase: Delete files from DB that are no longer present or are ignored
+	// Prune Phase: Delete files from DB that are ignored (but NOT if just missing from disk)
 	if err := pruneRepo(ctx, dbClient, absPath, cfg, ignorePatterns); err != nil {
 		logger.Error("Error pruning obsolete files for %s: %v", absPath, err)
 	}
@@ -167,9 +167,6 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 
 	// Fetch all files in this repo from DB
 	separator := string(os.PathSeparator)
-	// Query: path starts with repoPath + separator
-	// Note: We assume repoPath is absolute and normalized by filepath.Abs
-
 	queryPrefix := db.EscapeSQL(repoPath + separator)
 	ql := fmt.Sprintf("SELECT id, path FROM %s WHERE path BEGINSWITH '%s';", schema.TableFile, queryPrefix)
 
@@ -219,7 +216,10 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 
 		info, err := os.Stat(path)
 		if os.IsNotExist(err) {
-			shouldDelete = true // Deleted from disk
+			// FILE MISSING FROM DISK
+			// Strategy: Do NOT delete from DB. Preserve history.
+			// "what about files previously delete so no more into HEAD but still into git history?"
+			shouldDelete = false
 		} else if err == nil {
 			name := info.Name()
 
@@ -230,7 +230,6 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 			}
 			// Check Config Exclusions
 			if info.IsDir() {
-				// Should not happen as file table contains files, but sanity check
 				if ignoredDirs[name] {
 					shouldDelete = true
 				}
@@ -248,14 +247,6 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 				}
 			}
 
-			// Check Parent Directories for Global Ignores (simple check)
-			// If a parent dir is in ignoredDirs, we should delete this file.
-			// isIgnored handles patterns recursively, but ignoredDirs matches only name.
-			// We need to walk up path to check against ignoredDirs?
-			// This might be expensive. But filepath.Walk handles this during ingestion.
-			// For pruning, if we added "node_modules" to ignoredDirs, we need to detect files inside it.
-			// Simple heuristic: check path components?
-			// Let's rely on isIgnored mostly, but for Config.IgnoredDirs:
 			if !shouldDelete && len(ignoredDirs) > 0 {
 				rel, _ := filepath.Rel(repoPath, path)
 				parts := strings.Split(rel, string(os.PathSeparator))
@@ -330,50 +321,73 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 
 	fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(path))
 
-	// 2. Check if changed (using DB check)
-	// Query existing hash
+	// 2. Check if changed / check if version already exists
+
+	// We want to know:
+	// 1. Current hash in DB for this file.
+	// 2. Does this specific hash already exist in file_chunks?
+
+	// Fetch current state
+	var currentDBHash string
 	ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
 	res, err := dbClient.Execute(ql)
 	if err == nil {
-		// Parse response to see if hash matches.
-		// Result is typically []interface{} where each item is map[string]interface{}
 		if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
 			if row, ok := rows[0].(map[string]interface{}); ok {
-				if existingHash, ok := row["hash"].(string); ok && existingHash == hash {
-					return nil // Unchanged
-				}
+				currentDBHash, _ = row["hash"].(string)
 			}
 		}
 	}
 
+	// Optimization: If current DB hash matches disk hash, we are 100% up to date.
+	if currentDBHash == hash {
+		return nil
+	}
+
 	logger.Info("Processing %s...", filepath.Base(path))
 
-	// 3. Update File Node
-	// Update hash
+	// 3. Update File Node (Update pointer to current version)
 	_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, db.EscapeSQL(path)))
 	if err != nil {
 		return fmt.Errorf("db update error: %w", err)
 	}
 
-	// Reset file pointer to beginning for chunking
+	// 4. Check if we already have chunks for this hash (from history or another branch)
+	// We assume if one chunk exists for this hash, they all do.
+	checkQL := fmt.Sprintf("SELECT count() FROM %s WHERE file = %s AND hash = '%s';", schema.TableFileChunk, fileID, hash)
+	checkRes, err := dbClient.Execute(checkQL)
+	if err == nil {
+		// SurrealDB count returns [{ count: N }]
+		if rows, ok := checkRes.([]interface{}); ok && len(rows) > 0 {
+			if row, ok := rows[0].(map[string]interface{}); ok {
+				// Handle float64 or int (json unmarshal default is float64)
+				var count int64
+				if c, ok := row["count"].(float64); ok { count = int64(c) }
+				if c, ok := row["count"].(int64); ok { count = c }
+				if c, ok := row["count"].(int); ok { count = int64(c) }
+
+				if count > 0 {
+					logger.Info("  - Using existing embeddings for hash %s", hash[:8])
+					return nil // Already have embeddings for this version!
+				}
+			}
+		}
+	}
+
+	// 5. Chunk & Embed (New Version)
+	// Reset file pointer
 	if _, err := f.Seek(0, 0); err != nil {
 		return fmt.Errorf("seek error: %w", err)
 	}
 
-	// Chunk & Embed
-	chunks, err := chunkContent(f, 1000) // 1000 chars ~ 250 tokens
+	chunks, err := chunkContent(f, 1000)
 	if err != nil {
 		return fmt.Errorf("chunking error: %w", err)
 	}
 
-	// Delete old chunks
-	// DELETE file_chunk WHERE file = $fileID
-	if _, err := dbClient.Execute(fmt.Sprintf("DELETE %s WHERE file = %s;", schema.TableFileChunk, fileID)); err != nil {
-		return fmt.Errorf("failed to delete old chunks: %w", err)
-	}
+	// NOTE: We do NOT delete old chunks anymore. We keep history.
 
-	// Batching Logic (Gemini limit is 100 per batch)
-	// We use a smaller batch size to avoid hitting RPM limits instantly if items count as requests.
+	// Batching Logic
 	batchSize := 10
 	for i := 0; i < len(chunks); i += batchSize {
 		end := i + batchSize
@@ -382,7 +396,6 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 		}
 		batch := chunks[i:end]
 
-		// Filter empty
 		var validBatch []string
 		var validIndices []int
 		for k, c := range batch {
@@ -411,10 +424,19 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			chunkContentStr := validBatch[k]
 
 			vecJson, _ := json.Marshal(vec)
-			chunkID := fmt.Sprintf("%s:%s_%d", schema.TableFileChunk, db.SanitizeID(path), originalIndex)
+			// Chunk ID needs to include hash or be unique per version to avoid collision?
+			// Old ID: file:path_index.
+			// New ID: file:path_hash_index?
+			// If we use file:path_index, we overwrite old version chunks!
+			// YES, we must change Chunk ID to include Hash.
+			// sanitize(path) is stable.
+			// We append hash.
 
-			ql := fmt.Sprintf("UPDATE %s SET file = %s, content = '%s', embedding = %s;",
-				chunkID, fileID, db.EscapeSQL(chunkContentStr), string(vecJson))
+			chunkID := fmt.Sprintf("%s:%s_%s_%d", schema.TableFileChunk, db.SanitizeID(path), hash, originalIndex)
+
+			// We also store `hash` field for filtering.
+			ql := fmt.Sprintf("UPDATE %s SET file = %s, hash = '%s', content = '%s', embedding = %s;",
+				chunkID, fileID, hash, db.EscapeSQL(chunkContentStr), string(vecJson))
 
 			if _, err := dbClient.Execute(ql); err != nil {
 				logger.Error("Failed to update chunk %s: %v", chunkID, err)

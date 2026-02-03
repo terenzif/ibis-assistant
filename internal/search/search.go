@@ -25,7 +25,7 @@ type Result struct {
 	ID        string      `json:"code_chunk_id"`
 	Path      string      `json:"file_path"`
 	Score     float64     `json:"relevance_score"`
-	IsCurrent bool        `json:"is_current"` // Placeholder for HEAD check
+	IsCurrent bool        `json:"is_current"` // True if this chunk belongs to the current version of the file
 	Context   ContextData `json:"context"`
 	Content   string      `json:"content,omitempty"` // Keeping content for debug/display
 }
@@ -47,11 +47,14 @@ func (s *Service) AskProject(query string) ([]Result, error) {
 	vecJson, _ := json.Marshal(vec)
 
 	// 2. Vector Search (Time-Decayed)
+	// We select `hash` from chunk and `file.hash` to compare for currency.
 	ql := fmt.Sprintf(`
 		SELECT 
 			id,
 			file.path as path, 
-			content, 
+			content,
+			hash,
+			file.hash as current_hash,
 			(vector::similarity::cosine(embedding, %s) * 0.7) +
 			(math::max(0, 1 - (time::now() - (created_at OR time::now())).days / 365) * 0.3)
 			as score
@@ -66,10 +69,12 @@ func (s *Service) AskProject(query string) ([]Result, error) {
 
 	// Parse chunks
 	type ChunkResult struct {
-		ID      string  `json:"id"`
-		Path    string  `json:"path"`
-		Content string  `json:"content"`
-		Score   float64 `json:"score"`
+		ID          string  `json:"id"`
+		Path        string  `json:"path"`
+		Content     string  `json:"content"`
+		Score       float64 `json:"score"`
+		Hash        string  `json:"hash"`
+		CurrentHash string  `json:"current_hash"`
 	}
 
 	var chunks []ChunkResult
@@ -99,12 +104,19 @@ func (s *Service) AskProject(query string) ([]Result, error) {
 	var finalResults []Result
 
 	for _, c := range chunks {
+		isCurrent := (c.Hash == c.CurrentHash)
+		// If both are empty (legacy data), assume current? Or false?
+		// If current_hash is set but chunk hash is empty -> false (legacy chunk vs new file state).
+		if c.CurrentHash == "" {
+			isCurrent = true // Legacy/Fallback
+		}
+
 		r := Result{
 			ID:        c.ID,
 			Path:      c.Path,
 			Score:     c.Score,
 			Content:   c.Content,
-			IsCurrent: true, // Logic to check if file deleted in HEAD is hard without checking FS or Git. Assume true for now.
+			IsCurrent: isCurrent,
 			Context: ContextData{
 				RelatedIssues: []IssueSummary{},
 				ExpertAuthors: []string{},

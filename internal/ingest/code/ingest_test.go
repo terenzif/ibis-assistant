@@ -2,6 +2,8 @@ package code
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -321,7 +323,74 @@ func TestIngestCodebase_Pruning(t *testing.T) {
 	if !deletedIDs[ignoredID] {
 		t.Errorf("Ignored file was not deleted. Calls: %v", mockDB.ExecuteCalls)
 	}
-	if !deletedIDs[deletedID] {
-		t.Errorf("Deleted file was not deleted. Calls: %v", mockDB.ExecuteCalls)
+	if deletedIDs[deletedID] {
+		t.Errorf("Deleted file (physically missing) WAS deleted from DB! It should be preserved.")
 	}
+}
+
+func TestIngestCodebase_Versioning(t *testing.T) {
+	// Scenario: File changes content V1 -> V2 -> V1
+	// We want to ensure V1 embeddings are not regenerated when we switch back.
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "main.go")
+	fileID := fmt.Sprintf("file:%s", db.SanitizeID(path))
+
+	// Helper to set content and run ingest
+	runIngest := func(content string, mockAI *MockAI, mockDB *MockDB) {
+		os.WriteFile(path, []byte(content), 0644)
+		// We need to clear ExecuteCalls or handle accumulation?
+		// Better to use new mock instances or reset
+		IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, config.Load())
+	}
+
+	// 1. Ingest V1
+	mockDB := &MockDB{ReturnData: map[string]interface{}{}}
+	mockAI := &MockAI{}
+	runIngest("version1", mockAI, mockDB)
+
+	if len(mockAI.BatchEmbedCalls) != 1 {
+		t.Errorf("Expected 1 embedding call for V1, got %d", len(mockAI.BatchEmbedCalls))
+	}
+
+	// 2. Ingest V2 (Different content)
+	// DB returns "hash mismatch", so it updates.
+	// But we mock DB to say "Count=0" for new hash
+	// So it embeds.
+	mockDB = &MockDB{ReturnData: map[string]interface{}{}} // Reset
+	mockAI = &MockAI{}
+	runIngest("version2", mockAI, mockDB)
+
+	if len(mockAI.BatchEmbedCalls) != 1 {
+		t.Errorf("Expected 1 embedding call for V2, got %d", len(mockAI.BatchEmbedCalls))
+	}
+
+	// 3. Ingest V1 again (Switch back)
+	// DB has V2 hash.
+	// Ingest calculates V1 hash.
+	// Queries "SELECT count() ... WHERE hash=V1_HASH".
+	// WE NEED TO MOCK THIS RETURN to > 0
+
+	v1Hash, _ := getHash("version1")
+	countQuery := fmt.Sprintf("SELECT count() FROM file_chunk WHERE file = %s AND hash = '%s';", fileID, v1Hash)
+
+	mockDB = &MockDB{
+		ReturnData: map[string]interface{}{
+			countQuery: []interface{}{
+				map[string]interface{}{"count": 5}, // Assume 5 chunks exist
+			},
+		},
+	}
+	mockAI = &MockAI{}
+	runIngest("version1", mockAI, mockDB)
+
+	if len(mockAI.BatchEmbedCalls) != 0 {
+		t.Errorf("Expected 0 embedding calls for returning to V1 (Cache Hit), got %d", len(mockAI.BatchEmbedCalls))
+	}
+}
+
+func getHash(s string) (string, error) {
+	h := sha256.New()
+	h.Write([]byte(s))
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
