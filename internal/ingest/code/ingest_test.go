@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 )
 
@@ -88,6 +89,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		},
 	}
 	mockAI := &MockAI{}
+	cfg := config.Load()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -95,7 +97,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		mockDB.ExecuteCalls = nil
 		mockAI.BatchEmbedCalls = nil
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
 			b.Fatalf("Error: %v", err)
 		}
@@ -118,6 +120,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 
 	expectedHash := getFileHashHelper(filePath)
 	fileID := fmt.Sprintf("file:%s", db.SanitizeID(filePath))
+	cfg := config.Load()
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
 		mockDB := &MockDB{
@@ -129,7 +132,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
@@ -149,7 +152,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
@@ -166,4 +169,100 @@ func TestIngestCodebase_Delta(t *testing.T) {
 			t.Errorf("Expected UPDATE file_chunk statement, but not found. Calls: %v", mockDB.ExecuteCalls)
 		}
 	})
+}
+
+func TestIngestCodebase_Exclusions(t *testing.T) {
+	// Setup temp repo
+	tmpDir, err := os.MkdirTemp("", "repo_exclusions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create structure:
+	// /main.go          (Supported)
+	// /ignored_dir/     (Ignored Directory)
+	//   /ignored.go
+	// /package-lock.json(Ignored File)
+	// /large.go         (Too large)
+	// /other.txt        (Unsupported extension)
+
+	// 1. Supported File
+	mainGo := filepath.Join(tmpDir, "main.go")
+	os.WriteFile(mainGo, []byte("package main"), 0644)
+
+	// 2. Ignored Directory
+	ignoredDir := filepath.Join(tmpDir, "node_modules")
+	os.Mkdir(ignoredDir, 0755)
+	os.WriteFile(filepath.Join(ignoredDir, "lib.js"), []byte("console.log()"), 0644)
+
+	// 3. Ignored File
+	lockFile := filepath.Join(tmpDir, "package-lock.json")
+	os.WriteFile(lockFile, []byte("{}"), 0644)
+
+	// 4. Large File (limit is small for test)
+	largeFile := filepath.Join(tmpDir, "large.go")
+	os.WriteFile(largeFile, []byte(strings.Repeat("a", 200)), 0644)
+
+	// 5. Unsupported Extension
+	txtFile := filepath.Join(tmpDir, "readme.txt")
+	os.WriteFile(txtFile, []byte("readme"), 0644)
+
+	// Setup Config
+	cfg := &config.Config{
+		MaxFileSize:         100, // 100 bytes limit
+		IgnoredDirs:         []string{"node_modules"},
+		IgnoredFiles:        []string{"package-lock.json"},
+		SupportedExtensions: []string{".go", ".js"},
+	}
+
+	mockDB := &MockDB{ReturnData: map[string]interface{}{}}
+	mockAI := &MockAI{}
+
+	err = IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("IngestCodebase failed: %v", err)
+	}
+
+	// Analyze Calls
+	// We expect processFile to be called only for main.go
+	// Since IngestCodebase calls processFile which calls DB, we can check DB calls.
+	// But MockDB only tracks Execute calls.
+	// processFile does: "SELECT hash FROM file:..."
+	// We can check which file IDs were queried.
+
+	// Let's look at the arguments passed to processFile. Wait, we can't seeing that easily.
+	// But we can check if DB was touched for the excluded files.
+
+	// Helper to check if a path was processed
+	wasProcessed := func(path string) bool {
+		sanitized := db.SanitizeID(path)
+		target := fmt.Sprintf("file:%s", sanitized)
+		for _, sql := range mockDB.ExecuteCalls {
+			if strings.Contains(sql, target) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !wasProcessed(mainGo) {
+		t.Errorf("main.go should have been processed")
+	}
+
+	if wasProcessed(filepath.Join(ignoredDir, "lib.js")) {
+		t.Errorf("node_modules/lib.js should have been ignored (Ignored Dir)")
+	}
+
+	if wasProcessed(lockFile) {
+		t.Errorf("package-lock.json should have been ignored (Ignored File)")
+	}
+
+	if wasProcessed(largeFile) {
+		t.Errorf("large.go should have been ignored (Too Large)")
+	}
+
+	if wasProcessed(txtFile) {
+		t.Errorf("readme.txt should have been ignored (Unsupported Ext)")
+	}
 }

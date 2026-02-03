@@ -11,24 +11,28 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	Port          int               `json:"port"`
-	Mode          string            `json:"mode"` // sse, stdio
-	DBUrl         string            `json:"db_url"`
-	DBNamespace   string            `json:"db_namespace"`
-	DBDatabase    string            `json:"db_database"`
-	DBUser        string            `json:"db_user"`
-	DBPassword    string            `json:"db_password"`
-	GeminiKeys    []GeminiKeyConfig `json:"gemini_keys"`
-	GeminiDefaultRPM int            `json:"gemini_rpm"`
-	RedmineURL    string            `json:"redmine_url"`
-	RedmineKey    string            `json:"redmine_key"`
-	DiscoveryRoot string            `json:"discovery_root"`
-	AutoScan      bool     `json:"auto_scan"`
-	GitRepos      []string `json:"git_repos"` // Manual list override
-	LogFile       string   `json:"log_file"`
-	LogLevel      string   `json:"log_level"` // DEBUG, INFO, WARN, ERROR
-	ConfigLoaded  bool     `json:"-"`         // True if a config file was successfully loaded
-	ConfigPath    string   `json:"-"`         // Path to the file that was loaded
+	Port                int               `json:"port"`
+	Mode                string            `json:"mode"` // sse, stdio
+	DBUrl               string            `json:"db_url"`
+	DBNamespace         string            `json:"db_namespace"`
+	DBDatabase          string            `json:"db_database"`
+	DBUser              string            `json:"db_user"`
+	DBPassword          string            `json:"db_password"`
+	GeminiKeys          []GeminiKeyConfig `json:"gemini_keys"`
+	GeminiDefaultRPM    int               `json:"gemini_rpm"`
+	RedmineURL          string            `json:"redmine_url"`
+	RedmineKey          string            `json:"redmine_key"`
+	DiscoveryRoot       string            `json:"discovery_root"`
+	AutoScan            bool              `json:"auto_scan"`
+	GitRepos            []string          `json:"git_repos"` // Manual list override
+	LogFile             string            `json:"log_file"`
+	LogLevel            string            `json:"log_level"` // DEBUG, INFO, WARN, ERROR
+	MaxFileSize         int64             `json:"max_file_size"`
+	IgnoredDirs         []string          `json:"ignored_dirs"`
+	IgnoredFiles        []string          `json:"ignored_files"`
+	SupportedExtensions []string          `json:"supported_extensions"`
+	ConfigLoaded        bool              `json:"-"` // True if a config file was successfully loaded
+	ConfigPath          string            `json:"-"` // Path to the file that was loaded
 }
 
 type GeminiKeyConfig struct {
@@ -55,6 +59,19 @@ func Load(paths ...string) *Config {
 		DiscoveryRoot:    ".",
 		AutoScan:         true,
 		LogLevel:         "INFO",
+		MaxFileSize:      10 * 1024 * 1024, // 10MB
+		IgnoredDirs: []string{
+			".git", "node_modules", "bin", "obj", "vendor",
+			".idea", ".vscode", "dist", "build", "coverage", "target",
+		},
+		IgnoredFiles: []string{
+			"package-lock.json", "yarn.lock", "go.sum", "go.mod",
+			"Gemfile.lock", "pnpm-lock.yaml",
+		},
+		SupportedExtensions: []string{
+			".go", ".py", ".js", ".ts", ".md", ".cs",
+			".java", ".cpp", ".h", ".c", ".html", ".css", ".sql",
+		},
 	}
 
 	// 2. Candidate paths
@@ -76,7 +93,7 @@ func Load(paths ...string) *Config {
 			if err := decoder.Decode(cfg); err == nil {
 				cfg.ConfigLoaded = true
 				cfg.ConfigPath, _ = filepath.Abs(p)
-				break 
+				break
 			} else {
 				// We found a file but it's invalid.
 				// We print to stderr because logger isn't initialized yet.

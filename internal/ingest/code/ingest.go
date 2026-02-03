@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
@@ -23,15 +24,8 @@ type AIClient interface {
 	IsFunctional() bool
 }
 
-// SupportedExtensions filters which files we analyze
-var SupportedExtensions = map[string]bool{
-	".go": true, ".py": true, ".js": true, ".ts": true, ".md": true, 
-	".cs": true, ".java": true, ".cpp": true, ".h": true, ".c": true,
-	".html": true, ".css": true, ".sql": true,
-}
-
 // IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient, repoPath string) error {
+func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient, repoPath string, cfg *config.Config) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -41,6 +35,33 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 
 	if aiClient == nil || !aiClient.IsFunctional() {
 		return fmt.Errorf("AI vectorization is disabled: no Gemini API keys provided (set GEMINI_API_KEY or gemini_keys in config.json)")
+	}
+
+	// Prepare lookup maps from config
+	supportedExts := make(map[string]bool)
+	if cfg != nil {
+		for _, ext := range cfg.SupportedExtensions {
+			supportedExts[strings.ToLower(ext)] = true
+		}
+	}
+
+	ignoredDirs := make(map[string]bool)
+	if cfg != nil {
+		for _, dir := range cfg.IgnoredDirs {
+			ignoredDirs[dir] = true
+		}
+	}
+
+	ignoredFiles := make(map[string]bool)
+	if cfg != nil {
+		for _, file := range cfg.IgnoredFiles {
+			ignoredFiles[file] = true
+		}
+	}
+
+	maxSize := int64(10 * 1024 * 1024) // Default 10MB
+	if cfg != nil && cfg.MaxFileSize > 0 {
+		maxSize = cfg.MaxFileSize
 	}
 
 	pathsChan := make(chan string, 1000)
@@ -78,14 +99,26 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 			return ctx.Err()
 		}
 		if info.IsDir() {
-			if strings.HasPrefix(info.Name(), ".") || info.Name() == "node_modules" || info.Name() == "bin" || info.Name() == "obj" {
+			if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
+				return filepath.SkipDir
+			}
+			if ignoredDirs[info.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
+		if ignoredFiles[info.Name()] {
+			return nil
+		}
+
 		ext := strings.ToLower(filepath.Ext(path))
-		if !SupportedExtensions[ext] {
+		if !supportedExts[ext] {
+			return nil
+		}
+
+		if info.Size() > maxSize {
+			logger.Debug("Skipping large file: %s (%d bytes)", path, info.Size())
 			return nil
 		}
 
