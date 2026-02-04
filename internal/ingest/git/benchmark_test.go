@@ -67,7 +67,7 @@ func BenchmarkIngestStartup(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		err := IngestRepo(mockDB, mockRedmine, repoDir)
+		err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
 		if err != nil {
 			b.Fatalf("IngestRepo failed: %v", err)
 		}

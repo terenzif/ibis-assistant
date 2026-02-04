@@ -275,7 +275,7 @@ func runServer(ctx context.Context) {
 					}
 
 					logger.Info("Background: Indexing Git history for %s...", r)
-					if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
+					if err := git.IngestRepo(dbClient, redmineClient, r, cfg.RedmineConcurrency); err != nil {
 						logger.Error("Background: Git ingestion error for %s: %v", r, err)
 					}
 				}()
@@ -323,7 +323,7 @@ func runServer(ctx context.Context) {
 
 		var output strings.Builder
 		for _, r := range targets {
-			if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
+			if err := git.IngestRepo(dbClient, redmineClient, r, cfg.RedmineConcurrency); err != nil {
 				output.WriteString(fmt.Sprintf("Error ingesting %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully ingested %s\n", r))

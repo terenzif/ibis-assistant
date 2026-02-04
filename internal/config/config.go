@@ -22,6 +22,7 @@ type Config struct {
 	GeminiDefaultRPM    int               `json:"gemini_rpm"`
 	RedmineURL          string            `json:"redmine_url"`
 	RedmineKey          string            `json:"redmine_key"`
+	RedmineConcurrency  int               `json:"redmine_concurrency"`
 	DiscoveryRoot       string            `json:"discovery_root"`
 	AutoScan            bool              `json:"auto_scan"`
 	GitRepos            []string          `json:"git_repos"` // Manual list override
@@ -56,6 +57,7 @@ func Load(paths ...string) *Config {
 		DBUser:           "root",
 		DBPassword:       "root",
 		GeminiDefaultRPM: 100,
+		RedmineConcurrency: 10,
 		DiscoveryRoot:    ".",
 		AutoScan:         true,
 		LogLevel:         "INFO",
@@ -161,6 +163,11 @@ func Load(paths ...string) *Config {
 	}
 	if v := os.Getenv("REDMINE_API_KEY"); v != "" {
 		cfg.RedmineKey = v
+	}
+	if v := os.Getenv("REDMINE_CONCURRENCY"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.RedmineConcurrency = p
+		}
 	}
 
 	// Discovery
