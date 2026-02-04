@@ -72,8 +72,12 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	var wg sync.WaitGroup
 
 	// Start Worker Pool
-	// 20 workers is a reasonable default for concurrent IO + DB + AI wait
-	numWorkers := 20
+	// Default to a safer concurrency level to avoid DB overload
+	numWorkers := 5
+	if cfg != nil && cfg.CodeConcurrency > 0 {
+		numWorkers = cfg.CodeConcurrency
+	}
+
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
