@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deckonline/knowledge_mcp/internal/ai"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
@@ -40,11 +41,26 @@ func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 
 func (m *MockDB) Close() {}
 
-// MockAI implements Embedder
-type MockAI struct{}
+// MockAI implements AIProvider
+type MockAI struct {
+	GenerateFunc func([]ai.Content) (ai.Candidate, error)
+}
 
 func (m *MockAI) EmbedText(ctx context.Context, text string) ([]float32, error) {
 	return []float32{0.1, 0.2, 0.3}, nil
+}
+
+func (m *MockAI) GenerateContent(ctx context.Context, contents []ai.Content, config ai.GenerationConfig) (ai.Candidate, error) {
+	if m.GenerateFunc != nil {
+		return m.GenerateFunc(contents)
+	}
+	// Default response
+	return ai.Candidate{
+		Content: ai.Content{
+			Parts: []ai.Part{{Text: "FINAL ANSWER: Mocked Default"}},
+			Role:  "model",
+		},
+	}, nil
 }
 
 func TestAskProject(t *testing.T) {

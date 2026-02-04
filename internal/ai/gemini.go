@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	EmbeddingModel = "models/gemini-embedding-001"
-	TableKeyUsage  = "key_usage"
+	EmbeddingModel  = "models/gemini-embedding-001"
+	GenerationModel = "models/gemini-1.5-flash"
+	TableKeyUsage   = "key_usage"
 )
 
 var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -35,10 +36,24 @@ type EmbedResult struct {
 	Error      error
 }
 
+// GenerateJob represents a work item for content generation
+type GenerateJob struct {
+	Contents   []Content
+	Config     GenerationConfig
+	ResultChan chan GenerateResult
+}
+
+// GenerateResult represents the outcome of a generation job
+type GenerateResult struct {
+	Response Candidate
+	Error    error
+}
+
 // Client abstracts interaction with the AI Provider using a Worker Pool
 type Client struct {
-	jobQueue chan EmbedJob
-	dbClient db.Executor
+	jobQueue      chan EmbedJob
+	generateQueue chan GenerateJob
+	dbClient      db.Executor
 	workers  []*worker
 	wg       sync.WaitGroup
 	ctx      context.Context
@@ -89,15 +104,17 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 	// Create a buffered channel to hold pending jobs
 	// Buffer size can be adjusted, keeping it reasonable to prevent OOM but allow burst
 	jobQueue := make(chan EmbedJob, 100)
+	generateQueue := make(chan GenerateJob, 100)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &Client{
-		jobQueue: jobQueue,
-		dbClient: dbClient,
-		workers:  make([]*worker, 0, len(apiKeys)),
-		ctx:      ctx,
-		cancel:   cancel,
+		jobQueue:      jobQueue,
+		generateQueue: generateQueue,
+		dbClient:      dbClient,
+		workers:       make([]*worker, 0, len(apiKeys)),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	for _, cfg := range apiKeys {
@@ -106,7 +123,7 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 		c.wg.Add(1)
 		go func(w *worker) {
 			defer c.wg.Done()
-			w.startLoop(jobQueue, c.ctx)
+			w.startLoop(jobQueue, generateQueue, c.ctx)
 		}(w)
 	}
 
@@ -124,9 +141,13 @@ func (c *Client) Stop() {
 	}
 	if c.jobQueue != nil {
 		close(c.jobQueue)
-		c.wg.Wait()
 		c.jobQueue = nil
 	}
+	if c.generateQueue != nil {
+		close(c.generateQueue)
+		c.generateQueue = nil
+	}
+	c.wg.Wait()
 }
 
 // EmbedText generates a vector embedding for the given text
@@ -177,6 +198,37 @@ func (c *Client) BatchEmbedText(ctx context.Context, texts []string) ([][]float3
 	}
 }
 
+// GenerateContent generates text content using the AI model
+func (c *Client) GenerateContent(ctx context.Context, contents []Content, config GenerationConfig) (Candidate, error) {
+	if c.generateQueue == nil {
+		return Candidate{}, fmt.Errorf("AI client not initialized or no keys available")
+	}
+
+	resultChan := make(chan GenerateResult, 1)
+	job := GenerateJob{
+		Contents:   contents,
+		Config:     config,
+		ResultChan: resultChan,
+	}
+
+	select {
+	case c.generateQueue <- job:
+	case <-ctx.Done():
+		return Candidate{}, ctx.Err()
+	case <-c.ctx.Done():
+		return Candidate{}, c.ctx.Err()
+	}
+
+	select {
+	case result := <-resultChan:
+		return result.Response, result.Error
+	case <-ctx.Done():
+		return Candidate{}, ctx.Err()
+	case <-c.ctx.Done():
+		return Candidate{}, c.ctx.Err()
+	}
+}
+
 // --- Worker Implementation ---
 
 func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
@@ -223,18 +275,23 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 	return w
 }
 
-func (w *worker) startLoop(queue <-chan EmbedJob, ctx context.Context) {
+func (w *worker) startLoop(embedQueue <-chan EmbedJob, genQueue <-chan GenerateJob, ctx context.Context) {
 	logger.Info("AI Worker started for key ...%s", w.shortKey())
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case job, ok := <-queue:
+		case job, ok := <-embedQueue:
 			if !ok {
 				return
 			}
 			w.processJob(job, ctx)
+		case job, ok := <-genQueue:
+			if !ok {
+				return
+			}
+			w.processGenerateJob(job, ctx)
 		}
 	}
 }
@@ -280,6 +337,56 @@ func (w *worker) processJob(job EmbedJob, ctx context.Context) {
 	job.ResultChan <- EmbedResult{
 		Embeddings: embeddings,
 		Error:      err,
+	}
+}
+
+func (w *worker) processGenerateJob(job GenerateJob, ctx context.Context) {
+	// 1. Estimate Token Cost
+	texts := []string{}
+	for _, c := range job.Contents {
+		for _, p := range c.Parts {
+			texts = append(texts, p.Text)
+		}
+	}
+	w.waitRateLimits(texts, ctx)
+
+	// 2. Execute Request
+	var candidate Candidate
+	var err error
+	maxRetries := 3
+
+	for i := 0; i <= maxRetries; i++ {
+		// Check context before request
+		if ctx.Err() != nil {
+			err = ctx.Err()
+			break
+		}
+
+		var retryDelay time.Duration
+		candidate, retryDelay, err = w.doGenerate(job.Contents, job.Config)
+
+		if err == nil {
+			break
+		}
+
+		if retryDelay > 0 {
+			// Rate limit hit
+			logger.Warn("AI Worker (...%s) rate limited. Waiting %v...", w.shortKey(), retryDelay)
+			if sleepErr := sleepContext(ctx, retryDelay); sleepErr != nil {
+				err = sleepErr
+				break
+			}
+			continue
+		}
+
+		// Non-retriable error
+		break
+	}
+
+	// 3. Send Result
+	job.ResultChan <- GenerateResult{
+		Response: candidate,
+		Error:    err,
 	}
 }
 
@@ -498,6 +605,54 @@ func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
 	return nil, 0, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
 }
 
+// doGenerate performs the actual HTTP request. Returns (result, retryDelay, error).
+func (w *worker) doGenerate(contents []Content, config GenerationConfig) (Candidate, time.Duration, error) {
+	logger.Debug("AI: Worker ...%s processing generation", w.shortKey())
+
+	url := fmt.Sprintf("%s/%s:generateContent?key=%s", BaseURL, GenerationModel, w.apiKey)
+
+	payload := GenerateContentRequest{
+		Contents:         contents,
+		GenerationConfig: config,
+	}
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return Candidate{}, 0, err
+	}
+
+	start := time.Now()
+	resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return Candidate{}, 0, err
+	}
+	defer resp.Body.Close()
+	duration := time.Since(start)
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 200 {
+		logger.Debug("AI: Worker ...%s generation success (%v)", w.shortKey(), duration)
+		var result GenerateContentResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return Candidate{}, 0, fmt.Errorf("parsing error: %w", err)
+		}
+		if len(result.Candidates) == 0 {
+			return Candidate{}, 0, fmt.Errorf("no candidates returned")
+		}
+		return result.Candidates[0], 0, nil
+	}
+
+	if resp.StatusCode == 429 {
+		retryDelay := parseRetryDelay(body)
+		if retryDelay == 0 {
+			retryDelay = 5 * time.Second
+		}
+		return Candidate{}, retryDelay, fmt.Errorf("rate limit exceeded")
+	}
+
+	return Candidate{}, 0, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
+}
+
 // --- DTOs ---
 
 type EmbeddingRequest struct {
@@ -505,6 +660,7 @@ type EmbeddingRequest struct {
 	Content Content  `json:"content"`
 }
 type Content struct {
+	Role  string `json:"role,omitempty"`
 	Parts []Part `json:"parts"`
 }
 type Part struct {
@@ -523,6 +679,25 @@ type BatchEmbedResponse struct {
 	Embeddings []struct {
 		Values []float32 `json:"values"`
 	} `json:"embeddings"`
+}
+
+type GenerateContentRequest struct {
+	Contents         []Content        `json:"contents"`
+	GenerationConfig GenerationConfig `json:"generationConfig,omitempty"`
+}
+
+type GenerationConfig struct {
+	Temperature float64 `json:"temperature,omitempty"`
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+}
+
+type GenerateContentResponse struct {
+	Candidates []Candidate `json:"candidates"`
+}
+
+type Candidate struct {
+	Content      Content `json:"content"`
+	FinishReason string  `json:"finishReason"`
 }
 
 type ErrorResponse struct {

@@ -138,6 +138,7 @@ func TestTPMTokenBucket(t *testing.T) {
 
 	// We'll rely on the estimation logic which we plan to change to len/3.
 	// 60 chars -> 20 tokens.
+	// 60 chars -> 20 tokens.
 	text60 := strings.Repeat("a", 60)
 
 	client := NewClient([]KeyConfig{
@@ -216,5 +217,48 @@ func TestTPMTokenBucket(t *testing.T) {
 
 	if durEat < 2*time.Second {
 		t.Errorf("Rate limit failed! Should have waited > 2s, but took %v", durEat)
+	}
+}
+
+func TestGenerateContent(t *testing.T) {
+	// Mock Server for Chat
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "generateContent") {
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{
+			"candidates": [
+				{
+					"content": {
+						"parts": [
+							{"text": "Hello world"}
+						],
+						"role": "model"
+					},
+					"finishReason": "STOP"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	originalBaseURL := BaseURL
+	BaseURL = server.URL
+	defer func() { BaseURL = originalBaseURL }()
+
+	client := NewClient([]KeyConfig{
+		{Key: "keyGen", RPM: 60},
+	}, &MockDB{})
+
+	ctx := context.Background()
+	resp, err := client.GenerateContent(ctx, []Content{{Parts: []Part{{Text: "Hi"}}}}, GenerationConfig{})
+	if err != nil {
+		t.Fatalf("GenerateContent failed: %v", err)
+	}
+
+	if len(resp.Content.Parts) == 0 || resp.Content.Parts[0].Text != "Hello world" {
+		t.Errorf("Unexpected response: %+v", resp)
 	}
 }
