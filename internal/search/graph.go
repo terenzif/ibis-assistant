@@ -15,6 +15,7 @@ type GraphContext struct {
 }
 
 type CommitSummary struct {
+	ID      string  `json:"id"`
 	Hash    string  `json:"hash"`
 	Message string  `json:"message"`
 	Author  string  `json:"author"`
@@ -142,6 +143,7 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 		}
 
 		c := CommitSummary{
+			ID:      tc.ID,
 			Hash:    tc.Hash,
 			Message: tc.Message,
 			Date:    tc.Date,
