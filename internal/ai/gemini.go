@@ -2,6 +2,7 @@ package ai
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -40,6 +41,8 @@ type Client struct {
 	dbClient db.Executor
 	workers  []*worker
 	wg       sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 type KeyConfig struct {
@@ -87,10 +90,14 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 	// Buffer size can be adjusted, keeping it reasonable to prevent OOM but allow burst
 	jobQueue := make(chan EmbedJob, 100)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	c := &Client{
 		jobQueue: jobQueue,
 		dbClient: dbClient,
 		workers:  make([]*worker, 0, len(apiKeys)),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	for _, cfg := range apiKeys {
@@ -99,7 +106,7 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 		c.wg.Add(1)
 		go func(w *worker) {
 			defer c.wg.Done()
-			w.startLoop(jobQueue)
+			w.startLoop(jobQueue, c.ctx)
 		}(w)
 	}
 
@@ -112,6 +119,9 @@ func (c *Client) IsFunctional() bool {
 
 // Stop gracefully shuts down the AI client and waits for workers to finish
 func (c *Client) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
 	if c.jobQueue != nil {
 		close(c.jobQueue)
 		c.wg.Wait()
@@ -120,8 +130,8 @@ func (c *Client) Stop() {
 }
 
 // EmbedText generates a vector embedding for the given text
-func (c *Client) EmbedText(text string) ([]float32, error) {
-	res, err := c.BatchEmbedText([]string{text})
+func (c *Client) EmbedText(ctx context.Context, text string) ([]float32, error) {
+	res, err := c.BatchEmbedText(ctx, []string{text})
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +142,7 @@ func (c *Client) EmbedText(text string) ([]float32, error) {
 }
 
 // BatchEmbedText submits a batch of texts to the worker pool and waits for the result
-func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
+func (c *Client) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
 	if c.jobQueue == nil {
 		return nil, fmt.Errorf("AI client not initialized or no keys available")
 	}
@@ -148,11 +158,23 @@ func (c *Client) BatchEmbedText(texts []string) ([][]float32, error) {
 	}
 
 	// Submit job
-	c.jobQueue <- job
+	select {
+	case c.jobQueue <- job:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
+	}
 
 	// Wait for result
-	result := <-resultChan
-	return result.Embeddings, result.Error
+	select {
+	case result := <-resultChan:
+		return result.Embeddings, result.Error
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
+	}
 }
 
 // --- Worker Implementation ---
@@ -201,33 +223,38 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 	return w
 }
 
-func (w *worker) startLoop(queue <-chan EmbedJob) {
+func (w *worker) startLoop(queue <-chan EmbedJob, ctx context.Context) {
 	logger.Info("AI Worker started for key ...%s", w.shortKey())
 
-	for job := range queue {
-		w.processJob(job)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-queue:
+			if !ok {
+				return
+			}
+			w.processJob(job, ctx)
+		}
 	}
 }
 
-func (w *worker) processJob(job EmbedJob) {
+func (w *worker) processJob(job EmbedJob, ctx context.Context) {
 	// 1. Rate Limiting Logic
-	w.waitRateLimits(job.Texts)
+	w.waitRateLimits(job.Texts, ctx)
 
 	// 2. Execute Request
-	// Retry logic is simplified here: we retry only on 429 internally in the loop?
-	// Or we just fail and let the caller handle?
-	// The original code had complex retry logic searching for other workers.
-	// In a worker pool, if *this* worker fails with 429, we should probably backoff and retry
-	// inside this worker, because putting it back in the queue might just fail again if all keys are busy.
-	// However, if one key is bad, we don't want to block the job forever if others are free.
-	// But simply: "Up to n keys * 100 rpm" implies each key manages its own stream.
-	// We will implement a simple retry loop for 429s on this key.
-
 	var embeddings [][]float32
 	var err error
 	maxRetries := 3
 
 	for i := 0; i <= maxRetries; i++ {
+		// Check context before request
+		if ctx.Err() != nil {
+			err = ctx.Err()
+			break
+		}
+
 		var retryDelay time.Duration
 		embeddings, retryDelay, err = w.doEmbed(job.Texts)
 
@@ -238,7 +265,10 @@ func (w *worker) processJob(job EmbedJob) {
 		if retryDelay > 0 {
 			// Rate limit hit
 			logger.Warn("AI Worker (...%s) rate limited. Waiting %v...", w.shortKey(), retryDelay)
-			time.Sleep(retryDelay)
+			if sleepErr := sleepContext(ctx, retryDelay); sleepErr != nil {
+				err = sleepErr
+				break
+			}
 			continue
 		}
 
@@ -253,7 +283,7 @@ func (w *worker) processJob(job EmbedJob) {
 	}
 }
 
-func (w *worker) waitRateLimits(texts []string) {
+func (w *worker) waitRateLimits(texts []string, ctx context.Context) {
 	estimatedTokens := 0
 	for _, t := range texts {
 		estimatedTokens += len(t) / 3 // More conservative estimation (was / 4)
@@ -276,7 +306,9 @@ func (w *worker) waitRateLimits(texts []string) {
 		// This worker is done for the day.
 		logger.Warn("AI Worker (...%s) exhausted RPD (%d). Pausing...", w.shortKey(), w.limitRPD)
 		for {
-			time.Sleep(10 * time.Minute)
+			if err := sleepContext(ctx, 10*time.Minute); err != nil {
+				return
+			}
 			now = time.Now()
 			if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
 				// New Day!
@@ -312,7 +344,10 @@ func (w *worker) waitRateLimits(texts []string) {
 				if wait > 5*time.Second {
 					logger.Debug("AI: Rate limit throttling ...%s. Waiting %v (Cost: %d)", w.shortKey(), wait, estimatedTokens)
 				}
-				time.Sleep(wait)
+
+				if err := sleepContext(ctx, wait); err != nil {
+					return
+				}
 
 				// Reset bucket to 0 (consumed what we waited for)
 				w.tpmBucket = 0
@@ -324,7 +359,9 @@ func (w *worker) waitRateLimits(texts []string) {
 	// Check RPM (Interval)
 	now = time.Now()
 	if now.Before(w.nextAvailable) {
-		time.Sleep(w.nextAvailable.Sub(now))
+		if err := sleepContext(ctx, w.nextAvailable.Sub(now)); err != nil {
+			return
+		}
 	}
 
 	// Update State
@@ -333,6 +370,15 @@ func (w *worker) waitRateLimits(texts []string) {
 
 	// Update DB (Async)
 	go w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 

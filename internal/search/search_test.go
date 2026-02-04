@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ func (m *MockDB) Close() {}
 // MockAI implements Embedder
 type MockAI struct{}
 
-func (m *MockAI) EmbedText(text string) ([]float32, error) {
+func (m *MockAI) EmbedText(ctx context.Context, text string) ([]float32, error) {
 	return []float32{0.1, 0.2, 0.3}, nil
 }
 
@@ -91,7 +92,7 @@ func TestAskProject(t *testing.T) {
 		AI: &MockAI{},
 	}
 
-	results, err := svc.AskProject("test query")
+	results, err := svc.AskProject(context.Background(), "test query")
 	if err != nil {
 		t.Fatalf("AskProject failed: %v", err)
 	}

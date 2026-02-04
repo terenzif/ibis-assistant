@@ -20,7 +20,7 @@ import (
 )
 
 type AIClient interface {
-	BatchEmbedText(texts []string) ([][]float32, error)
+	BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error)
 	IsFunctional() bool
 }
 
@@ -412,7 +412,7 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			return ctx.Err()
 		}
 
-		vectors, err := aiClient.BatchEmbedText(validBatch)
+		vectors, err := aiClient.BatchEmbedText(ctx, validBatch)
 		if err != nil {
 			logger.Error("Batch embedding error for %s: %v", path, err)
 			continue

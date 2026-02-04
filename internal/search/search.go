@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 // Embedder interface for AI client
 type Embedder interface {
-	EmbedText(text string) ([]float32, error)
+	EmbedText(ctx context.Context, text string) ([]float32, error)
 }
 
 // SearchService handles hybrid queries
@@ -39,9 +40,9 @@ type ContextData struct {
 // AskProject performs a hybrid search:
 // 1. Vector Search with Time Decay.
 // 2. Graph Traversal (Weighted).
-func (s *Service) AskProject(query string) ([]Result, error) {
+func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error) {
 	// 1. Embed Query
-	vec, err := s.AI.EmbedText(query)
+	vec, err := s.AI.EmbedText(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}

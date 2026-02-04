@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,7 +64,7 @@ func TestClientWorkerPool(t *testing.T) {
 	for i := 0; i < count; i++ {
 		go func() {
 			defer wg.Done()
-			_, err := client.EmbedText("test")
+			_, err := client.EmbedText(context.Background(), "test")
 			if err != nil {
 				t.Errorf("Embed failed: %v", err)
 			}
@@ -104,9 +105,9 @@ func TestClientRateLimitingPacing(t *testing.T) {
 
 	start := time.Now()
 	// 1st call: Should be immediate (or very fast)
-	client.EmbedText("1")
+	client.EmbedText(context.Background(), "1")
 	// 2nd call: Should wait ~1s
-	client.EmbedText("2")
+	client.EmbedText(context.Background(), "2")
 	duration := time.Since(start)
 
 	if duration < 900*time.Millisecond {
@@ -150,7 +151,7 @@ func TestTPMTokenBucket(t *testing.T) {
 	// 1. First Request: 60 chars ~ 20 tokens.
 	// Should pass immediately (burst).
 	start := time.Now()
-	_, err := client.EmbedText(text60)
+	_, err := client.EmbedText(context.Background(), text60)
 	if err != nil {
 		t.Fatalf("First request failed: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestTPMTokenBucket(t *testing.T) {
 	// Helper to eat tokens
 	eatTokens := func(n int) {
 		for i := 0; i < n; i++ {
-			_, err := client2.EmbedText(text60)
+			_, err := client2.EmbedText(context.Background(), text60)
 			if err != nil {
 				t.Errorf("Eat request %d failed: %v", i, err)
 			}
