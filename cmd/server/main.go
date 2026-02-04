@@ -257,33 +257,49 @@ func runServer(ctx context.Context) {
 		bgWg.Add(1)
 		go func() {
 			defer bgWg.Done()
+
+			var repoWg sync.WaitGroup
+
 			for _, r := range activeRepos {
-				// Check for cancellation
-				select {
-				case <-ctx.Done():
-					logger.Info("Background indexing cancelled.")
-					return
-				default:
-				}
+				r := r
 
-				logger.Info("Background: Indexing Git history for %s...", r)
-				if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
-					logger.Error("Background: Git ingestion error for %s: %v", r, err)
-				}
+				// 1. Git Ingestion
+				repoWg.Add(1)
+				go func() {
+					defer repoWg.Done()
+					// Check for cancellation
+					if ctx.Err() != nil {
+						return
+					}
 
-				// Check again
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
+					logger.Info("Background: Indexing Git history for %s...", r)
+					if err := git.IngestRepo(dbClient, redmineClient, r); err != nil {
+						logger.Error("Background: Git ingestion error for %s: %v", r, err)
+					}
+				}()
 
-				logger.Info("Background: Vectorizing codebase for %s...", r)
-				if err := code.IngestCodebase(ctx, dbClient, aiClient, r, cfg); err != nil {
-					logger.Error("Background: Code ingestion error for %s: %v", r, err)
-				}
+				// 2. Code Ingestion
+				repoWg.Add(1)
+				go func() {
+					defer repoWg.Done()
+					// Check for cancellation
+					if ctx.Err() != nil {
+						return
+					}
+
+					logger.Info("Background: Vectorizing codebase for %s...", r)
+					if err := code.IngestCodebase(ctx, dbClient, aiClient, r, cfg); err != nil {
+						logger.Error("Background: Code ingestion error for %s: %v", r, err)
+					}
+				}()
 			}
-			logger.Info("Background: Initial indexing complete.")
+
+			repoWg.Wait()
+			if ctx.Err() == nil {
+				logger.Info("Background: Initial indexing complete.")
+			} else {
+				logger.Info("Background: Indexing interrupted.")
+			}
 		}()
 	}
 

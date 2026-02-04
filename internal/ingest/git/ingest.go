@@ -70,7 +70,8 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	// Fetch existing commits to support incremental ingestion
 	existingCommits := make(map[string]bool)
 	// We use SmartQuery to get the IDs. Result is []interface{} (list of maps)
-	resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE repo = $repo", map[string]interface{}{"repo": repoID})
+	// CAST $repo to record because SmartQuery passes it as a string, but the field is a record link.
+	resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE repo = type::record($repo)", map[string]interface{}{"repo": repoID})
 	if err == nil {
 		bytes, _ := json.Marshal(resRaw)
 		var commits []struct {
