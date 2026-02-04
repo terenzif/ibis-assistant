@@ -279,7 +279,7 @@ func runServer(ctx context.Context) {
 				}
 
 				logger.Info("Background: Vectorizing codebase for %s...", r)
-				if err := code.IngestCodebase(ctx, dbClient, aiClient, r); err != nil {
+				if err := code.IngestCodebase(ctx, dbClient, aiClient, r, cfg); err != nil {
 					logger.Error("Background: Code ingestion error for %s: %v", r, err)
 				}
 			}
@@ -332,7 +332,7 @@ func runServer(ctx context.Context) {
 		
 		var output strings.Builder
 		for _, r := range targets {
-			if err := code.IngestCodebase(ctx, dbClient, aiClient, r); err != nil {
+			if err := code.IngestCodebase(ctx, dbClient, aiClient, r, cfg); err != nil {
 				output.WriteString(fmt.Sprintf("Error scanning %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully scanned %s\n", r))

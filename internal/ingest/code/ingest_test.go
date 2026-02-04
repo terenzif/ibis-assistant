@@ -2,12 +2,15 @@ package code
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 )
 
@@ -88,6 +91,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		},
 	}
 	mockAI := &MockAI{}
+	cfg := config.Load()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -95,7 +99,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		mockDB.ExecuteCalls = nil
 		mockAI.BatchEmbedCalls = nil
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
 			b.Fatalf("Error: %v", err)
 		}
@@ -118,6 +122,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 
 	expectedHash := getFileHashHelper(filePath)
 	fileID := fmt.Sprintf("file:%s", db.SanitizeID(filePath))
+	cfg := config.Load()
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
 		mockDB := &MockDB{
@@ -129,7 +134,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
@@ -149,7 +154,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
@@ -166,4 +171,226 @@ func TestIngestCodebase_Delta(t *testing.T) {
 			t.Errorf("Expected UPDATE file_chunk statement, but not found. Calls: %v", mockDB.ExecuteCalls)
 		}
 	})
+}
+
+func TestIngestCodebase_Exclusions(t *testing.T) {
+	// Setup temp repo
+	tmpDir, err := os.MkdirTemp("", "repo_exclusions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create structure:
+	// /main.go          (Supported)
+	// /ignored_dir/     (Ignored Directory)
+	//   /ignored.go
+	// /package-lock.json(Ignored File)
+	// /large.go         (Too large)
+	// /other.txt        (Unsupported extension)
+
+	// 1. Supported File
+	mainGo := filepath.Join(tmpDir, "main.go")
+	os.WriteFile(mainGo, []byte("package main"), 0644)
+
+	// 2. Ignored Directory
+	ignoredDir := filepath.Join(tmpDir, "node_modules")
+	os.Mkdir(ignoredDir, 0755)
+	os.WriteFile(filepath.Join(ignoredDir, "lib.js"), []byte("console.log()"), 0644)
+
+	// 3. Ignored File
+	lockFile := filepath.Join(tmpDir, "package-lock.json")
+	os.WriteFile(lockFile, []byte("{}"), 0644)
+
+	// 4. Large File (limit is small for test)
+	largeFile := filepath.Join(tmpDir, "large.go")
+	os.WriteFile(largeFile, []byte(strings.Repeat("a", 200)), 0644)
+
+	// 5. Unsupported Extension
+	txtFile := filepath.Join(tmpDir, "readme.txt")
+	os.WriteFile(txtFile, []byte("readme"), 0644)
+
+	// Setup Config
+	cfg := &config.Config{
+		MaxFileSize:         100, // 100 bytes limit
+		IgnoredDirs:         []string{"node_modules"},
+		IgnoredFiles:        []string{"package-lock.json"},
+		SupportedExtensions: []string{".go", ".js"},
+	}
+
+	mockDB := &MockDB{ReturnData: map[string]interface{}{}}
+	mockAI := &MockAI{}
+
+	err = IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("IngestCodebase failed: %v", err)
+	}
+
+	// Analyze Calls
+	// We expect processFile to be called only for main.go
+	// Helper to check if a path was processed
+	wasProcessed := func(path string) bool {
+		sanitized := db.SanitizeID(path)
+		target := fmt.Sprintf("file:%s", sanitized)
+		for _, sql := range mockDB.ExecuteCalls {
+			if strings.Contains(sql, target) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !wasProcessed(mainGo) {
+		t.Errorf("main.go should have been processed")
+	}
+
+	if wasProcessed(filepath.Join(ignoredDir, "lib.js")) {
+		t.Errorf("node_modules/lib.js should have been ignored (Ignored Dir)")
+	}
+
+	if wasProcessed(lockFile) {
+		t.Errorf("package-lock.json should have been ignored (Ignored File)")
+	}
+
+	if wasProcessed(largeFile) {
+		t.Errorf("large.go should have been ignored (Too Large)")
+	}
+
+	if wasProcessed(txtFile) {
+		t.Errorf("readme.txt should have been ignored (Unsupported Ext)")
+	}
+}
+
+func TestIngestCodebase_Pruning(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Create a file that is ignored by .knowledgeignore
+	ignoredFile := filepath.Join(tmpDir, "secret.go")
+	os.WriteFile(ignoredFile, []byte("secret"), 0644)
+
+	// 2. Create .knowledgeignore
+	os.WriteFile(filepath.Join(tmpDir, ".knowledgeignore"), []byte("secret.go"), 0644)
+
+	// 3. Setup Config
+	cfg := config.Load()
+
+	// 4. Setup MockDB with existing files
+	ignoredID := fmt.Sprintf("file:%s", db.SanitizeID(ignoredFile))
+
+	// deletedFile (not on disk)
+	deletedFile := filepath.Join(tmpDir, "gone.go")
+	deletedID := fmt.Sprintf("file:%s", db.SanitizeID(deletedFile))
+
+	// existingFile (should be kept)
+	existingFile := filepath.Join(tmpDir, "main.go")
+	os.WriteFile(existingFile, []byte("package main"), 0644)
+	existingID := fmt.Sprintf("file:%s", db.SanitizeID(existingFile))
+
+	// Mock Response
+	mockDB := &MockDB{
+		ReturnData: map[string]interface{}{
+			"SELECT id, path FROM file": []interface{}{
+				map[string]interface{}{"id": ignoredID, "path": ignoredFile},
+				map[string]interface{}{"id": deletedID, "path": deletedFile},
+				map[string]interface{}{"id": existingID, "path": existingFile},
+			},
+		},
+	}
+	mockAI := &MockAI{}
+
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("Error: %v", err)
+	}
+
+	// Verify Deletes
+	deletedIDs := make(map[string]bool)
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.HasPrefix(sql, "DELETE") && !strings.Contains(sql, "file_chunk") {
+			// This is a file record delete (PruneRepo)
+			if strings.Contains(sql, ignoredID) {
+				deletedIDs[ignoredID] = true
+			}
+			if strings.Contains(sql, deletedID) {
+				deletedIDs[deletedID] = true
+			}
+			if strings.Contains(sql, existingID) {
+				t.Errorf("Existing file %s was deleted! SQL: %s", existingID, sql)
+			}
+		}
+	}
+
+	if !deletedIDs[ignoredID] {
+		t.Errorf("Ignored file was not deleted. Calls: %v", mockDB.ExecuteCalls)
+	}
+	if deletedIDs[deletedID] {
+		t.Errorf("Deleted file (physically missing) WAS deleted from DB! It should be preserved.")
+	}
+}
+
+func TestIngestCodebase_Versioning(t *testing.T) {
+	// Scenario: File changes content V1 -> V2 -> V1
+	// We want to ensure V1 embeddings are not regenerated when we switch back.
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "main.go")
+	fileID := fmt.Sprintf("file:%s", db.SanitizeID(path))
+
+	// Helper to set content and run ingest
+	runIngest := func(content string, mockAI *MockAI, mockDB *MockDB) {
+		os.WriteFile(path, []byte(content), 0644)
+		// We need to clear ExecuteCalls or handle accumulation?
+		// Better to use new mock instances or reset
+		IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, config.Load())
+	}
+
+	// 1. Ingest V1
+	mockDB := &MockDB{ReturnData: map[string]interface{}{}}
+	mockAI := &MockAI{}
+	runIngest("version1", mockAI, mockDB)
+
+	if len(mockAI.BatchEmbedCalls) != 1 {
+		t.Errorf("Expected 1 embedding call for V1, got %d", len(mockAI.BatchEmbedCalls))
+	}
+
+	// 2. Ingest V2 (Different content)
+	// DB returns "hash mismatch", so it updates.
+	// But we mock DB to say "Count=0" for new hash
+	// So it embeds.
+	mockDB = &MockDB{ReturnData: map[string]interface{}{}} // Reset
+	mockAI = &MockAI{}
+	runIngest("version2", mockAI, mockDB)
+
+	if len(mockAI.BatchEmbedCalls) != 1 {
+		t.Errorf("Expected 1 embedding call for V2, got %d", len(mockAI.BatchEmbedCalls))
+	}
+
+	// 3. Ingest V1 again (Switch back)
+	// DB has V2 hash.
+	// Ingest calculates V1 hash.
+	// Queries "SELECT count() ... WHERE hash=V1_HASH".
+	// WE NEED TO MOCK THIS RETURN to > 0
+
+	v1Hash, _ := getHash("version1")
+	countQuery := fmt.Sprintf("SELECT count() FROM file_chunk WHERE file = %s AND hash = '%s';", fileID, v1Hash)
+
+	mockDB = &MockDB{
+		ReturnData: map[string]interface{}{
+			countQuery: []interface{}{
+				map[string]interface{}{"count": 5}, // Assume 5 chunks exist
+			},
+		},
+	}
+	mockAI = &MockAI{}
+	runIngest("version1", mockAI, mockDB)
+
+	if len(mockAI.BatchEmbedCalls) != 0 {
+		t.Errorf("Expected 0 embedding calls for returning to V1 (Cache Hit), got %d", len(mockAI.BatchEmbedCalls))
+	}
+}
+
+func getHash(s string) (string, error) {
+	h := sha256.New()
+	h.Write([]byte(s))
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
