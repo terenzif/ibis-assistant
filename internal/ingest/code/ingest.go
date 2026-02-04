@@ -418,12 +418,16 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			continue
 		}
 
-		// Store Results
+		// Store Results (Batched Transaction)
+		var transaction strings.Builder
+		transaction.WriteString("BEGIN TRANSACTION; ")
+
 		for k, vec := range vectors {
 			originalIndex := validIndices[k]
 			chunkContentStr := validBatch[k]
 
 			vecJson, _ := json.Marshal(vec)
+
 			// Chunk ID needs to include hash or be unique per version to avoid collision?
 			// Old ID: file:path_index.
 			// New ID: file:path_hash_index?
@@ -438,9 +442,14 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			ql := fmt.Sprintf("UPDATE %s SET file = %s, hash = '%s', content = '%s', embedding = %s;",
 				chunkID, fileID, hash, db.EscapeSQL(chunkContentStr), string(vecJson))
 
-			if _, err := dbClient.Execute(ql); err != nil {
-				logger.Error("Failed to update chunk %s: %v", chunkID, err)
-			}
+			transaction.WriteString(ql)
+			transaction.WriteString(" ")
+		}
+
+		transaction.WriteString("COMMIT TRANSACTION;")
+
+		if _, err := dbClient.Execute(transaction.String()); err != nil {
+			logger.Error("Failed to update batch for %s: %v", path, err)
 		}
 		logger.Info("  - Embedded %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
 	}
