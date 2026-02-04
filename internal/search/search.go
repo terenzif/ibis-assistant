@@ -63,6 +63,7 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 			(math::max(0, 1 - (time::now() - (created_at OR time::now())).days / 365) * 0.3)
 			as score
 		FROM %s 
+		WHERE embedding != NONE
 		ORDER BY score DESC 
 		LIMIT 10;`, string(vecJson), schema.TableFileChunk)
 

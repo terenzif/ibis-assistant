@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,7 +19,6 @@ import (
 )
 
 type AIClient interface {
-	BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error)
 	IsFunctional() bool
 }
 
@@ -88,7 +86,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 					if !ok {
 						return
 					}
-					if err := processFile(ctx, dbClient, aiClient, path); err != nil {
+					if err := processFile(ctx, dbClient, path); err != nil {
 						logger.Error("Error processing file %s: %v", path, err)
 					}
 				}
@@ -306,7 +304,7 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 	return nil
 }
 
-func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, path string) error {
+func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open error: %w", err)
@@ -374,7 +372,7 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 		}
 	}
 
-	// 5. Chunk & Embed (New Version)
+	// 5. Chunk & Persist (Wait for Async Batch)
 	// Reset file pointer
 	if _, err := f.Seek(0, 0); err != nil {
 		return fmt.Errorf("seek error: %w", err)
@@ -412,21 +410,13 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			return ctx.Err()
 		}
 
-		vectors, err := aiClient.BatchEmbedText(ctx, validBatch)
-		if err != nil {
-			logger.Error("Batch embedding error for %s: %v", path, err)
-			continue
-		}
-
-		// Store Results (Batched Transaction)
+		// Store Chunks with batch_status = 'pending'
+		// No Embeddings yet.
 		var transaction strings.Builder
 		transaction.WriteString("BEGIN TRANSACTION; ")
 
-		for k, vec := range vectors {
+		for k, chunkContentStr := range validBatch {
 			originalIndex := validIndices[k]
-			chunkContentStr := validBatch[k]
-
-			vecJson, _ := json.Marshal(vec)
 
 			// Chunk ID needs to include hash or be unique per version to avoid collision?
 			// Old ID: file:path_index.
@@ -439,8 +429,9 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 			chunkID := fmt.Sprintf("%s:%s_%s_%d", schema.TableFileChunk, db.SanitizeID(path), hash, originalIndex)
 
 			// We also store `hash` field for filtering.
-			ql := fmt.Sprintf("UPDATE %s SET file = %s, hash = '%s', content = '%s', embedding = %s;",
-				chunkID, fileID, hash, db.EscapeSQL(chunkContentStr), string(vecJson))
+			// embedding = NONE
+			ql := fmt.Sprintf("UPDATE %s SET file = %s, hash = '%s', content = '%s', embedding = NONE, batch_status = 'pending';",
+				chunkID, fileID, hash, db.EscapeSQL(chunkContentStr))
 
 			transaction.WriteString(ql)
 			transaction.WriteString(" ")
@@ -449,9 +440,9 @@ func processFile(ctx context.Context, dbClient db.Executor, aiClient AIClient, p
 		transaction.WriteString("COMMIT TRANSACTION;")
 
 		if _, err := dbClient.Execute(transaction.String()); err != nil {
-			logger.Error("Failed to update batch for %s: %v", path, err)
+			logger.Error("Failed to persist pending chunks for %s: %v", path, err)
 		}
-		logger.Info("  - Embedded %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
+		logger.Info("  - Queued %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
 	}
 
 	return nil

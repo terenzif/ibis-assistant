@@ -38,17 +38,7 @@ func (m *MockDB) Close() {}
 
 // MockAI implements AIClient
 type MockAI struct {
-	BatchEmbedCalls [][]string
-}
-
-func (m *MockAI) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
-	m.BatchEmbedCalls = append(m.BatchEmbedCalls, texts)
-	// Return dummy embeddings
-	result := make([][]float32, len(texts))
-	for i := range texts {
-		result[i] = []float32{0.1, 0.2, 0.3}
-	}
-	return result, nil
+	// No methods needed for async ingestion testing
 }
 
 func (m *MockAI) IsFunctional() bool {
@@ -97,7 +87,6 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Reset calls to avoid infinite growth if that matters (slices)
 		mockDB.ExecuteCalls = nil
-		mockAI.BatchEmbedCalls = nil
 
 		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {
@@ -139,11 +128,11 @@ func TestIngestCodebase_Delta(t *testing.T) {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
 
-		// After optimization, this should be 0.
-		if len(mockAI.BatchEmbedCalls) == 0 {
-			t.Log("Skipped embedding (Optimized)")
-		} else {
-			t.Errorf("Processed embedding (Unoptimized) - Expected 0 calls, got %d", len(mockAI.BatchEmbedCalls))
+		// Verify no UPDATE calls
+		for _, sql := range mockDB.ExecuteCalls {
+			if strings.Contains(sql, "UPDATE file_chunk") {
+				t.Errorf("Processed embedding (Unoptimized) - Expected 0 chunk updates, got call: %s", sql)
+			}
 		}
 	})
 
@@ -162,13 +151,13 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		// Verify UPDATE is called for chunks
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
-			if strings.Contains(sql, "UPDATE file_chunk") {
+			if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
 				foundUpdate = true
 				break
 			}
 		}
 		if !foundUpdate {
-			t.Errorf("Expected UPDATE file_chunk statement, but not found. Calls: %v", mockDB.ExecuteCalls)
+			t.Errorf("Expected UPDATE file_chunk statement with batch_status='pending', but not found. Calls: %v", mockDB.ExecuteCalls)
 		}
 	})
 }
@@ -339,8 +328,6 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Helper to set content and run ingest
 	runIngest := func(content string, mockAI *MockAI, mockDB *MockDB) {
 		os.WriteFile(path, []byte(content), 0644)
-		// We need to clear ExecuteCalls or handle accumulation?
-		// Better to use new mock instances or reset
 		IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, config.Load())
 	}
 
@@ -349,20 +336,33 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	mockAI := &MockAI{}
 	runIngest("version1", mockAI, mockDB)
 
-	if len(mockAI.BatchEmbedCalls) != 1 {
-		t.Errorf("Expected 1 embedding call for V1, got %d", len(mockAI.BatchEmbedCalls))
+	// Check for INSERT (Queueing)
+	foundInsert := false
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+			foundInsert = true
+			break
+		}
+	}
+	if !foundInsert {
+		t.Errorf("Expected V1 to be queued (UPDATE file_chunk ... pending)")
 	}
 
 	// 2. Ingest V2 (Different content)
-	// DB returns "hash mismatch", so it updates.
-	// But we mock DB to say "Count=0" for new hash
-	// So it embeds.
 	mockDB = &MockDB{ReturnData: map[string]interface{}{}} // Reset
 	mockAI = &MockAI{}
 	runIngest("version2", mockAI, mockDB)
 
-	if len(mockAI.BatchEmbedCalls) != 1 {
-		t.Errorf("Expected 1 embedding call for V2, got %d", len(mockAI.BatchEmbedCalls))
+	// Check for INSERT (Queueing)
+	foundInsertV2 := false
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+			foundInsertV2 = true
+			break
+		}
+	}
+	if !foundInsertV2 {
+		t.Errorf("Expected V2 to be queued")
 	}
 
 	// 3. Ingest V1 again (Switch back)
@@ -384,8 +384,11 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	mockAI = &MockAI{}
 	runIngest("version1", mockAI, mockDB)
 
-	if len(mockAI.BatchEmbedCalls) != 0 {
-		t.Errorf("Expected 0 embedding calls for returning to V1 (Cache Hit), got %d", len(mockAI.BatchEmbedCalls))
+	// Verify NO queuing happened
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+			t.Errorf("Expected 0 queuing calls for returning to V1 (Cache Hit), got call: %s", sql)
+		}
 	}
 }
 
@@ -404,11 +407,6 @@ func BenchmarkIngestCodebase_Write(b *testing.B) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create a large file to generate many chunks
-	// 1000 lines * 100 chars = 100KB per chunk approx if max is 1000
-	// But chunking logic uses 1000 *bytes* approximately.
-	// We want ~10 batches of 10 chunks = 100 chunks.
-	// 100 chunks * 1000 bytes = 100KB file.
-
 	filePath := filepath.Join(tmpDir, "large.go")
 	line := strings.Repeat("A", 100) + "\n"
 	content := strings.Repeat(line, 2000) // 200KB
@@ -426,7 +424,6 @@ func BenchmarkIngestCodebase_Write(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mockDB.ExecuteCalls = nil
-		mockAI.BatchEmbedCalls = nil
 
 		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
 		if err != nil {

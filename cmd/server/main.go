@@ -230,6 +230,10 @@ func runServer(ctx context.Context) {
 	}
 	aiClient := ai.NewClient(aiKeys, dbClient)
 	
+	// Start Batch Manager
+	batchManager := ai.NewBatchManager(dbClient, aiClient)
+	batchManager.Start()
+
 	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
 	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
 	
@@ -567,6 +571,9 @@ func runServer(ctx context.Context) {
 	// 2. Stop AI Workers (waits for them to finish current job)
 	logger.Info("Stopping AI workers...")
 	aiClient.Stop()
+	// Stop Batch Manager
+	logger.Info("Stopping Batch Manager...")
+	batchManager.Stop()
 
 	// 3. Close DB Connection (now safe as no workers are using it)
 	if dbClient != nil {
