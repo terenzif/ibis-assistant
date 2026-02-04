@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os/exec"
 	"path/filepath"
@@ -27,38 +28,6 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 
 	logger.Info("Starting ingestion for repo: %s (%s)", repoName, absPath)
 
-	// 1. Run Git Log
-	// Format: COMMIT|Hash|Parents|Author|Date|Subject
-	// We use --numstat to get lines changed.
-	// Output format will be:
-	// COMMIT|Hash|Parents|Author|Date|Subject
-	// Added Deleted Path
-	// ...
-	cmd := exec.Command("git", "log", "--all", "--numstat", "--reverse", "--format=COMMIT|%H|%P|%an|%aI|%s")
-	cmd.Dir = absPath
-	// Increase buffer for large repos if needed, but standard pipe is usually fine for streaming
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start git command: %w", err)
-	}
-
-	// 2. Stream & Parse
-	scanner := bufio.NewScanner(stdout)
-	// Buffer size for long lines (though file paths shouldn't be huge)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	var (
-		currentCommitID string
-		batchQL         strings.Builder
-		batchCount      int
-		skipping        bool
-	)
-
 	// Register Repo Node
 	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, db.SanitizeID(repoName))
 	logger.Debug("Upserting repo node: %s", repoID)
@@ -67,24 +36,179 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 		return fmt.Errorf("failed to upsert repo node: %w", err)
 	}
 
-	// Fetch existing commits to support incremental ingestion
-	existingCommits := make(map[string]bool)
-	// We use SmartQuery to get the IDs. Result is []interface{} (list of maps)
-	// CAST $repo to record because SmartQuery passes it as a string, but the field is a record link.
-	resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE repo = type::record($repo)", map[string]interface{}{"repo": repoID})
-	if err == nil {
-		bytes, _ := json.Marshal(resRaw)
-		var commits []struct {
-			ID string `json:"id"`
-		}
-		// If unmarshal fails (e.g. empty result or unexpected format), we just proceed (empty map -> ingest everything)
-		if err := json.Unmarshal(bytes, &commits); err == nil {
-			for _, c := range commits {
-				existingCommits[c.ID] = true
-			}
-			logger.Info("Found %d existing commits for repo %s. These will be skipped.", len(commits), repoName)
-		}
+	// 1. Start Hash Generator (Stream all commits)
+	cmdHashes := exec.Command("git", "log", "--all", "--reverse", "--format=%H")
+	cmdHashes.Dir = absPath
+	stdoutHashes, err := cmdHashes.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create hashes stdout pipe: %w", err)
 	}
+	if err := cmdHashes.Start(); err != nil {
+		return fmt.Errorf("failed to start git log hashes: %w", err)
+	}
+
+	// 2. Start Ingest Worker (Consumes new hashes, produces log output)
+	// We use --no-walk --stdin to ingest only specific commits provided on stdin.
+	cmdIngest := exec.Command("git", "log", "--no-walk", "--stdin", "--numstat", "--format=COMMIT|%H|%P|%an|%aI|%s")
+	cmdIngest.Dir = absPath
+	stdinIngest, err := cmdIngest.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create ingest stdin pipe: %w", err)
+	}
+	stdoutIngest, err := cmdIngest.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create ingest stdout pipe: %w", err)
+	}
+	// stderr for debugging
+	// cmdIngest.Stderr = os.Stderr
+
+	if err := cmdIngest.Start(); err != nil {
+		return fmt.Errorf("failed to start git log ingest: %w", err)
+	}
+
+	// Channel to signal feeder completion/error
+	feederErrChan := make(chan error, 1)
+
+	// Goroutine: Feed Hashes to Ingest Worker
+	go func() {
+		defer stdinIngest.Close() // Close stdin to signal we are done feeding
+
+		scanner := bufio.NewScanner(stdoutHashes)
+		batchSize := 500
+		var batch []string
+
+		processBatch := func() error {
+			if len(batch) == 0 {
+				return nil
+			}
+
+			// Check DB for existing commits
+			// We can't pass 500 IDs in a single query if the string is too long?
+			// 500 * 40 chars = 20KB. Fine.
+
+			// Build ID list
+			// "SELECT id FROM commit WHERE id IN ['commit:hash1', 'commit:hash2', ...]"
+			ids := make([]string, len(batch))
+			idMap := make(map[string]bool) // To track which exist
+			for i, h := range batch {
+				id := fmt.Sprintf("%s:%s", schema.TableCommit, h)
+				ids[i] = id
+			}
+
+			// SmartQuery with array param?
+			// SurrealDB: "SELECT id FROM commit WHERE id INSIDE $ids"
+			// But SmartQuery vars handling depends on driver.
+			// Let's assume we can pass a slice of strings.
+
+			// Optimization: If we query, we get back IDs that EXIST.
+			// The ones NOT in the result are NEW.
+
+			// If slice param fails, we might need to construct the query string manually or loops.
+			// Trying SmartQuery with slice.
+
+			resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE id IN $ids", map[string]interface{}{
+				"ids": ids,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to check existing commits: %w", err)
+			}
+
+			// Parse result to find existing
+			bytes, _ := json.Marshal(resRaw)
+			var foundCommits []struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(bytes, &foundCommits); err == nil {
+				for _, c := range foundCommits {
+					idMap[c.ID] = true
+				}
+			}
+
+			// Identify New
+			var newCount int
+			for _, h := range batch {
+				id := fmt.Sprintf("%s:%s", schema.TableCommit, h)
+				if !idMap[id] {
+					// Is new, write to ingest stdin
+					if _, err := io.WriteString(stdinIngest, h+"\n"); err != nil {
+						return fmt.Errorf("failed to write to ingest stdin: %w", err)
+					}
+					newCount++
+				}
+			}
+
+			if newCount > 0 {
+				logger.Debug("Batch check: %d/%d new commits queued", newCount, len(batch))
+			}
+
+			return nil
+		}
+
+		for scanner.Scan() {
+			hash := strings.TrimSpace(scanner.Text())
+			if hash == "" {
+				continue
+			}
+			batch = append(batch, hash)
+			if len(batch) >= batchSize {
+				if err := processBatch(); err != nil {
+					feederErrChan <- err
+					return
+				}
+				batch = batch[:0]
+			}
+		}
+		// Final batch
+		if err := processBatch(); err != nil {
+			feederErrChan <- err
+			return
+		}
+
+		feederErrChan <- nil
+	}()
+
+	// 3. Main Thread: Consume Ingest Output
+	scannerIngest := bufio.NewScanner(stdoutIngest)
+	// Use larger buffer for numstat output
+	buf := make([]byte, 0, 64*1024)
+	scannerIngest.Buffer(buf, 1024*1024)
+
+	// We pass nil for existingCommits because we already filtered them!
+	ingestErr := processGitLogStream(context.Background(), scannerIngest, client, redmineClient, repoID, nil)
+
+	// Wait for feeder
+	feederErr := <-feederErrChan
+
+	// Wait for commands
+	cmdHashes.Wait() // Ignore error here if pipe closed early? usually fine.
+	cmdIngest.Wait()
+
+	if feederErr != nil {
+		return fmt.Errorf("feeder error: %w", feederErr)
+	}
+	if ingestErr != nil {
+		return fmt.Errorf("ingest error: %w", ingestErr)
+	}
+
+	logger.Info("Ingestion complete for %s", repoName)
+	return nil
+}
+
+// processGitLogStream consumes the git log output and writes to DB
+func processGitLogStream(
+	ctx context.Context,
+	scanner *bufio.Scanner,
+	client db.Executor,
+	redmineClient redmine.Ingester,
+	repoID string,
+	existingCommits map[string]bool,
+) error {
+	var (
+		currentCommitID string
+		batchQL         strings.Builder
+		batchCount      int
+		skipping        bool
+	)
 
 	flushBatch := func() error {
 		if batchQL.Len() == 0 {
@@ -103,6 +227,13 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	}
 
 	for scanner.Scan() {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
@@ -122,7 +253,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 
 			commitID := fmt.Sprintf("%s:%s", schema.TableCommit, hash)
 
-			if existingCommits[commitID] {
+			if existingCommits != nil && existingCommits[commitID] {
 				skipping = true
 				currentCommitID = ""
 				continue
@@ -289,12 +420,5 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	}
 	logger.Debug("Final batch flushed.")
 
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("git command finished with error: %w", err)
-	}
-
-	logger.Info("Ingestion complete for %s", repoName)
 	return nil
 }
-
-
