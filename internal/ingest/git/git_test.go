@@ -73,7 +73,7 @@ func TestIngestRepoIntegration(t *testing.T) {
 	mockRedmine := &MockRedmine{}
 
 	// 3. Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir)
+	err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestIngestRepo_QuotedPaths(t *testing.T) {
 	mockRedmine := &MockRedmine{}
 
 	// 3. Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir)
+	err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestIngestRepo_Incremental(t *testing.T) {
 	}
 
 	// 3. Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir)
+	err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}

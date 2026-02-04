@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
@@ -19,7 +20,7 @@ import (
 )
 
 // IngestRepo analyzes a git repository and populates the Knowledge Graph
-func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath string) error {
+func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath string, concurrency int) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("invalid repo path: %w", err)
@@ -174,7 +175,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	scannerIngest.Buffer(buf, 1024*1024)
 
 	// We pass nil for existingCommits because we already filtered them!
-	ingestErr := processGitLogStream(context.Background(), scannerIngest, client, redmineClient, repoID, nil)
+	ingestErr := processGitLogStream(context.Background(), scannerIngest, client, redmineClient, repoID, nil, concurrency)
 
 	// Wait for feeder
 	feederErr := <-feederErrChan
@@ -202,6 +203,7 @@ func processGitLogStream(
 	redmineClient redmine.Ingester,
 	repoID string,
 	existingCommits map[string]bool,
+	concurrency int,
 ) error {
 	var (
 		currentCommitID string
@@ -209,6 +211,14 @@ func processGitLogStream(
 		batchCount      int
 		skipping        bool
 	)
+
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	// Semaphore for Redmine Ingestion
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
 
 	flushBatch := func() error {
 		if batchQL.Len() == 0 {
@@ -301,11 +311,19 @@ func processGitLogStream(
 						
 						// In-Band Ingestion: Trigger Redmine fetch if client is available
 						if redmineClient != nil {
-							go func(id string) {
-								if err := redmineClient.IngestIssue(context.Background(), client, id); err != nil {
-									logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
-								}
-							}(issueIDStr)
+							wg.Add(1)
+							select {
+							case sem <- struct{}{}:
+								go func(id string) {
+									defer wg.Done()
+									defer func() { <-sem }()
+									if err := redmineClient.IngestIssue(context.Background(), client, id); err != nil {
+										logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
+									}
+								}(issueIDStr)
+							case <-ctx.Done():
+								wg.Done()
+							}
 						} else {
 						    // Just ensure existence
 						    batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
@@ -419,6 +437,9 @@ func processGitLogStream(
 		return err
 	}
 	logger.Debug("Final batch flushed.")
+
+	// Wait for any background Redmine tasks
+	wg.Wait()
 
 	return nil
 }
