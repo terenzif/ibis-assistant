@@ -6,19 +6,21 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/deckonline/knowledge_mcp/internal/ai"
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
-// Embedder interface for AI client
-type Embedder interface {
+// AIProvider interface for AI client
+type AIProvider interface {
 	EmbedText(ctx context.Context, text string) ([]float32, error)
+	GenerateContent(ctx context.Context, contents []ai.Content, config ai.GenerationConfig) (ai.Candidate, error)
 }
 
-// SearchService handles hybrid queries
+// Service handles hybrid queries
 type Service struct {
 	DB db.Executor
-	AI Embedder
+	AI AIProvider
 }
 
 // Result represents a knowledge chunk (Code, Commit, or Issue)

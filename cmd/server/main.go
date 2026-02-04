@@ -22,6 +22,7 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/ingest/git"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/deckonline/knowledge_mcp/internal/optimization"
 	"github.com/deckonline/knowledge_mcp/internal/search"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -233,6 +234,7 @@ func runServer(ctx context.Context) {
 	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
 	
 	searchService := &search.Service{DB: dbClient, AI: aiClient}
+	optimizer := optimization.NewOptimizer(dbClient, aiClient, searchService)
 
 	// --- Check Connections ---
 	if !aiClient.IsFunctional() {
@@ -358,24 +360,50 @@ func runServer(ctx context.Context) {
 	})
 
 	s.AddTool(mcp.NewTool("ask_project",
-		mcp.WithDescription("Ask a natural language question about the project history and code."),
+		mcp.WithDescription("Ask a natural language question about the project history and code. Uses Agentic reasoning."),
 		mcp.WithString("query", mcp.Description("The question (e.g., 'Why was login changed?')")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: ask_project")
 		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok { return mcp.NewToolResultError("Invalid arguments"), nil }
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
 		query, _ := args["query"].(string)
 
-		results, err := searchService.AskProject(ctx, query)
+		result, err := searchService.AskProjectAgentic(ctx, query)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 		}
 
-		bytes, err := json.MarshalIndent(results, "", "  ")
+		bytes, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(bytes)), nil
+	})
+
+	s.AddTool(mcp.NewTool("optimize_knowledge",
+		mcp.WithDescription("Trigger the RAFT self-optimization loop to improve knowledge graph weights."),
+		mcp.WithNumber("iterations", mcp.Description("Number of chunks to process (default 10)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: optimize_knowledge")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+
+		iter := 10
+		if v, ok := args["iterations"].(float64); ok {
+			iter = int(v)
+		}
+
+		go func() {
+			if err := optimizer.OptimizeLoop(context.Background(), iter); err != nil {
+				logger.Error("Optimization failed: %v", err)
+			}
+		}()
+
+		return mcp.NewToolResultText(fmt.Sprintf("Optimization started for %d iterations.", iter)), nil
 	})
 
 	s.AddTool(mcp.NewTool("reinforce_path",
