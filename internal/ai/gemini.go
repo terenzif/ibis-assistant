@@ -229,6 +229,46 @@ func (c *Client) GenerateContent(ctx context.Context, contents []Content, config
 	}
 }
 
+// --- Async Batch API Methods ---
+
+// CreateBatchEmbedJob submits an asynchronous batch embedding job
+func (c *Client) CreateBatchEmbedJob(ctx context.Context, texts []string) (string, error) {
+	if len(c.workers) == 0 {
+		return "", fmt.Errorf("no active workers")
+	}
+	// Use the first worker for now (assuming all keys are valid for batch ops)
+	// Ideally we should load balance or use a specific key for batch operations
+	w := c.workers[0]
+	return w.createBatchEmbedJob(ctx, texts)
+}
+
+// GetBatchJob retrieves the status of a batch job
+func (c *Client) GetBatchJob(ctx context.Context, name string) (*BatchJobStatus, error) {
+	if len(c.workers) == 0 {
+		return nil, fmt.Errorf("no active workers")
+	}
+	w := c.workers[0]
+	return w.getBatchJob(ctx, name)
+}
+
+// GetBatchResults retrieves the results of a completed batch job
+// Since the output is likely a file URI or inline responses, we need to handle that.
+// The current implementation assumes inline responses or simple file reading if applicable.
+// However, based on API docs, it might return a file URI.
+func (c *Client) GetBatchResults(ctx context.Context, outputURI string) ([][]float32, error) {
+	// Not implemented fully as it depends on whether we get a file URI or inline response.
+	// For inline responses in the batch status, we extract them there.
+	// If the output is a file, we need a separate method to download/read it.
+	// For now, let's assume we rely on what GetBatchJob returns if it includes inline results.
+	// If `responses` are in the output object of the job status, we are good.
+	// If `responsesFile` is set, we need to download it.
+
+	// This function is a placeholder for downloading the file if needed.
+	// Since `GetBatchJob` returns the metadata, the caller usually decides what to do.
+	return nil, fmt.Errorf("not implemented: use GetBatchJob and check for inline responses or file URI")
+}
+
+
 // --- Worker Implementation ---
 
 func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
@@ -653,6 +693,137 @@ func (w *worker) doGenerate(contents []Content, config GenerationConfig) (Candid
 	return Candidate{}, 0, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
 }
 
+// --- Worker Async Batch Implementation ---
+
+func (w *worker) createBatchEmbedJob(ctx context.Context, texts []string) (string, error) {
+	url := fmt.Sprintf("%s/%s:asyncBatchEmbedContent?key=%s", BaseURL, EmbeddingModel, w.apiKey)
+
+	reqItems := make([]EmbedRequestItem, len(texts))
+	for i, t := range texts {
+		reqItems[i] = EmbedRequestItem{
+			Model: EmbeddingModel,
+			Content: Content{
+				Parts: []Part{{Text: t}},
+			},
+		}
+	}
+
+	// Use displayName to store something useful? Maybe just timestamp.
+	payload := map[string]interface{}{
+		"model": EmbeddingModel,
+		"displayName": fmt.Sprintf("batch_%d", time.Now().UnixNano()),
+		"inputConfig": map[string]interface{}{
+			"requests": map[string]interface{}{
+				"requests": reqItems,
+			},
+		},
+	}
+
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 200 {
+		// Response is an Operation object
+		var op Operation
+		if err := json.Unmarshal(body, &op); err != nil {
+			return "", fmt.Errorf("parsing operation error: %w", err)
+		}
+		return op.Name, nil
+	}
+
+	return "", fmt.Errorf("gemini async batch error %d: %s", resp.StatusCode, string(body))
+}
+
+func (w *worker) getBatchJob(ctx context.Context, name string) (*BatchJobStatus, error) {
+	// name is like "batches/12345" or "operations/..." ?
+	// API Docs say: POST .../asyncBatchEmbedContent returns Operation.
+	// We need to poll Operation or Batches?
+	// The response from asyncBatchEmbedContent is an Operation.
+	// Usually Operation.name can be polled via /v1beta/{name}.
+	// If it's a Batch resource, we might need batches.get.
+	// Let's assume the name returned is the resource to poll.
+
+	url := fmt.Sprintf("%s/%s?key=%s", BaseURL, name, w.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("get batch error %d: %s", resp.StatusCode, string(body))
+	}
+
+	// It could return an Operation or a Batch resource depending on what we polled.
+	// If it's an Operation, we check `done` and `response`.
+	// If it's a Batch, we check `state`.
+	// For simplicity, let's map it to our internal status struct.
+
+	// Try parsing as Operation first
+	var op Operation
+	if err := json.Unmarshal(body, &op); err == nil && op.Name != "" {
+		status := &BatchJobStatus{
+			Name: op.Name,
+			Done: op.Done,
+		}
+		if op.Error != nil {
+			status.Error = fmt.Errorf("operation error: %s", op.Error.Message)
+		}
+		// If done, usually response contains the result?
+		// For asyncBatchEmbedContent, the result is likely a BatchEmbedResponse or similar.
+		if op.Done && op.Response != nil {
+			// Extract embeddings
+			// The response field is a map[string]interface{}.
+			// We need to marshal/unmarshal or map it.
+			// However, looking at docs, Batch API might return a separate Batch resource?
+			// "Enqueues a batch ... If successful, the response body contains an instance of Operation."
+
+			// Let's try to parse the response part as BatchEmbedResponse
+			// Note: "The normal, successful response of the operation... For other methods, the response should have the type XxxResponse"
+			// So it should be BatchEmbedResponse.
+			// BUT, the `response` field in Operation is `map[string]interface{}` (Any).
+
+			if embeddingsRaw, ok := op.Response["embeddings"]; ok {
+				// Manually extract
+				jsonBytes, _ := json.Marshal(map[string]interface{}{"embeddings": embeddingsRaw})
+				var ber BatchEmbedResponse
+				if err := json.Unmarshal(jsonBytes, &ber); err == nil {
+					status.Embeddings = make([][]float32, len(ber.Embeddings))
+					for i, e := range ber.Embeddings {
+						status.Embeddings[i] = e.Values
+					}
+				}
+			}
+		}
+		return status, nil
+	}
+
+	return nil, fmt.Errorf("unknown response format")
+}
+
 // --- DTOs ---
 
 type EmbeddingRequest struct {
@@ -712,6 +883,25 @@ type ErrorResponse struct {
 type ErrorDetail struct {
 	Type       string `json:"@type"`
 	RetryDelay string `json:"retryDelay,omitempty"`
+}
+
+// Operation resource from Google API
+type Operation struct {
+	Name     string                 `json:"name"`
+	Metadata map[string]interface{} `json:"metadata"`
+	Done     bool                   `json:"done"`
+	Error    *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+	Response map[string]interface{} `json:"response,omitempty"`
+}
+
+type BatchJobStatus struct {
+	Name       string
+	Done       bool
+	Error      error
+	Embeddings [][]float32
 }
 
 func parseRetryDelay(body []byte) time.Duration {

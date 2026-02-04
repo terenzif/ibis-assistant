@@ -15,6 +15,7 @@ const (
 	TableFileChunk = "file_chunk"
 	TableIssue     = "issue"   // Redmine Issue
 	TableTracker   = "tracker" // Redmine Tracker/Epic
+	TableBatchJob  = "batch_job" // Gemini Async Batch Job
 
 	// Edges
 	EdgeContains   = "contains"   // Repo -> Branch, Repo -> File
@@ -31,6 +32,13 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),
 	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path UNIQUE;", TableFile),
 	fmt.Sprintf("DEFINE INDEX issue_id ON TABLE %s COLUMNS id UNIQUE;", TableIssue),
+
+	// Batch Job Indexes
+	fmt.Sprintf("DEFINE INDEX job_status ON TABLE %s COLUMNS status;", TableBatchJob),
+
+	// Chunk Indexes for Async Workflow
+	fmt.Sprintf("DEFINE INDEX chunk_batch_id ON TABLE %s COLUMNS batch_id;", TableFileChunk),
+	fmt.Sprintf("DEFINE INDEX chunk_batch_status ON TABLE %s COLUMNS batch_status;", TableFileChunk),
 
 	// Vector Index
 	fmt.Sprintf("DEFINE INDEX vector_embedding ON TABLE %s COLUMNS embedding M-TREE DIMENSION 768 DIST COSINE;", TableFileChunk),
