@@ -162,7 +162,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		// Verify UPDATE is called for chunks
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
-			if strings.HasPrefix(sql, "UPDATE file_chunk") {
+			if strings.Contains(sql, "UPDATE file_chunk") {
 				foundUpdate = true
 				break
 			}
@@ -393,4 +393,96 @@ func getHash(s string) (string, error) {
 	h := sha256.New()
 	h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func BenchmarkIngestCodebase_Write(b *testing.B) {
+	// Setup temp repo
+	tmpDir, err := os.MkdirTemp("", "repo_write_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a large file to generate many chunks
+	// 1000 lines * 100 chars = 100KB per chunk approx if max is 1000
+	// But chunking logic uses 1000 *bytes* approximately.
+	// We want ~10 batches of 10 chunks = 100 chunks.
+	// 100 chunks * 1000 bytes = 100KB file.
+
+	filePath := filepath.Join(tmpDir, "large.go")
+	line := strings.Repeat("A", 100) + "\n"
+	content := strings.Repeat(line, 2000) // 200KB
+
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		b.Fatal(err)
+	}
+
+	mockDB := &MockDB{
+		ReturnData: map[string]interface{}{}, // Always return nil -> force write
+	}
+	mockAI := &MockAI{}
+	cfg := config.Load()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mockDB.ExecuteCalls = nil
+		mockAI.BatchEmbedCalls = nil
+
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+		if err != nil {
+			b.Fatalf("Error: %v", err)
+		}
+	}
+}
+
+func TestIngestCodebase_Batching(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a file large enough to produce > 10 chunks (batch size)
+	// 20 chunks should result in 2 batches => 2 Transactions.
+	filePath := filepath.Join(tmpDir, "batch.go")
+	line := strings.Repeat("A", 100) + "\n"
+	content := strings.Repeat(line, 250) // ~25KB. Chunk size 1000 => ~25 chunks.
+
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mockDB := &MockDB{
+		ReturnData: map[string]interface{}{}, // Force updates
+	}
+	mockAI := &MockAI{}
+	cfg := config.Load()
+
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("Error: %v", err)
+	}
+
+	// Count DB update calls
+	transactionCount := 0
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.Contains(sql, "BEGIN TRANSACTION") {
+			transactionCount++
+		}
+	}
+
+	// We expect roughly 3 transactions (25 chunks / 10 = 2.5 => 3 batches)
+	if transactionCount != 3 {
+		t.Errorf("Expected 3 batched transactions, got %d", transactionCount)
+	}
+
+	// Ensure no individual updates outside transaction
+	updateCount := 0
+	for _, sql := range mockDB.ExecuteCalls {
+		// "UPDATE file_chunk" appears inside the big string, but `Execute` receives the WHOLE string.
+		// So checking if the string STARTS with UPDATE vs BEGIN.
+		if strings.HasPrefix(sql, "UPDATE file_chunk") {
+			updateCount++
+		}
+	}
+
+	if updateCount > 0 {
+		t.Errorf("Found %d unbatched individual chunk updates!", updateCount)
+	}
 }
