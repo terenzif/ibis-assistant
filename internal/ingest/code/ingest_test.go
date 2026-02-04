@@ -41,7 +41,7 @@ type MockAI struct {
 	BatchEmbedCalls [][]string
 }
 
-func (m *MockAI) BatchEmbedText(texts []string) ([][]float32, error) {
+func (m *MockAI) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
 	m.BatchEmbedCalls = append(m.BatchEmbedCalls, texts)
 	// Return dummy embeddings
 	result := make([][]float32, len(texts))

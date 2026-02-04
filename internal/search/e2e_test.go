@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -99,7 +100,7 @@ func TestEndToEnd_SearchReinforcement(t *testing.T) {
 	}
 
 	// 2. Execute Search
-	results, err := svc.AskProject("how does main.go work?")
+	results, err := svc.AskProject(context.Background(), "how does main.go work?")
 	if err != nil {
 		t.Fatalf("AskProject failed: %v", err)
 	}

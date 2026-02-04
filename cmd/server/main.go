@@ -366,7 +366,7 @@ func runServer(ctx context.Context) {
 		if !ok { return mcp.NewToolResultError("Invalid arguments"), nil }
 		query, _ := args["query"].(string)
 
-		results, err := searchService.AskProject(query)
+		results, err := searchService.AskProject(ctx, query)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 		}

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -69,7 +70,7 @@ func TestSearchLifecycle(t *testing.T) {
 	}
 
 	// Step 1: User asks a question
-	results, err := svc.AskProject("how does file.go work?")
+	results, err := svc.AskProject(context.Background(), "how does file.go work?")
 	if err != nil {
 		t.Fatalf("AskProject failed: %v", err)
 	}
