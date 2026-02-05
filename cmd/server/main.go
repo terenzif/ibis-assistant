@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/ai"
 	"github.com/deckonline/knowledge_mcp/internal/auth"
@@ -207,6 +208,9 @@ func runServer(ctx context.Context) {
 	if err != nil {
 		logger.Error("CRITICAL: Failed to connect to SurrealDB: %v", err)
 	} else {
+		if cfg.DBTimeout > 0 {
+			dbClient.SetTimeout(time.Duration(cfg.DBTimeout) * time.Second)
+		}
 		defer dbClient.Close()
 		logger.Info("Successfully connected to SurrealDB.")
 	}
