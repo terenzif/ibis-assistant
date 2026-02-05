@@ -3,10 +3,14 @@ package db
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/surrealdb/surrealdb.go" // Standard driver
+	"github.com/surrealdb/surrealdb.go/pkg/connection"
+	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
 )
 
 type Executor interface {
@@ -30,9 +34,31 @@ func (c *Client) SetTimeout(d time.Duration) {
 func NewClient(endpoint, ns, db, user, pass string) (*Client, error) {
 	// Connect to SurrealDB
 	logger.Info("Connecting to SurrealDB at %s...", endpoint)
-	dbConn, err := surrealdb.New(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create surrealdb client: %w", err)
+
+	var dbConn *surrealdb.DB
+	var err error
+
+	// Custom connection creation to disable internal driver timeouts for WebSockets
+	u, parseErr := url.ParseRequestURI(endpoint)
+	if parseErr == nil && (u.Scheme == "ws" || u.Scheme == "wss") {
+		logger.Info("Detected WebSocket connection, applying custom timeout configuration...")
+		conf := connection.NewConfig(u)
+		ws := gorillaws.New(conf)
+		ws.Timeout = 0 // Disable internal driver timeout, rely on Context
+
+		dbConn, err = surrealdb.FromConnection(context.Background(), ws)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create custom surrealdb client: %w", err)
+		}
+	} else {
+		// Fallback for HTTP or invalid URL (though New checks it too)
+		if strings.HasPrefix(endpoint, "http") {
+			logger.Warn("Using HTTP connection. Warning: The driver enforces a 10s timeout on HTTP which cannot be overridden.")
+		}
+		dbConn, err = surrealdb.New(endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create surrealdb client: %w", err)
+		}
 	}
 
 	// Sign in
@@ -48,8 +74,8 @@ func NewClient(endpoint, ns, db, user, pass string) (*Client, error) {
 		return nil, fmt.Errorf("failed to use ns/db: %w", err)
 	}
 
-	// Default timeout 60s
-	return &Client{DB: dbConn, Timeout: 60 * time.Second}, nil
+	// Default timeout 300s (5m)
+	return &Client{DB: dbConn, Timeout: 300 * time.Second}, nil
 }
 
 func (c *Client) Close() {

@@ -61,7 +61,7 @@ func Load(paths ...string) *Config {
 		GeminiDefaultRPM: 100,
 		RedmineConcurrency: 10,
 		CodeConcurrency:    5,
-		DBTimeout:          60,
+		DBTimeout:          300,
 		DiscoveryRoot:    ".",
 		AutoScan:         true,
 		LogLevel:         "INFO",
