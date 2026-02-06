@@ -3,7 +3,6 @@ package git
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -114,14 +113,14 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 				return fmt.Errorf("failed to check existing commits: %w", err)
 			}
 
-			// Parse result to find existing
-			bytes, _ := json.Marshal(resRaw)
-			var foundCommits []struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(bytes, &foundCommits); err == nil {
-				for _, c := range foundCommits {
-					idMap[c.ID] = true
+			// Parse result to find existing (Optimized: Direct Type Assertion)
+			if results, ok := resRaw.([]interface{}); ok {
+				for _, item := range results {
+					if props, ok := item.(map[string]interface{}); ok {
+						if id, ok := props["id"].(string); ok {
+							idMap[id] = true
+						}
+					}
 				}
 			}
 
