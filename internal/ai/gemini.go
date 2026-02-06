@@ -94,6 +94,9 @@ type worker struct {
 	lastResetRPD time.Time
 
 	usageID string // Cached DB ID for today
+
+	mu            sync.Mutex
+	flushInterval time.Duration
 }
 
 func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
@@ -307,6 +310,7 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 		maxBucket:  maxBucket,
 		refillRate: refillRate,
 		lastRefill: time.Now(),
+		flushInterval: 5 * time.Second,
 	}
 
 	w.updateUsageID()
@@ -317,6 +321,8 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 
 func (w *worker) startLoop(embedQueue <-chan EmbedJob, genQueue <-chan GenerateJob, ctx context.Context) {
 	logger.Info("AI Worker started for key ...%s", w.shortKey())
+
+	go w.flushLoop(ctx)
 
 	for {
 		select {
@@ -442,28 +448,44 @@ func (w *worker) waitRateLimits(texts []string, ctx context.Context) {
 	now := time.Now()
 
 	// Reset Counters if needed
+	w.mu.Lock()
 	if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
+		// Flush final usage for the previous day
+		w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
+
 		w.usedRPD = 0
 		w.lastResetRPD = now
 		w.updateUsageID()
 	}
+	// Store these values to check constraints without holding lock during sleep
+	limitRPD := w.limitRPD
+	usedRPD := w.usedRPD
+	w.mu.Unlock()
 
 	// Check RPD (Hard Stop)
-	if w.limitRPD > 0 && w.usedRPD+1 > w.limitRPD {
+	if limitRPD > 0 && usedRPD+1 > limitRPD {
 		// This worker is done for the day.
-		logger.Warn("AI Worker (...%s) exhausted RPD (%d). Pausing...", w.shortKey(), w.limitRPD)
+		logger.Warn("AI Worker (...%s) exhausted RPD (%d). Pausing...", w.shortKey(), limitRPD)
 		for {
 			if err := sleepContext(ctx, 10*time.Minute); err != nil {
 				return
 			}
 			now = time.Now()
+
+			w.mu.Lock()
+			// Check if day changed while sleeping
 			if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
 				// New Day!
+				// Flush final usage for the previous day
+				w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
+
 				w.usedRPD = 0
 				w.lastResetRPD = now
 				w.updateUsageID()
+				w.mu.Unlock()
 				break
 			}
+			w.mu.Unlock()
 		}
 	}
 
@@ -513,10 +535,10 @@ func (w *worker) waitRateLimits(texts []string, ctx context.Context) {
 
 	// Update State
 	w.nextAvailable = time.Now().Add(w.costInterval)
-	w.usedRPD++
 
-	// Update DB (Async)
-	go w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
+	w.mu.Lock()
+	w.usedRPD++
+	w.mu.Unlock()
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
@@ -525,6 +547,48 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	case <-time.After(d):
 		return nil
+	}
+}
+
+func (w *worker) flushLoop(ctx context.Context) {
+	ticker := time.NewTicker(w.flushInterval)
+	defer ticker.Stop()
+
+	// Track last flushed values locally to avoid holding lock unnecessarily
+	var lastFlushedRPD int = -1
+	var lastFlushedID string = ""
+
+	// Initial sync (optional, or wait for first tick)
+	w.mu.Lock()
+	lastFlushedRPD = w.usedRPD
+	lastFlushedID = w.usageID
+	w.mu.Unlock()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Final flush
+			w.mu.Lock()
+			currRPD := w.usedRPD
+			currID := w.usageID
+			w.mu.Unlock()
+			if currRPD != lastFlushedRPD || currID != lastFlushedID {
+				w.updateDBUsage(currID, currRPD, w.owner)
+			}
+			return
+
+		case <-ticker.C:
+			w.mu.Lock()
+			currRPD := w.usedRPD
+			currID := w.usageID
+			w.mu.Unlock()
+
+			if currRPD != lastFlushedRPD || currID != lastFlushedID {
+				w.updateDBUsage(currID, currRPD, w.owner)
+				lastFlushedRPD = currRPD
+				lastFlushedID = currID
+			}
+		}
 	}
 }
 
