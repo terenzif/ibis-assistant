@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -390,7 +391,7 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 	// NOTE: We do NOT delete old chunks anymore. We keep history.
 
 	// Batching Logic
-	batchSize := 10
+	batchSize := 100
 	for i := 0; i < len(chunks); i += batchSize {
 		end := i + batchSize
 		if end > len(chunks) {
@@ -416,10 +417,13 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 
 		// Store Chunks with batch_status = 'pending'
 		// No Embeddings yet.
-		var transaction strings.Builder
-		transaction.WriteString("BEGIN TRANSACTION; ")
+		var qlBuilder strings.Builder
+		qlBuilder.WriteString(fmt.Sprintf("INSERT INTO %s [", schema.TableFileChunk))
 
 		for k, chunkContentStr := range validBatch {
+			if k > 0 {
+				qlBuilder.WriteString(", ")
+			}
 			originalIndex := validIndices[k]
 
 			// Chunk ID needs to include hash or be unique per version to avoid collision?
@@ -434,16 +438,22 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 
 			// We also store `hash` field for filtering.
 			// embedding = NONE
-			ql := fmt.Sprintf("UPDATE %s SET file = %s, hash = '%s', content = '%s', embedding = NONE, batch_status = 'pending';",
-				chunkID, fileID, hash, db.EscapeSQL(chunkContentStr))
+			contentBytes, _ := json.Marshal(chunkContentStr)
+			ql := fmt.Sprintf(`{
+				id: %s,
+				file: %s,
+				hash: '%s',
+				content: %s,
+				embedding: NONE,
+				batch_status: 'pending'
+			}`, chunkID, fileID, hash, string(contentBytes))
 
-			transaction.WriteString(ql)
-			transaction.WriteString(" ")
+			qlBuilder.WriteString(ql)
 		}
 
-		transaction.WriteString("COMMIT TRANSACTION;")
+		qlBuilder.WriteString("];")
 
-		if _, err := dbClient.Execute(transaction.String()); err != nil {
+		if _, err := dbClient.Execute(qlBuilder.String()); err != nil {
 			logger.Error("Failed to persist pending chunks for %s: %v", path, err)
 		}
 		logger.Info("  - Queued %d/%d chunks for %s", end, len(chunks), filepath.Base(path))

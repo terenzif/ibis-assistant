@@ -128,9 +128,9 @@ func TestIngestCodebase_Delta(t *testing.T) {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
 
-		// Verify no UPDATE calls
+		// Verify no INSERT calls
 		for _, sql := range mockDB.ExecuteCalls {
-			if strings.Contains(sql, "UPDATE file_chunk") {
+			if strings.Contains(sql, "INSERT INTO file_chunk") {
 				t.Errorf("Processed embedding (Unoptimized) - Expected 0 chunk updates, got call: %s", sql)
 			}
 		}
@@ -148,16 +148,17 @@ func TestIngestCodebase_Delta(t *testing.T) {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
 
-		// Verify UPDATE is called for chunks
+		// Verify INSERT is called for chunks
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
-			if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+			// Check for JSON-style assignment in INSERT
+			if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
 				foundUpdate = true
 				break
 			}
 		}
 		if !foundUpdate {
-			t.Errorf("Expected UPDATE file_chunk statement with batch_status='pending', but not found. Calls: %v", mockDB.ExecuteCalls)
+			t.Errorf("Expected INSERT INTO file_chunk statement with batch_status: 'pending', but not found. Calls: %v", mockDB.ExecuteCalls)
 		}
 	})
 }
@@ -339,13 +340,13 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Check for INSERT (Queueing)
 	foundInsert := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+		if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
 			foundInsert = true
 			break
 		}
 	}
 	if !foundInsert {
-		t.Errorf("Expected V1 to be queued (UPDATE file_chunk ... pending)")
+		t.Errorf("Expected V1 to be queued (INSERT INTO file_chunk ... pending)")
 	}
 
 	// 2. Ingest V2 (Different content)
@@ -356,7 +357,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Check for INSERT (Queueing)
 	foundInsertV2 := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+		if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
 			foundInsertV2 = true
 			break
 		}
@@ -386,7 +387,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 
 	// Verify NO queuing happened
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "UPDATE file_chunk") && strings.Contains(sql, "batch_status = 'pending'") {
+		if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
 			t.Errorf("Expected 0 queuing calls for returning to V1 (Cache Hit), got call: %s", sql)
 		}
 	}
@@ -436,7 +437,7 @@ func TestIngestCodebase_Batching(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a file large enough to produce > 10 chunks (batch size)
-	// 20 chunks should result in 2 batches => 2 Transactions.
+	// 25 chunks should result in 1 batch (batch size 100).
 	filePath := filepath.Join(tmpDir, "batch.go")
 	line := strings.Repeat("A", 100) + "\n"
 	content := strings.Repeat(line, 250) // ~25KB. Chunk size 1000 => ~25 chunks.
@@ -457,29 +458,15 @@ func TestIngestCodebase_Batching(t *testing.T) {
 	}
 
 	// Count DB update calls
-	transactionCount := 0
+	insertCount := 0
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "BEGIN TRANSACTION") {
-			transactionCount++
+		if strings.Contains(sql, "INSERT INTO file_chunk") {
+			insertCount++
 		}
 	}
 
-	// We expect roughly 3 transactions (25 chunks / 10 = 2.5 => 3 batches)
-	if transactionCount != 3 {
-		t.Errorf("Expected 3 batched transactions, got %d", transactionCount)
-	}
-
-	// Ensure no individual updates outside transaction
-	updateCount := 0
-	for _, sql := range mockDB.ExecuteCalls {
-		// "UPDATE file_chunk" appears inside the big string, but `Execute` receives the WHOLE string.
-		// So checking if the string STARTS with UPDATE vs BEGIN.
-		if strings.HasPrefix(sql, "UPDATE file_chunk") {
-			updateCount++
-		}
-	}
-
-	if updateCount > 0 {
-		t.Errorf("Found %d unbatched individual chunk updates!", updateCount)
+	// We expect 1 batch (25 chunks < 100)
+	if insertCount != 1 {
+		t.Errorf("Expected 1 batched INSERT, got %d", insertCount)
 	}
 }
