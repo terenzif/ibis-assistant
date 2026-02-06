@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/ai"
@@ -76,21 +77,19 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		}
 		history = append(history, modelContent)
 
-		// Parse Response
-		if strings.Contains(response, "FINAL ANSWER:") {
-			parts := strings.Split(response, "FINAL ANSWER:")
-			if len(parts) > 1 {
-				result.Answer = strings.TrimSpace(parts[1])
-			} else {
-				result.Answer = response
-			}
+		// Parse Response (Case Insensitive using Regex to be Unicode safe)
+		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
+		if loc := reFinal.FindStringIndex(response); loc != nil {
+			// loc[1] is the end index of the match
+			answerPart := response[loc[1]:]
+			result.Answer = strings.TrimSpace(answerPart)
 			break
 		}
 
-		if strings.Contains(response, "SEARCH:") {
+		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		if loc := reSearch.FindStringIndex(response); loc != nil {
 			// Extract query
-			idx := strings.Index(response, "SEARCH:")
-			rest := response[idx+7:]
+			rest := response[loc[1]:]
 			lineEnd := strings.Index(rest, "\n")
 			searchQuery := ""
 			if lineEnd == -1 {
@@ -98,6 +97,9 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			} else {
 				searchQuery = strings.TrimSpace(rest[:lineEnd])
 			}
+
+			// Robustness: Strip quotes if the model wrapped the query in them
+			searchQuery = strings.Trim(searchQuery, "\"'")
 
 			logger.Info("Agentic Search Step %d: Searching for '%s'", i+1, searchQuery)
 
