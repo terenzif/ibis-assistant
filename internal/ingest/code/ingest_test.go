@@ -470,3 +470,38 @@ func TestIngestCodebase_Batching(t *testing.T) {
 		t.Errorf("Expected 1 batched INSERT, got %d", insertCount)
 	}
 }
+
+func TestIngestCodebase_Pruning_QuerySyntax(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Load()
+
+	// Mock DB to capture query
+	mockDB := &MockDB{
+		ReturnData: map[string]interface{}{},
+	}
+	mockAI := &MockAI{}
+
+	// We just need to trigger pruneRepo.
+	// It's called at the end of IngestCodebase.
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("IngestCodebase failed: %v", err)
+	}
+
+	foundQuery := false
+	for _, sql := range mockDB.ExecuteCalls {
+		if strings.Contains(sql, "SELECT id, path FROM file WHERE") {
+			foundQuery = true
+			if strings.Contains(sql, "BEGINSWITH") {
+				t.Errorf("Query uses deprecated BEGINSWITH syntax: %s", sql)
+			}
+			if !strings.Contains(sql, "string::starts_with") {
+				t.Errorf("Query should use string::starts_with syntax: %s", sql)
+			}
+		}
+	}
+
+	if !foundQuery {
+		t.Errorf("Pruning query not found in calls: %v", mockDB.ExecuteCalls)
+	}
+}

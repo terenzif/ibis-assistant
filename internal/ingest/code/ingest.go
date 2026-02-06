@@ -171,7 +171,7 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 	// Fetch all files in this repo from DB
 	separator := string(os.PathSeparator)
 	queryPrefix := db.EscapeSQL(repoPath + separator)
-	ql := fmt.Sprintf("SELECT id, path FROM %s WHERE path BEGINSWITH '%s';", schema.TableFile, queryPrefix)
+	ql := fmt.Sprintf("SELECT id, path FROM %s WHERE string::starts_with(path, '%s');", schema.TableFile, queryPrefix)
 
 	res, err := dbClient.Execute(ql)
 	if err != nil {
