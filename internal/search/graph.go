@@ -133,10 +133,7 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 			authorName = tc.Author[0]
 		}
 
-		// Lookup impact using Commit ID (which we need to fetch, oops, query didn't select 'id' explicitly in object?
-		// SurrealDB returns 'id' by default for records. Let's hope json unmarshal catches it if we add field)
-		// Added ID to tempCommit.
-
+		// Lookup impact using Commit ID
 		impact := 0.0
 		if val, ok := impactMap[tc.ID]; ok {
 			impact = val

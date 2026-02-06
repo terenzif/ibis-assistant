@@ -57,8 +57,7 @@ func TestGetFileContext_Success(t *testing.T) {
 
 	c := ctx.Commits[0]
 
-	// We EXPECT the impact to be 0.8, but due to the bug (missing ID), it will be 0.0.
-	// This test is expected to FAIL until we fix the code.
+	// Impact should be correctly mapped using the ID
 	if c.Impact != 0.8 {
 		t.Errorf("Expected Impact 0.8, got %f", c.Impact)
 	}
