@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// loadIgnorePatterns reads .gitignore and .knowledgeignore
+// loadIgnorePatterns reads .gitignore and .aiignore
 func loadIgnorePatterns(repoPath string) ([]string, error) {
 	var patterns []string
-	// Order: .gitignore first, then .knowledgeignore (so knowledgeignore can add more, or conceptually "override" if we had negation)
+	// Order: .gitignore first, then .aiignore (so aiignore can add more, or conceptually "override" if we had negation)
 	// Actually order doesn't matter for union.
-	files := []string{".gitignore", ".knowledgeignore"}
+	files := []string{".gitignore", ".aiignore"}
 
 	for _, name := range files {
 		f, err := os.Open(filepath.Join(repoPath, name))
