@@ -274,14 +274,14 @@ func processGitLogStream(
 			authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, db.SanitizeID(authorName))
 
 			// --- Batch Construction ---
-			
+
 			// 1. Upsert Author
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET name = '%s';\n", authorID, db.EscapeSQL(authorName)))
 
 			// 2. Create Commit (Using UPDATE to be safe/idempotent)
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s;\n",
 				commitID, hash, date, db.EscapeSQL(subject), repoID))
-			
+
 			// 3. Link Author -> Commit
 			batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", authorID, schema.EdgeAuthored, commitID))
 
@@ -307,8 +307,9 @@ func processGitLogStream(
 						issueIDStr := subject[start:end]
 						// Create Issue Node (Placeholder first)
 						issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
-						
+
 						// In-Band Ingestion: Trigger Redmine fetch if client is available
+						// Use a semaphore to bound concurrency to avoid excessive goroutines and API rate limits
 						if redmineClient != nil {
 							wg.Add(1)
 							select {
@@ -324,8 +325,8 @@ func processGitLogStream(
 								wg.Done()
 							}
 						} else {
-						    // Just ensure existence
-						    batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
+							// Just ensure existence
+							batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
 						}
 
 						// Link Commit -> Issue with default confidence/weight
@@ -384,8 +385,18 @@ func processGitLogStream(
 			}
 
 			// Handle binary
-			if addedStr == "-" { added = 0 } else { a, _ := strconv.Atoi(addedStr); added = a }
-			if deletedStr == "-" { deleted = 0 } else { d, _ := strconv.Atoi(deletedStr); deleted = d }
+			if addedStr == "-" {
+				added = 0
+			} else {
+				a, _ := strconv.Atoi(addedStr)
+				added = a
+			}
+			if deletedStr == "-" {
+				deleted = 0
+			} else {
+				d, _ := strconv.Atoi(deletedStr)
+				deleted = d
+			}
 
 			// Handle quoted paths
 			if strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"") {
@@ -402,7 +413,9 @@ func processGitLogStream(
 			impact := 0.0
 			if totalChanged > 0 {
 				impact = math.Log10(totalChanged + 1)
-				if impact > 1.0 { impact = 1.0 } // Normalize? Log10(10)=1, Log10(100)=2.
+				if impact > 1.0 {
+					impact = 1.0
+				} // Normalize? Log10(10)=1, Log10(100)=2.
 				// Maybe sigmoid? Or just raw log.
 				// Spec says "float 0.0-1.0".
 				// Let's limit it. If > 100 lines, impact = 1.0?
@@ -411,10 +424,10 @@ func processGitLogStream(
 			}
 
 			fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(path))
-			
+
 			// 1. Upsert File
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, db.EscapeSQL(path)))
-			
+
 			// 3. Link Commit -> File (Changed) with Impact
 			if currentCommitID != "" {
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET impact = %f, added = %d, deleted = %d;\n",
