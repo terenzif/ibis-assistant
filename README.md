@@ -126,26 +126,28 @@ Per eseguire azioni che richiedono l'identità dell'utente (es. `redmine_update_
 
 Se questo header non è presente, il server utilizzerà la *System Key* (sola lettura/globale) definita in `config.json`. Le azioni di scrittura falliranno senza una chiave utente valida.
 
-#### 1. Claude Desktop
+#### 1. Claude Desktop (Windows/Mac)
 
-Configura il client per connettersi allo stream SSE remoto.
-File: `%APPDATA%\Claude\claude_desktop_config.json`
+Claude Desktop richiede un "bridge" locale per connettersi a server SSE remoti in modo affidabile. Forniamo uno strumento dedicato per questo scopo.
 
-```json
-{
-  "mcpServers": {
-    "knowledge-graph": {
-      "url": "http://localhost:3030/sse",
-      "headers": {
-        "X-Redmine-API-Key": "YOUR_USER_KEY"
+**[👉 Guida all'Integrazione Claude](docs/CLAUDE_INTEGRATION.md)**
+
+Riassunto rapido:
+1.  Compila il bridge: `go build -o mcp-bridge.exe ./tools/mcp-bridge`
+2.  Configura `%APPDATA%\Claude\claude_desktop_config.json`:
+    ```json
+    {
+      "mcpServers": {
+        "knowledge-graph": {
+          "command": "C:/path/to/mcp-bridge.exe",
+          "args": [
+             "-url", "http://localhost:3030/sse",
+             "-key", "YOUR_REDMINE_KEY"
+          ]
+        }
       }
     }
-  }
-}
-```
-*Nota: Il supporto per gli header personalizzati dipende dalla versione di Claude Desktop / Client MCP.*
-
-*Nota*: Se la versione corrente di Claude Desktop supporta solo Stdio, utilizzare un bridge locale o attendere l'aggiornamento.
+    ```
 
 #### 2. Visual Studio Code
 
