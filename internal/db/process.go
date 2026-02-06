@@ -24,9 +24,9 @@ func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, 
 		binName = "surreal.exe"
 	}
 
-	// Check if binary exists in CWD
-	if _, err := os.Stat(binName); os.IsNotExist(err) {
-		return nil, fmt.Errorf("database binary '%s' not found in current directory", binName)
+	// Ensure binary exists and is up to date
+	if err := EnsureSurrealDB(); err != nil {
+		return nil, fmt.Errorf("failed to ensure database binary: %w", err)
 	}
 
 	// Construct command
