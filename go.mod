@@ -3,6 +3,7 @@ module github.com/deckonline/knowledge_mcp
 go 1.25.5
 
 require (
+	github.com/kardianos/service v1.2.4
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/surrealdb/surrealdb.go v1.0.0
 )
@@ -15,7 +16,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
-	github.com/kardianos/service v1.2.4 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
