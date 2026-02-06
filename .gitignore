@@ -1,6 +1,8 @@
 # Binaries
 *.exe
 *.dll
+server
+surreal.exe
 
 # Database
 knowledge.db
