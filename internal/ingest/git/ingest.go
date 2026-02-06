@@ -115,13 +115,25 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			}
 
 			// Parse result to find existing
-			bytes, _ := json.Marshal(resRaw)
-			var foundCommits []struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(bytes, &foundCommits); err == nil {
-				for _, c := range foundCommits {
-					idMap[c.ID] = true
+			// Try direct type assertion first for performance
+			if rows, ok := resRaw.([]interface{}); ok {
+				for _, row := range rows {
+					if obj, ok := row.(map[string]interface{}); ok {
+						if id, ok := obj["id"].(string); ok {
+							idMap[id] = true
+						}
+					}
+				}
+			} else {
+				// Fallback to JSON marshaling
+				bytes, _ := json.Marshal(resRaw)
+				var foundCommits []struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(bytes, &foundCommits); err == nil {
+					for _, c := range foundCommits {
+						idMap[c.ID] = true
+					}
 				}
 			}
 
@@ -310,6 +322,7 @@ func processGitLogStream(
 						issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
 						
 						// In-Band Ingestion: Trigger Redmine fetch if client is available
+						// Use a semaphore to bound concurrency to avoid excessive goroutines and API rate limits
 						if redmineClient != nil {
 							wg.Add(1)
 							select {
