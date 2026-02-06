@@ -254,12 +254,12 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 func TestIngestCodebase_Pruning(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// 1. Create a file that is ignored by .knowledgeignore
+	// 1. Create a file that is ignored by .aiexclude
 	ignoredFile := filepath.Join(tmpDir, "secret.go")
 	os.WriteFile(ignoredFile, []byte("secret"), 0644)
 
-	// 2. Create .knowledgeignore
-	os.WriteFile(filepath.Join(tmpDir, ".knowledgeignore"), []byte("secret.go"), 0644)
+	// 2. Create .aiexclude
+	os.WriteFile(filepath.Join(tmpDir, ".aiexclude"), []byte("secret.go"), 0644)
 
 	// 3. Setup Config
 	cfg := config.Load()
