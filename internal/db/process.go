@@ -24,9 +24,15 @@ func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, 
 		binName = "surreal.exe"
 	}
 
-	// Check if binary exists in CWD
+	// Check if binary exists in CWD or PATH
+	cmdPath := "./" + binName
 	if _, err := os.Stat(binName); os.IsNotExist(err) {
-		return nil, fmt.Errorf("database binary '%s' not found in current directory", binName)
+		// Fallback to PATH
+		path, err := exec.LookPath(binName)
+		if err != nil {
+			return nil, fmt.Errorf("database binary '%s' not found in current directory or PATH: %w", binName, err)
+		}
+		cmdPath = path
 	}
 
 	// Construct command
@@ -42,7 +48,7 @@ func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, 
 		fileArg,
 	}
 
-	cmd := exec.Command("./" + binName, args...)
+	cmd := exec.Command(cmdPath, args...)
 	
 	// Check if log file exists/create it
 	logFile, err := os.OpenFile("surreal.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
