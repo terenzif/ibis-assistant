@@ -12,9 +12,11 @@ import (
 // TestAgentMockAI implements AIProvider for testing Agentic flow
 type TestAgentMockAI struct {
 	GenerateFunc func(contents []ai.Content) (ai.Candidate, error)
+	EmbedCalls   []string
 }
 
 func (m *TestAgentMockAI) EmbedText(ctx context.Context, text string) ([]float32, error) {
+	m.EmbedCalls = append(m.EmbedCalls, text)
 	// Return a dummy vector
 	return []float32{0.1, 0.2, 0.3}, nil
 }
