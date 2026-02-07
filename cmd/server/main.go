@@ -585,6 +585,9 @@ func runServer(ctx context.Context) {
 		dbClient.Close()
 	}
 
+	// Give the websocket connection time to close properly before killing the DB process
+	time.Sleep(500 * time.Millisecond)
+
 	// 4. Stop DB Process
 	if dbProcess != nil {
 		logger.Info("Stopping embedded database process...")

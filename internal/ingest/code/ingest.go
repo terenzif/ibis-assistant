@@ -416,42 +416,26 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 		}
 
 		// Store Chunks with batch_status = 'pending'
-		// No Embeddings yet.
+		// Use idempotent CREATE IF NOT EXISTS logic via IF statement to avoid "record already exists" errors
+		// and to preserve existing embeddings if we are resuming a partial ingest.
 		var qlBuilder strings.Builder
-		qlBuilder.WriteString(fmt.Sprintf("INSERT INTO %s [", schema.TableFileChunk))
+		qlBuilder.WriteString("BEGIN TRANSACTION; ")
 
 		for k, chunkContentStr := range validBatch {
-			if k > 0 {
-				qlBuilder.WriteString(", ")
-			}
 			originalIndex := validIndices[k]
-
-			// Chunk ID needs to include hash or be unique per version to avoid collision?
-			// Old ID: file:path_index.
-			// New ID: file:path_hash_index?
-			// If we use file:path_index, we overwrite old version chunks!
-			// YES, we must change Chunk ID to include Hash.
-			// sanitize(path) is stable.
-			// We append hash.
-
 			chunkID := fmt.Sprintf("%s:%s_%s_%d", schema.TableFileChunk, db.SanitizeID(path), hash, originalIndex)
 
-			// We also store `hash` field for filtering.
-			// embedding = NONE
 			contentBytes, _ := json.Marshal(chunkContentStr)
-			ql := fmt.Sprintf(`{
-				id: %s,
-				file: %s,
-				hash: '%s',
-				content: %s,
-				embedding: NONE,
-				batch_status: 'pending'
-			}`, chunkID, fileID, hash, string(contentBytes))
+
+			// Logic: IF (SELECT * FROM chunkID) IS EMPTY THEN CREATE chunkID ... END
+			// This ensures we only insert if it's missing, effectively an INSERT IGNORE.
+			ql := fmt.Sprintf(`IF array::len((SELECT * FROM %s)) = 0 THEN CREATE %s SET file=%s, hash='%s', content=%s, embedding=NONE, batch_status='pending'; END; `,
+				chunkID, chunkID, fileID, hash, string(contentBytes))
 
 			qlBuilder.WriteString(ql)
 		}
 
-		qlBuilder.WriteString("];")
+		qlBuilder.WriteString("COMMIT;")
 
 		if _, err := dbClient.Execute(qlBuilder.String()); err != nil {
 			logger.Error("Failed to persist pending chunks for %s: %v", path, err)
