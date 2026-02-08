@@ -79,17 +79,33 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 
 		// Parse Response (Case Insensitive using Regex to be Unicode safe)
 		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-		if loc := reFinal.FindStringIndex(response); loc != nil {
-			// loc[1] is the end index of the match
-			answerPart := response[loc[1]:]
-			result.Answer = strings.TrimSpace(answerPart)
-			break
-		}
+		locFinal := reFinal.FindStringIndex(response)
 
 		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
-		if loc := reSearch.FindStringIndex(response); loc != nil {
-			// Extract query
-			rest := response[loc[1]:]
+		locSearch := reSearch.FindStringIndex(response)
+
+		// Determine which action to take (priority to first occurrence)
+		action := "none"
+		if locFinal != nil && locSearch != nil {
+			if locFinal[0] < locSearch[0] {
+				action = "final"
+			} else {
+				action = "search"
+			}
+		} else if locFinal != nil {
+			action = "final"
+		} else if locSearch != nil {
+			action = "search"
+		}
+
+		if action == "final" {
+			// locFinal[1] is the end index of the match
+			answerPart := response[locFinal[1]:]
+			result.Answer = strings.TrimSpace(answerPart)
+			break
+		} else if action == "search" {
+			// Extract query using locSearch
+			rest := response[locSearch[1]:]
 			lineEnd := strings.Index(rest, "\n")
 			searchQuery := ""
 			if lineEnd == -1 {

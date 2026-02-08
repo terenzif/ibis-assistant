@@ -171,3 +171,80 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 		}
 	}
 }
+
+func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
+	// Reproduction of bug where FINAL ANSWER takes precedence even if SEARCH appears first.
+
+	mockDB := &TestAgentMockDB{
+		ReturnData: map[string]interface{}{
+			"FROM file_chunk": []map[string]interface{}{}, // Return empty, doesn't matter, we want to see if Search is called
+		},
+	}
+
+	stepCounter := 0
+	mockAI := &TestAgentMockAI{
+		GenerateFunc: func(contents []ai.Content) (ai.Candidate, error) {
+			stepCounter++
+			if stepCounter == 1 {
+				// The model outputs SEARCH first, then implies it will give a final answer later or confusingly mixes them.
+				// Current implementation checks FINAL ANSWER first.
+				return ai.Candidate{
+					Content: ai.Content{
+						Role: "model",
+						Parts: []ai.Part{
+							{Text: "I will SEARCH: \"something\" to find the FINAL ANSWER: 42"},
+						},
+					},
+				}, nil
+			}
+			// Should not reach here if bug exists (it will exit at step 1)
+			// If bug is fixed, it should search, then we return final answer
+			return ai.Candidate{
+				Content: ai.Content{
+					Role: "model",
+					Parts: []ai.Part{
+						{Text: "FINAL ANSWER: 42"},
+					},
+				},
+			}, nil
+		},
+	}
+
+	svc := &Service{
+		DB: mockDB,
+		AI: mockAI,
+	}
+
+	result, err := svc.AskProjectAgentic(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("AskProjectAgentic failed: %v", err)
+	}
+
+	// If bug exists:
+	// It sees "FINAL ANSWER: 42" in the first response.
+	// It extracts "42" (or "42" depending on regex).
+	// It does NOT execute search.
+	// result.Steps will have 1 element.
+
+	// If bug is fixed:
+	// It sees "SEARCH: \"something\"" first.
+	// It executes search.
+	// It goes to step 2.
+	// result.Steps will have 2 elements.
+
+	foundSearch := false
+	for _, sql := range mockDB.CapturedQueries {
+		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM file_chunk") {
+			foundSearch = true
+			break
+		}
+	}
+
+	if !foundSearch {
+		t.Errorf("BUG REPRODUCED: Search was NOT executed. The agent likely parsed FINAL ANSWER prematurely.")
+	}
+
+	if len(result.Steps) < 2 {
+		t.Errorf("BUG REPRODUCED: Expected at least 2 steps (Search -> Answer), got %d", len(result.Steps))
+	}
+}
