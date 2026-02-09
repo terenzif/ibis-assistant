@@ -1,6 +1,7 @@
 package search
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,68 @@ func TestGetFileContext_Success(t *testing.T) {
 
 	if c.Hash != "hash123" {
 		t.Errorf("Expected hash hash123, got %s", c.Hash)
+	}
+
+	// Verify Query Structure to prevent regression of "missing ID"
+	if len(mockDB.SmartCalls) > 0 {
+		query := mockDB.SmartCalls[0]
+		// We expect the query to select 'id' from commit
+		if !strings.Contains(query, "id,") && !strings.Contains(query, "id\n") {
+			t.Errorf("Query MUST select 'id' field to map impact correctly. Got: %s", query)
+		}
+	}
+}
+
+func TestGetFileContext_RobustID(t *testing.T) {
+	// Verify that GetFileContext handles non-string IDs robustly.
+
+	// Using int ID for 'in' and 'id' to simulate non-string types (like RecordID objects)
+	mockResponse := []interface{}{
+		map[string]interface{}{
+			"change_edges": []interface{}{
+				map[string]interface{}{
+					"in":     123, // int instead of string
+					"out":    "file:abc",
+					"impact": 0.8,
+				},
+			},
+			"history": []interface{}{
+				map[string]interface{}{
+					"id":      123, // int instead of string
+					"hash":    "hash123",
+					"message": "fix bug",
+					"date":    "2024-01-01T00:00:00Z",
+					"author":  []string{"dev"},
+					"issues":  []interface{}{},
+				},
+			},
+		},
+	}
+
+	mockDB := &MockDB{
+		ReturnData: map[string]interface{}{
+			"SELECT": mockResponse,
+		},
+	}
+
+	ctx, err := GetFileContext(mockDB, "/path/to/file")
+	if err != nil {
+		t.Fatalf("GetFileContext failed: %v", err)
+	}
+
+	if len(ctx.Commits) != 1 {
+		t.Fatalf("Expected 1 commit, got %d", len(ctx.Commits))
+	}
+
+	c := ctx.Commits[0]
+
+	// Impact should be correctly mapped using the converted ID "123"
+	if c.Impact != 0.8 {
+		t.Errorf("Expected Impact 0.8, got %f", c.Impact)
+	}
+
+	if c.ID != "123" {
+		t.Errorf("Expected ID '123', got '%v'", c.ID)
 	}
 }
 

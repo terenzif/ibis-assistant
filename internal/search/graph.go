@@ -87,7 +87,8 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 				// Wait. RELATE commit->changed->file.
 				// Query: <-changed means we are at file, looking at incoming edges.
 				// Incoming edge 'in' is the start node (commit). 'out' is the end node (file).
-				if inID, ok := em["in"].(string); ok {
+				if inRaw, ok := em["in"]; ok {
+					inID := fmt.Sprintf("%v", inRaw)
 					if imp, ok := em["impact"].(float64); ok {
 						impactMap[inID] = imp
 					}
@@ -106,9 +107,9 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 
 	// Temp struct matches projection
 	type tempCommit struct {
-		ID      string `json:"id"` // Need ID to map impact
-		Hash    string `json:"hash"`
-		Message string `json:"message"`
+		ID      interface{} `json:"id"` // Need ID to map impact
+		Hash    string      `json:"hash"`
+		Message string      `json:"message"`
 		Date    string `json:"date"`
 		Author  []string `json:"author"`
 		Issues  []struct {
@@ -133,14 +134,16 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 			authorName = tc.Author[0]
 		}
 
+		idStr := fmt.Sprintf("%v", tc.ID)
+
 		// Lookup impact using Commit ID
 		impact := 0.0
-		if val, ok := impactMap[tc.ID]; ok {
+		if val, ok := impactMap[idStr]; ok {
 			impact = val
 		}
 
 		c := CommitSummary{
-			ID:      tc.ID,
+			ID:      idStr,
 			Hash:    tc.Hash,
 			Message: tc.Message,
 			Date:    tc.Date,
