@@ -116,7 +116,7 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 			ID      interface{} `json:"id"`
 			Subject string      `json:"subject"`
 			Status  string      `json:"status"`
-			Weight  []float64   `json:"weight"` // Query ->implements.usage_weight returns array if multiple edges? usually 1.
+			Weight  interface{} `json:"weight"` // Can be float64 or []interface{} (depending on DB driver and result shape)
 		} `json:"issues"`
 	}
 
@@ -155,9 +155,18 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 		for _, iss := range tc.Issues {
 			idStr := fmt.Sprintf("%v", iss.ID)
 
+			// Handle potentially scalar or array weight
 			w := 1.0
-			if len(iss.Weight) > 0 {
-				w = iss.Weight[0]
+			switch val := iss.Weight.(type) {
+			case float64:
+				w = val
+			case []interface{}:
+				// If it's an array, take the first element if it's a number
+				if len(val) > 0 {
+					if f, ok := val[0].(float64); ok {
+						w = f
+					}
+				}
 			}
 
 			is := IssueSummary{
