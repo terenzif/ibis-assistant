@@ -42,7 +42,7 @@ func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, 
 		fileArg,
 	}
 
-	cmd := exec.Command(cmdPath, args...)
+	cmd := exec.Command(binName, args...)
 	
 	// Check if log file exists/create it
 	logFile, err := os.OpenFile("surreal.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
