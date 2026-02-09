@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/ai"
@@ -76,28 +77,73 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		}
 		history = append(history, modelContent)
 
-		// Parse Response
-		if strings.Contains(response, "FINAL ANSWER:") {
-			parts := strings.Split(response, "FINAL ANSWER:")
-			if len(parts) > 1 {
-				result.Answer = strings.TrimSpace(parts[1])
+		// Parse Response (Case Insensitive using Regex to be Unicode safe)
+		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
+		locFinal := reFinal.FindStringIndex(response)
+
+		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		locSearch := reSearch.FindStringIndex(response)
+
+		// Determine which action to take (prioritize the first occurrence)
+		isFinal := false
+		isSearch := false
+
+		if locFinal != nil && locSearch != nil {
+			if locFinal[0] < locSearch[0] {
+				isFinal = true
 			} else {
-				result.Answer = response
+				isSearch = true
 			}
+		} else if locFinal != nil {
+			isFinal = true
+		} else if locSearch != nil {
+			isSearch = true
+		}
+
+		if isFinal {
+			// locFinal[1] is the end index of the match
+			answerPart := response[locFinal[1]:]
+			result.Answer = strings.TrimSpace(answerPart)
 			break
 		}
 
-		if strings.Contains(response, "SEARCH:") {
+		if isSearch {
 			// Extract query
-			idx := strings.Index(response, "SEARCH:")
-			rest := response[idx+7:]
+			rest := response[locSearch[1]:]
 			lineEnd := strings.Index(rest, "\n")
-			searchQuery := ""
+
+			var rawQuery string
 			if lineEnd == -1 {
-				searchQuery = strings.TrimSpace(rest)
+				rawQuery = strings.TrimSpace(rest)
 			} else {
-				searchQuery = strings.TrimSpace(rest[:lineEnd])
+				rawQuery = strings.TrimSpace(rest[:lineEnd])
 			}
+
+			// Stop at FINAL ANSWER if present in the same line
+			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
+			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
+				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
+			}
+
+			// Clean up query logic
+			searchQuery := ""
+			// 1. Check for quotes at the start
+			if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
+				quote := rawQuery[0:1]
+				// Find next quote
+				endQuote := strings.Index(rawQuery[1:], quote)
+				if endQuote != -1 {
+					searchQuery = rawQuery[1 : 1+endQuote]
+				} else {
+					// Mismatched quotes, just strip leading
+					searchQuery = strings.TrimPrefix(rawQuery, quote)
+				}
+			} else {
+				// 2. If no quotes, just take the line but strip trailing punctuation
+				searchQuery = strings.TrimRight(rawQuery, ".")
+			}
+
+			searchQuery = strings.TrimSpace(searchQuery)
 
 			logger.Info("Agentic Search Step %d: Searching for '%s'", i+1, searchQuery)
 
