@@ -79,27 +79,71 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 
 		// Parse Response (Case Insensitive using Regex to be Unicode safe)
 		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-		if loc := reFinal.FindStringIndex(response); loc != nil {
-			// loc[1] is the end index of the match
-			answerPart := response[loc[1]:]
+		locFinal := reFinal.FindStringIndex(response)
+
+		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		locSearch := reSearch.FindStringIndex(response)
+
+		// Determine which action to take (prioritize the first occurrence)
+		isFinal := false
+		isSearch := false
+
+		if locFinal != nil && locSearch != nil {
+			if locFinal[0] < locSearch[0] {
+				isFinal = true
+			} else {
+				isSearch = true
+			}
+		} else if locFinal != nil {
+			isFinal = true
+		} else if locSearch != nil {
+			isSearch = true
+		}
+
+		if isFinal {
+			// locFinal[1] is the end index of the match
+			answerPart := response[locFinal[1]:]
 			result.Answer = strings.TrimSpace(answerPart)
 			break
 		}
 
-		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
-		if loc := reSearch.FindStringIndex(response); loc != nil {
+		if isSearch {
 			// Extract query
-			rest := response[loc[1]:]
+			rest := response[locSearch[1]:]
 			lineEnd := strings.Index(rest, "\n")
-			searchQuery := ""
+
+			var rawQuery string
 			if lineEnd == -1 {
-				searchQuery = strings.TrimSpace(rest)
+				rawQuery = strings.TrimSpace(rest)
 			} else {
-				searchQuery = strings.TrimSpace(rest[:lineEnd])
+				rawQuery = strings.TrimSpace(rest[:lineEnd])
 			}
 
-			// Robustness: Strip quotes if the model wrapped the query in them
-			searchQuery = strings.Trim(searchQuery, "\"'")
+			// Stop at FINAL ANSWER if present in the same line
+			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
+			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
+				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
+			}
+
+			// Clean up query logic
+			searchQuery := ""
+			// 1. Check for quotes at the start
+			if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
+				quote := rawQuery[0:1]
+				// Find next quote
+				endQuote := strings.Index(rawQuery[1:], quote)
+				if endQuote != -1 {
+					searchQuery = rawQuery[1 : 1+endQuote]
+				} else {
+					// Mismatched quotes, just strip leading
+					searchQuery = strings.TrimPrefix(rawQuery, quote)
+				}
+			} else {
+				// 2. If no quotes, just take the line but strip trailing punctuation
+				searchQuery = strings.TrimRight(rawQuery, ".")
+			}
+
+			searchQuery = strings.TrimSpace(searchQuery)
 
 			logger.Info("Agentic Search Step %d: Searching for '%s'", i+1, searchQuery)
 
