@@ -3,6 +3,7 @@
 *.dll
 server
 surreal.exe
+knowledge_server
 
 # Database
 knowledge.db
