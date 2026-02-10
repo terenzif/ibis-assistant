@@ -43,13 +43,14 @@ func BenchmarkExcessiveDBUpdates(b *testing.B) {
 	mockDB := &CountingMockDB{}
 	// High limits to avoid rate limiting during benchmark
 	client := NewClient([]KeyConfig{
-		{Key: "benchKey", RPM: 100000, TPM: 1000000, RPD: 1000000},
+		{
+			Key:           "benchKey",
+			RPM:           100000,
+			TPM:           1000000,
+			RPD:           1000000,
+			FlushInterval: 100 * time.Millisecond,
+		},
 	}, mockDB)
-
-	// Speed up flushing for benchmark
-	for _, w := range client.workers {
-		w.flushInterval = 100 * time.Millisecond
-	}
 
 	ctx := context.Background()
 
@@ -93,13 +94,14 @@ func TestDBUpdateBatching(t *testing.T) {
 
 	mockDB := &CountingMockDB{}
 	client := NewClient([]KeyConfig{
-		{Key: "testKey", RPM: 10000, TPM: 100000, RPD: 100000},
+		{
+			Key:           "testKey",
+			RPM:           10000,
+			TPM:           100000,
+			RPD:           100000,
+			FlushInterval: 100 * time.Millisecond,
+		},
 	}, mockDB)
-
-	// Set fast flush interval
-	for _, w := range client.workers {
-		w.flushInterval = 100 * time.Millisecond
-	}
 
 	ctx := context.Background()
 	count := 50
