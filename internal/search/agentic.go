@@ -84,31 +84,27 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
 		locSearch := reSearch.FindStringIndex(response)
 
-		// Determine which action to take (prioritize the first occurrence)
-		isFinal := false
-		isSearch := false
-
+		// Determine which action to take (priority to first occurrence)
+		action := "none"
 		if locFinal != nil && locSearch != nil {
 			if locFinal[0] < locSearch[0] {
-				isFinal = true
+				action = "final"
 			} else {
-				isSearch = true
+				action = "search"
 			}
 		} else if locFinal != nil {
-			isFinal = true
+			action = "final"
 		} else if locSearch != nil {
-			isSearch = true
+			action = "search"
 		}
 
-		if isFinal {
+		if action == "final" {
 			// locFinal[1] is the end index of the match
 			answerPart := response[locFinal[1]:]
 			result.Answer = strings.TrimSpace(answerPart)
 			break
-		}
-
-		if isSearch {
-			// Extract query
+		} else if action == "search" {
+			// Extract query using locSearch
 			rest := response[locSearch[1]:]
 			lineEnd := strings.Index(rest, "\n")
 
