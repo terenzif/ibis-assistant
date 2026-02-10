@@ -77,10 +77,21 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 		batchSize := 500
 		var batch []string
 
+		// Pre-allocate reusable buffers for batch processing to reduce GC pressure
+		ids := make([]string, 0, batchSize)
+		idMap := make(map[string]bool)
+		vars := make(map[string]interface{}, 1)
+
 		processBatch := func() error {
 			if len(batch) == 0 {
 				return nil
 			}
+
+			// Clear maps and reset slice
+			for k := range idMap {
+				delete(idMap, k)
+			}
+			ids = ids[:0]
 
 			// Check DB for existing commits
 			// We can't pass 500 IDs in a single query if the string is too long?
@@ -88,11 +99,9 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 
 			// Build ID list
 			// "SELECT id FROM commit WHERE id IN ['commit:hash1', 'commit:hash2', ...]"
-			ids := make([]string, len(batch))
-			idMap := make(map[string]bool) // To track which exist
-			for i, h := range batch {
+			for _, h := range batch {
 				id := fmt.Sprintf("%s:%s", schema.TableCommit, h)
-				ids[i] = id
+				ids = append(ids, id)
 			}
 
 			// SmartQuery with array param?
@@ -106,9 +115,8 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			// If slice param fails, we might need to construct the query string manually or loops.
 			// Trying SmartQuery with slice.
 
-			resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE id IN $ids", map[string]interface{}{
-				"ids": ids,
-			})
+			vars["ids"] = ids
+			resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE id IN $ids", vars)
 			if err != nil {
 				return fmt.Errorf("failed to check existing commits: %w", err)
 			}
@@ -174,7 +182,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	scannerIngest.Buffer(buf, 1024*1024)
 
 	// We pass nil for existingCommits because we already filtered them!
-	ingestErr := processGitLogStream(context.Background(), scannerIngest, client, redmineClient, repoID, nil, concurrency)
+	ingestErr := processGitLogStream(context.Background(), scannerIngest, client, redmineClient, repoID, concurrency)
 
 	// Wait for feeder
 	feederErr := <-feederErrChan
@@ -201,7 +209,6 @@ func processGitLogStream(
 	client db.Executor,
 	redmineClient redmine.Ingester,
 	repoID string,
-	existingCommits map[string]bool,
 	concurrency int,
 ) error {
 	var (
@@ -262,11 +269,7 @@ func processGitLogStream(
 
 			commitID := fmt.Sprintf("%s:%s", schema.TableCommit, hash)
 
-			if existingCommits != nil && existingCommits[commitID] {
-				skipping = true
-				currentCommitID = ""
-				continue
-			}
+			// Assume filtering already happened upstream in the feeder goroutine
 			skipping = false
 			currentCommitID = commitID
 
