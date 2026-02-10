@@ -61,11 +61,12 @@ type Client struct {
 }
 
 type KeyConfig struct {
-	Key   string
-	RPM   int
-	TPM   int
-	RPD   int
-	Owner string
+	Key           string
+	RPM           int
+	TPM           int
+	RPD           int
+	Owner         string
+	FlushInterval time.Duration
 }
 
 // worker holds the state for a single API key
@@ -306,11 +307,15 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 		lastResetRPD: time.Now(),
 		nextAvailable: time.Now(),
 
-		tpmBucket:  maxBucket,
-		maxBucket:  maxBucket,
-		refillRate: refillRate,
-		lastRefill: time.Now(),
+		tpmBucket:     maxBucket,
+		maxBucket:     maxBucket,
+		refillRate:    refillRate,
+		lastRefill:    time.Now(),
 		flushInterval: 5 * time.Second,
+	}
+
+	if cfg.FlushInterval > 0 {
+		w.flushInterval = cfg.FlushInterval
 	}
 
 	w.updateUsageID()
