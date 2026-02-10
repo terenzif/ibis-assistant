@@ -215,4 +215,24 @@ func TestReinforcePath(t *testing.T) {
 			t.Errorf("Expected call to sub 0.1, got %s", mockDB.SmartCalls[0])
 		}
 	}
+
+	// Reset
+	mockDB.SmartCalls = nil
+
+	// Test Case 3: Unknown Edge with Positive Score
+	// Access count should still be updated
+	err = svc.ReinforcePath("unknown:1", "issue:2", 0.8)
+	if err != nil {
+		t.Fatalf("ReinforcePath failed: %v", err)
+	}
+
+	// Expect 1 SmartQuery call:
+	// 1. UPDATE issue:2 ... (access_count + 1)
+	if len(mockDB.SmartCalls) != 1 {
+		t.Errorf("Expected 1 SmartCall, got %d: %v", len(mockDB.SmartCalls), mockDB.SmartCalls)
+	}
+
+	if !strings.Contains(mockDB.SmartCalls[0], "access_count") {
+		t.Errorf("Expected call to update access_count, got %s", mockDB.SmartCalls[0])
+	}
 }
