@@ -88,7 +88,19 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 				// Query: <-changed means we are at file, looking at incoming edges.
 				// Incoming edge 'in' is the start node (commit). 'out' is the end node (file).
 				if inRaw, ok := em["in"]; ok {
-					inID := fmt.Sprintf("%v", inRaw)
+					var inID string
+					// Normalize ID via JSON roundtrip to match history parsing logic
+					if b, err := json.Marshal(inRaw); err == nil {
+						var v interface{}
+						if err := json.Unmarshal(b, &v); err == nil {
+							inID = fmt.Sprintf("%v", v)
+						} else {
+							inID = fmt.Sprintf("%v", inRaw)
+						}
+					} else {
+						inID = fmt.Sprintf("%v", inRaw)
+					}
+
 					if imp, ok := em["impact"].(float64); ok {
 						impactMap[inID] = imp
 					}
