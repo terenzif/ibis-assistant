@@ -1,5 +1,8 @@
 # Nome dell'eseguibile finale
-BINARY_NAME=knowledge_server.exe
+BINARY_NAME=knowledge_server
+ifeq ($(OS),Windows_NT)
+    BINARY_NAME=knowledge_server.exe
+endif
 
 build:
 	go build -o $(BINARY_NAME) ./cmd/server
@@ -9,4 +12,4 @@ run:
 
 clean:
 	go clean
-	rm -f $(BINARY_NAME)
+	rm -f knowledge_server knowledge_server.exe

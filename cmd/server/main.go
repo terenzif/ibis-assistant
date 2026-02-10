@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -51,13 +52,19 @@ func main() {
 
 	cmd := os.Args[1]
 	switch cmd {
-	case "/run":
+	case "/run", "run", "-run", "--run":
 		// Normal interactive run or service run
 		// We shift the arguments to skip the command for flag parsing
-		os.Args = append(os.Args[:1], os.Args[2:]...)
+		if len(os.Args) > 2 {
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		} else {
+			os.Args = os.Args[:1]
+		}
 		runServer(context.Background())
-	case "/install", "/uninstall":
-		handleService(cmd)
+	case "/install", "install", "-install", "--install":
+		handleService("/install")
+	case "/uninstall", "uninstall", "-uninstall", "--uninstall":
+		handleService("/uninstall")
 	default:
 		// If it's not a known command, it might be a flag or just wrong.
 		// If it starts with - or --, we assume they want to run with flags directly?
@@ -73,14 +80,15 @@ func main() {
 }
 
 func printHelp() {
+	binName := filepath.Base(os.Args[0])
 	fmt.Println("Knowledge Server - MCP Knowledge Graph & Search")
 	fmt.Println("\nUsage:")
-	fmt.Println("  knowledge_server.exe <command> [options]")
+	fmt.Printf("  %s <command> [options]\n", binName)
 	fmt.Println("\nCommands:")
-	fmt.Println("  /run        Run the server interactively (standard MCP behavior)")
-	fmt.Println("  /install    Install as Windows Service 'knowledge-server'")
-	fmt.Println("  /uninstall  Uninstall the Windows Service")
-	fmt.Println("\nOptions (used with /run or as flags):")
+	fmt.Println("  run         Run the server interactively (standard MCP behavior)")
+	fmt.Println("  install     Install as Windows Service 'knowledge-server'")
+	fmt.Println("  uninstall   Uninstall the Windows Service")
+	fmt.Println("\nOptions (used with run or as flags):")
 	fmt.Println("  -port int        Port to listen on for SSE (default 8080)")
 	fmt.Println("  -mode string     Mode: 'sse' or 'stdio' (default 'sse')")
 	fmt.Println("  -scan            Discover git repositories in current/root directory (default true)")
@@ -94,7 +102,7 @@ func printHelp() {
 	fmt.Println("  3. Config File (config.json)")
 	fmt.Println("  4. Hardcoded Defaults (lowest)")
 	fmt.Println("\nExample:")
-	fmt.Println("  knowledge_server.exe /run -port 9000 -mode sse")
+	fmt.Printf("  %s run -port 9000 -mode sse\n", binName)
 }
 
 func runServer(ctx context.Context) {
@@ -584,6 +592,9 @@ func runServer(ctx context.Context) {
 		logger.Info("Closing database connection...")
 		dbClient.Close()
 	}
+
+	// Give the websocket connection time to close properly before killing the DB process
+	time.Sleep(500 * time.Millisecond)
 
 	// 4. Stop DB Process
 	if dbProcess != nil {

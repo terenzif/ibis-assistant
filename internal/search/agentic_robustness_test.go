@@ -41,7 +41,7 @@ func TestAskProjectAgentic_Robustness(t *testing.T) {
 		{
 			name:           "Mid-sentence",
 			modelResponse:  "I will run SEARCH: auth logic to find out.",
-			expectedSearch: "auth logic to find out.",
+			expectedSearch: "auth logic to find out",
 			expectSearch:   true,
 		},
 	}

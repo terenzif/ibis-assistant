@@ -107,15 +107,39 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			// Extract query using locSearch
 			rest := response[locSearch[1]:]
 			lineEnd := strings.Index(rest, "\n")
-			searchQuery := ""
+
+			var rawQuery string
 			if lineEnd == -1 {
-				searchQuery = strings.TrimSpace(rest)
+				rawQuery = strings.TrimSpace(rest)
 			} else {
-				searchQuery = strings.TrimSpace(rest[:lineEnd])
+				rawQuery = strings.TrimSpace(rest[:lineEnd])
 			}
 
-			// Robustness: Strip quotes if the model wrapped the query in them
-			searchQuery = strings.Trim(searchQuery, "\"'")
+			// Stop at FINAL ANSWER if present in the same line
+			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
+			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
+				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
+			}
+
+			// Clean up query logic
+			searchQuery := ""
+			// 1. Check for quotes at the start
+			if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
+				quote := rawQuery[0:1]
+				// Find next quote
+				endQuote := strings.Index(rawQuery[1:], quote)
+				if endQuote != -1 {
+					searchQuery = rawQuery[1 : 1+endQuote]
+				} else {
+					// Mismatched quotes, just strip leading
+					searchQuery = strings.TrimPrefix(rawQuery, quote)
+				}
+			} else {
+				// 2. If no quotes, just take the line but strip trailing punctuation
+				searchQuery = strings.TrimRight(rawQuery, ".")
+			}
+
+			searchQuery = strings.TrimSpace(searchQuery)
 
 			logger.Info("Agentic Search Step %d: Searching for '%s'", i+1, searchQuery)
 
