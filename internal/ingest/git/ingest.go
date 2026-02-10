@@ -215,9 +215,33 @@ func processGitLogStream(
 		concurrency = 1
 	}
 
-	// Semaphore for Redmine Ingestion
-	sem := make(chan struct{}, concurrency)
+	// Worker Pool for Redmine Ingestion
+	// Using a buffered channel allows the main loop (Git Log Parsing) to proceed ahead of Redmine ingestion,
+	// effectively parallelizing the two stages.
+	jobChan := make(chan string, 100)
 	var wg sync.WaitGroup
+
+	if redmineClient != nil {
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for id := range jobChan {
+					if err := redmineClient.IngestIssue(ctx, client, id); err != nil {
+						logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
+					}
+				}
+			}()
+		}
+	}
+
+	// Ensure workers are stopped on exit
+	defer func() {
+		if redmineClient != nil {
+			close(jobChan)
+			wg.Wait()
+		}
+	}()
 
 	flushBatch := func() error {
 		if batchQL.Len() == 0 {
@@ -309,20 +333,10 @@ func processGitLogStream(
 						issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
 
 						// In-Band Ingestion: Trigger Redmine fetch if client is available
-						// Use a semaphore to bound concurrency to avoid excessive goroutines and API rate limits
 						if redmineClient != nil {
-							wg.Add(1)
 							select {
-							case sem <- struct{}{}:
-								go func(id string) {
-									defer wg.Done()
-									defer func() { <-sem }()
-									if err := redmineClient.IngestIssue(context.Background(), client, id); err != nil {
-										logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
-									}
-								}(issueIDStr)
+							case jobChan <- issueIDStr:
 							case <-ctx.Done():
-								wg.Done()
 							}
 						} else {
 							// Just ensure existence
@@ -449,9 +463,6 @@ func processGitLogStream(
 		return err
 	}
 	logger.Debug("Final batch flushed.")
-
-	// Wait for any background Redmine tasks
-	wg.Wait()
 
 	return nil
 }
