@@ -216,3 +216,33 @@ func TestReinforcePath(t *testing.T) {
 		}
 	}
 }
+
+func TestReinforcePath_UnknownEdge(t *testing.T) {
+	mockDB := &MockDB{}
+	svc := &Service{
+		DB: mockDB,
+		AI: &MockAI{},
+	}
+
+	// Test Case: Unknown Edge Type (e.g., Issue -> Tracker or unknown prefix)
+	// Should update access_count but NOT edge weight
+	err := svc.ReinforcePath("unknown:1", "tracker:1", 0.8)
+	if err != nil {
+		t.Fatalf("ReinforcePath failed: %v", err)
+	}
+
+	// Expect 1 SmartQuery call:
+	// 1. UPDATE tracker:1 ... (access_count + 1)
+	if len(mockDB.SmartCalls) != 1 {
+		t.Errorf("Expected 1 SmartCall, got %d: %v", len(mockDB.SmartCalls), mockDB.SmartCalls)
+	}
+
+	if !strings.Contains(mockDB.SmartCalls[0], "access_count") {
+		t.Errorf("Expected call to update access_count, got %s", mockDB.SmartCalls[0])
+	}
+
+	// Ensure no edge update query was made (by checking query content)
+	if strings.Contains(mockDB.SmartCalls[0], "usage_weight") {
+		t.Errorf("Expected NO usage_weight update, got %s", mockDB.SmartCalls[0])
+	}
+}
