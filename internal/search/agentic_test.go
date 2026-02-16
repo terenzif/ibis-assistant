@@ -46,7 +46,11 @@ func (m *TestAgentMockDB) Execute(sql string) (interface{}, error) {
 
 func (m *TestAgentMockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
-	// Not needed for this specific test flow as AskProject uses Execute for search
+	for k, v := range m.ReturnData {
+		if strings.Contains(sql, k) {
+			return v, nil
+		}
+	}
 	return nil, nil
 }
 
@@ -246,5 +250,112 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 
 	if len(result.Steps) < 2 {
 		t.Errorf("BUG REPRODUCED: Expected at least 2 steps (Search -> Answer), got %d", len(result.Steps))
+	}
+}
+
+func TestAskProjectAgentic_GraphContext(t *testing.T) {
+	// 1. Setup Mock DB Data
+	issueID := "issue:101"
+
+	// Vector Search Result
+	chunks := []map[string]interface{}{
+		{
+			"id":           "chunk:1",
+			"path":         "/src/context.go",
+			"content":      "func Context() {}",
+			"score":        0.95,
+			"hash":         "abc",
+			"current_hash": "abc",
+		},
+	}
+
+	// Graph Context (GetFileContext)
+	graphResponse := []interface{}{
+		map[string]interface{}{
+			"change_edges": []interface{}{},
+			"history": []interface{}{
+				map[string]interface{}{
+					"id":      "commit:hash123",
+					"hash":    "hash123",
+					"message": "fix bug",
+					"date":    "2024-01-01T00:00:00Z",
+					"author":  []string{"dev"},
+					"issues": []interface{}{
+						map[string]interface{}{
+							"id":      issueID,
+							"subject": "Fix context bug",
+							"status":  "Open",
+							"weight":  []float64{0.8},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mockDB := &TestAgentMockDB{
+		ReturnData: map[string]interface{}{
+			"FROM file_chunk": chunks,        // Triggered by AskProject Vector Search
+			"<-changed":       graphResponse, // Triggered by AskProject -> GetFileContext
+		},
+	}
+
+	// 2. Mock AI
+	stepCounter := 0
+	mockAI := &TestAgentMockAI{
+		GenerateFunc: func(contents []ai.Content) (ai.Candidate, error) {
+			stepCounter++
+
+			// Step 1: Decide to Search
+			if stepCounter == 1 {
+				return ai.Candidate{
+					Content: ai.Content{
+						Role: "model",
+						Parts: []ai.Part{
+							{Text: "THOUGHT: I need to check context.\nSEARCH: context"},
+						},
+					},
+				}, nil
+			} else if stepCounter == 2 {
+				// Step 2: Receive Observation
+				// Verify that the observation contains the related issue info
+				lastMsg := contents[len(contents)-1]
+				text := lastMsg.Parts[0].Text
+
+				// Check for "Context:" block or specifically the issue subject
+				if !strings.Contains(text, "Fix context bug") {
+					return ai.Candidate{}, fmt.Errorf("OBSERVATION missing related issue 'Fix context bug'. Got: %s", text)
+				}
+
+				return ai.Candidate{
+					Content: ai.Content{
+						Role: "model",
+						Parts: []ai.Part{
+							{Text: "FINAL ANSWER: Found it."},
+						},
+					},
+				}, nil
+			}
+
+			return ai.Candidate{}, fmt.Errorf("unexpected step %d", stepCounter)
+		},
+	}
+
+	svc := &Service{
+		DB: mockDB,
+		AI: mockAI,
+	}
+
+	// 3. Execute
+	_, err := svc.AskProjectAgentic(context.Background(), "test")
+	if err != nil {
+		// If the mock AI returns an error (due to missing context), AskProjectAgentic wraps it.
+		// We expect this to happen if the bug exists.
+		if strings.Contains(err.Error(), "OBSERVATION missing related issue") {
+			t.Logf("Successfully reproduced bug: %v", err)
+			// For TDD, we want to FAIL the test if the bug is present, so that fixing it makes the test PASS.
+			t.Fatalf("Test failed as expected (Bug Reproduced): %v", err)
+		}
+		t.Fatalf("AskProjectAgentic failed unexpectedly: %v", err)
 	}
 }

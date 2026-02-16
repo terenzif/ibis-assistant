@@ -167,7 +167,28 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 				if len(contentSnippet) > 2000 {
 					contentSnippet = contentSnippet[:2000] + "...(truncated)"
 				}
-				obs.WriteString(fmt.Sprintf("- File: %s (Score: %.2f)\nContext: %s\n\n", r.Path, r.Score, contentSnippet))
+				obs.WriteString(fmt.Sprintf("- File: %s (Score: %.2f)\nContext: %s\n", r.Path, r.Score, contentSnippet))
+
+				if len(r.Context.RelatedIssues) > 0 {
+					obs.WriteString("  Related Issues:\n")
+					for _, issue := range r.Context.RelatedIssues {
+						obs.WriteString(fmt.Sprintf("    - [%s] %s (Status: %s)\n", issue.ID, issue.Subject, issue.Status))
+					}
+				}
+				if len(r.Context.Commits) > 0 {
+					obs.WriteString("  Recent Commits:\n")
+					for _, commit := range r.Context.Commits {
+						hashShort := commit.Hash
+						if len(hashShort) > 7 {
+							hashShort = hashShort[:7]
+						}
+						obs.WriteString(fmt.Sprintf("    - [%s] %s (by %s)\n", hashShort, commit.Message, commit.Author))
+					}
+				}
+				if len(r.Context.ExpertAuthors) > 0 {
+					obs.WriteString(fmt.Sprintf("  Experts: %s\n", strings.Join(r.Context.ExpertAuthors, ", ")))
+				}
+				obs.WriteString("\n")
 			}
 
 			history = append(history, ai.Content{Role: "user", Parts: []ai.Part{{Text: obs.String()}}})
