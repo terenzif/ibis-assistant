@@ -133,3 +133,34 @@ func TestProcessGitLogStream_Parsing_Robustness(t *testing.T) {
 		t.Log("Fallback logic skipped space-separated line (as expected)")
 	}
 }
+
+func TestProcessGitLogStream_TabInPath(t *testing.T) {
+	// Simulate git log --numstat output where a file path contains a literal tab.
+	// This can happen if core.quotePath is false or if the file has a tab.
+	// The line is: added<tab>deleted<tab>path<tab>part2
+	// "1\t1\tpath/with\ttab.txt"
+
+	input := "COMMIT|hash1|parent1|Author|2024-01-01T00:00:00Z|Message\n1\t1\tpath/with\ttab.txt"
+
+	scanner := bufio.NewScanner(strings.NewReader(input))
+	mockDB := &MockDB{}
+	mockRedmine := &MockRedmine{}
+
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", 1)
+	if err != nil {
+		t.Fatalf("processGitLogStream failed: %v", err)
+	}
+
+	expectedPath := "path/with\ttab.txt"
+	found := false
+	for _, qry := range mockDB.CapturedQueries {
+		if strings.Contains(qry, db.EscapeSQL(expectedPath)) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Failed to parse path with literal tab. Expected path '%s' in queries. Queries: %v", expectedPath, mockDB.CapturedQueries)
+	}
+}
