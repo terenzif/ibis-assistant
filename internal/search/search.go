@@ -193,6 +193,9 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 	} else if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "file") {
 		// Try 'changed' (Commit -> File)
 		err = runUpdate(schema.EdgeChanged)
+	} else if strings.Contains(sourceID, "author") && strings.Contains(targetID, "commit") {
+		// Try 'authored' (Author -> Commit)
+		err = runUpdate(schema.EdgeAuthored)
 	}
 
 	if err != nil {
