@@ -208,9 +208,9 @@ func TestIngestRepo_Incremental(t *testing.T) {
 	mockRedmine := &MockRedmine{}
 
 	// Mock Result: Commit 1 exists
-	// SmartQuery returns a list of existing commit IDs
+	// SmartQuery returns a list of existing commit IDs (flat slice due to SELECT VALUE)
 	mockDB.MockResult = []interface{}{
-		map[string]interface{}{"id": fmt.Sprintf("commit:%s", hash1)},
+		fmt.Sprintf("commit:%s", hash1),
 	}
 
 	// 3. Run Ingest
