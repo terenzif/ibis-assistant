@@ -392,7 +392,7 @@ func processGitLogStream(
 			if len(tabParts) >= 3 {
 				addedStr = tabParts[0]
 				deletedStr = tabParts[1]
-				path = tabParts[2]
+				path = strings.Join(tabParts[2:], "\t")
 			} else {
 				// Fallback to Fields if tabs missing (e.g. ecosystem quirks)
 				// But path with spaces will break Fields logic.
