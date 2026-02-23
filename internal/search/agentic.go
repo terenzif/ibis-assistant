@@ -17,6 +17,11 @@ type AgenticResult struct {
 	Steps   []string `json:"reasoning_steps"`
 }
 
+var (
+	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
+	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
+)
+
 const SystemPrompt = `You are a Senior Software Engineer Agent.
 Your goal is to answer questions about the codebase using the provided SEARCH tool.
 
@@ -78,10 +83,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		history = append(history, modelContent)
 
 		// Parse Response (Case Insensitive using Regex to be Unicode safe)
-		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-		locFinal := reFinal.FindStringIndex(response)
-
-		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		locFinal := reFinalAnswer.FindStringIndex(response)
 		locSearch := reSearch.FindStringIndex(response)
 
 		// Determine which action to take (priority to first occurrence)
@@ -116,8 +118,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			}
 
 			// Stop at FINAL ANSWER if present in the same line
-			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
+			if loc := reFinalAnswer.FindStringIndex(rawQuery); loc != nil {
 				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
 			}
 

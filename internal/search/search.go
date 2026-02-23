@@ -186,14 +186,24 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 		return err
 	}
 
+	// Extract table names
+	sourceTable := ""
+	if idx := strings.Index(sourceID, ":"); idx != -1 {
+		sourceTable = sourceID[:idx]
+	}
+	targetTable := ""
+	if idx := strings.Index(targetID, ":"); idx != -1 {
+		targetTable = targetID[:idx]
+	}
+
 	// Try 'implements' (Commit -> Issue)
 	var err error
-	if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "issue") {
+	if sourceTable == schema.TableCommit && targetTable == schema.TableIssue {
 		err = runUpdate(schema.EdgeImplements)
-	} else if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "file") {
+	} else if sourceTable == schema.TableCommit && (targetTable == schema.TableFile || targetTable == schema.TableFileChunk) {
 		// Try 'changed' (Commit -> File)
 		err = runUpdate(schema.EdgeChanged)
-	} else if strings.Contains(sourceID, "author") && strings.Contains(targetID, "commit") {
+	} else if sourceTable == schema.TableAuthor && targetTable == schema.TableCommit {
 		// Try 'authored' (Author -> Commit)
 		err = runUpdate(schema.EdgeAuthored)
 	}
