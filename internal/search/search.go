@@ -186,14 +186,28 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 		return err
 	}
 
+	// Parse Source and Target Table Types
+	sourceParts := strings.Split(sourceID, ":")
+	targetParts := strings.Split(targetID, ":")
+
+	// Default to empty if invalid format, effectively skipping edge updates
+	sourceType := ""
+	targetType := ""
+	if len(sourceParts) >= 2 {
+		sourceType = sourceParts[0]
+	}
+	if len(targetParts) >= 2 {
+		targetType = targetParts[0]
+	}
+
 	// Try 'implements' (Commit -> Issue)
 	var err error
-	if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "issue") {
+	if sourceType == schema.TableCommit && targetType == schema.TableIssue {
 		err = runUpdate(schema.EdgeImplements)
-	} else if strings.Contains(sourceID, "commit") && strings.Contains(targetID, "file") {
+	} else if sourceType == schema.TableCommit && targetType == schema.TableFile {
 		// Try 'changed' (Commit -> File)
 		err = runUpdate(schema.EdgeChanged)
-	} else if strings.Contains(sourceID, "author") && strings.Contains(targetID, "commit") {
+	} else if sourceType == schema.TableAuthor && targetType == schema.TableCommit {
 		// Try 'authored' (Author -> Commit)
 		err = runUpdate(schema.EdgeAuthored)
 	}
