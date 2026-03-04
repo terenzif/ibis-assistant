@@ -10,6 +10,11 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 )
 
+var (
+	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
+	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
+)
+
 // AgenticResult represents the outcome of an agentic search
 type AgenticResult struct {
 	Answer  string   `json:"answer"`
@@ -78,10 +83,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		history = append(history, modelContent)
 
 		// Parse Response (Case Insensitive using Regex to be Unicode safe)
-		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-		locFinal := reFinal.FindStringIndex(response)
-
-		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		locFinal := reFinalAnswer.FindStringIndex(response)
 		locSearch := reSearch.FindStringIndex(response)
 
 		// Determine which action to take (priority to first occurrence)
@@ -116,8 +118,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			}
 
 			// Stop at FINAL ANSWER if present in the same line
-			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
+			if loc := reFinalAnswer.FindStringIndex(rawQuery); loc != nil {
 				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
 			}
 
