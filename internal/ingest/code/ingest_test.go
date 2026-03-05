@@ -130,8 +130,8 @@ func TestIngestCodebase_Delta(t *testing.T) {
 
 		// Verify no INSERT calls
 		for _, sql := range mockDB.ExecuteCalls {
-			if strings.Contains(sql, "INSERT INTO file_chunk") {
-				t.Errorf("Processed embedding (Unoptimized) - Expected 0 chunk updates, got call: %s", sql)
+			if strings.Contains(sql, "CREATE file_chunk") {
+				t.Errorf("Processed embedding (Unoptimized) - Expected 0 chunk creates, got call: %s", sql)
 			}
 		}
 	})
@@ -151,8 +151,8 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		// Verify INSERT is called for chunks
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
-			// Check for JSON-style assignment in INSERT
-			if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
+			// Check for assignment in CREATE file_chunk
+			if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 				foundUpdate = true
 				break
 			}
@@ -337,10 +337,10 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	mockAI := &MockAI{}
 	runIngest("version1", mockAI, mockDB)
 
-	// Check for INSERT (Queueing)
+	// Check for CREATE (Queueing)
 	foundInsert := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
+		if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 			foundInsert = true
 			break
 		}
@@ -354,10 +354,10 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	mockAI = &MockAI{}
 	runIngest("version2", mockAI, mockDB)
 
-	// Check for INSERT (Queueing)
+	// Check for CREATE (Queueing)
 	foundInsertV2 := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
+		if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 			foundInsertV2 = true
 			break
 		}
@@ -387,8 +387,8 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 
 	// Verify NO queuing happened
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "INSERT INTO file_chunk") && strings.Contains(sql, "batch_status: 'pending'") {
-			t.Errorf("Expected 0 queuing calls for returning to V1 (Cache Hit), got call: %s", sql)
+		if strings.Contains(sql, "CREATE file_chunk") {
+			t.Errorf("Expected 0 queuing creates for returning to V1 (Cache Hit), got call: %s", sql)
 		}
 	}
 }
@@ -458,16 +458,16 @@ func TestIngestCodebase_Batching(t *testing.T) {
 	}
 
 	// Count DB update calls
-	insertCount := 0
+	transactionCount := 0
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "INSERT INTO file_chunk") {
-			insertCount++
+		if strings.Contains(sql, "BEGIN TRANSACTION") {
+			transactionCount++
 		}
 	}
 
 	// We expect 1 batch (25 chunks < 100)
-	if insertCount != 1 {
-		t.Errorf("Expected 1 batched INSERT, got %d", insertCount)
+	if transactionCount != 1 {
+		t.Errorf("Expected 1 batched transaction, got %d", transactionCount)
 	}
 }
 
