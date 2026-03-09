@@ -116,18 +116,16 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			// Trying SmartQuery with slice.
 
 			vars["ids"] = ids
-			resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE id IN $ids", vars)
+			resRaw, err := client.SmartQuery("SELECT VALUE id FROM commit WHERE id IN $ids", vars)
 			if err != nil {
 				return fmt.Errorf("failed to check existing commits: %w", err)
 			}
 
-			// Parse result to find existing (Optimized: Direct Type Assertion)
+			// Parse result to find existing (Optimized: Direct Type Assertion for SELECT VALUE)
 			if results, ok := resRaw.([]interface{}); ok {
 				for _, item := range results {
-					if props, ok := item.(map[string]interface{}); ok {
-						if id, ok := props["id"].(string); ok {
-							idMap[id] = true
-						}
+					if id, ok := item.(string); ok {
+						idMap[id] = true
 					}
 				}
 			}
@@ -318,49 +316,25 @@ func processGitLogStream(
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", parentID, schema.EdgeParentOf, commitID))
 			}
 
-			// 5. Link Issue (Simple linking based on regex-like scan)
-			// Scanning for # followed by digits
-			msgLen := len(subject)
-			for i := 0; i < msgLen; i++ {
-				if subject[i] == '#' {
-					// Check if next chars are digits
-					start := i + 1
-					end := start
-					for end < msgLen && subject[end] >= '0' && subject[end] <= '9' {
-						end++
+			// 5. Link Issues
+			issueRefs := ExtractIssueRefs(subject)
+			for _, ref := range issueRefs {
+				issueIDStr := ref.ID
+				issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
+
+				// In-Band Ingestion: Trigger Redmine fetch if client is available
+				if redmineClient != nil {
+					select {
+					case jobChan <- issueIDStr:
+					case <-ctx.Done():
 					}
-					if end > start {
-						// Found an issue ID
-						issueIDStr := subject[start:end]
-						// Create Issue Node (Placeholder first)
-						issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
-
-						// In-Band Ingestion: Trigger Redmine fetch if client is available
-						if redmineClient != nil {
-							select {
-							case jobChan <- issueIDStr:
-							case <-ctx.Done():
-							}
-						} else {
-							// Just ensure existence
-							batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
-						}
-
-						// Link Commit -> Issue with default confidence/weight
-						// Spec: 0.5 if just mentioned. 1.0 if "Fixes".
-						// For now, default to 1.0 for simplicity or parse properly.
-						// Let's do simple keyword check.
-						confidence := 0.5
-						lowerSub := strings.ToLower(subject)
-						if strings.Contains(lowerSub, "fix") || strings.Contains(lowerSub, "close") || strings.Contains(lowerSub, "resolve") {
-							confidence = 1.0
-						}
-
-						batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET confidence = %f, usage_weight = 1.0;\n",
-							commitID, schema.EdgeImplements, issueID, confidence))
-					}
-					i = end // Advance
+				} else {
+					// Just ensure existence
+					batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
 				}
+
+				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET confidence = %f, usage_weight = 1.0;\n",
+					commitID, schema.EdgeImplements, issueID, ref.Confidence))
 			}
 
 		} else {
@@ -392,7 +366,7 @@ func processGitLogStream(
 			if len(tabParts) >= 3 {
 				addedStr = tabParts[0]
 				deletedStr = tabParts[1]
-				path = tabParts[2]
+				path = strings.Join(tabParts[2:], "\t")
 			} else {
 				// Fallback to Fields if tabs missing (e.g. ecosystem quirks)
 				// But path with spaces will break Fields logic.

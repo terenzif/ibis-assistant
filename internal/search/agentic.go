@@ -17,12 +17,18 @@ type AgenticResult struct {
 	Steps   []string `json:"reasoning_steps"`
 }
 
+// Pre-compiled regexes for performance
+var (
+	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
+	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
+)
+
 const SystemPrompt = `You are a Senior Software Engineer Agent.
 Your goal is to answer questions about the codebase using the provided SEARCH tool.
 
 PROTOCOL:
 1. THOUGHT: Explain your reasoning. What do you need to know?
-2. ACTION: If you need information, output "SEARCH: <query>".
+2. ACTION: If you need information, output "SEARCH: \"<query>\"". Always use double quotes for the query.
 3. OBSERVATION: I will provide the search results.
 4. REPEAT: You can search multiple times if needed.
 5. FINAL ANSWER: When you have enough information, output "FINAL ANSWER: <your answer>".
@@ -78,10 +84,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		history = append(history, modelContent)
 
 		// Parse Response (Case Insensitive using Regex to be Unicode safe)
-		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-		locFinal := reFinal.FindStringIndex(response)
-
-		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		locFinal := reFinalAnswer.FindStringIndex(response)
 		locSearch := reSearch.FindStringIndex(response)
 
 		// Determine which action to take (priority to first occurrence)
@@ -105,41 +108,58 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			break
 		} else if action == "search" {
 			// Extract query using locSearch
-			rest := response[locSearch[1]:]
-			lineEnd := strings.Index(rest, "\n")
+			rawRest := response[locSearch[1]:]
+			trimmedRest := strings.TrimSpace(rawRest)
 
-			var rawQuery string
-			if lineEnd == -1 {
-				rawQuery = strings.TrimSpace(rest)
-			} else {
-				rawQuery = strings.TrimSpace(rest[:lineEnd])
-			}
-
-			// Stop at FINAL ANSWER if present in the same line
-			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
-				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
-			}
-
-			// Clean up query logic
 			searchQuery := ""
-			// 1. Check for quotes at the start
-			if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
-				quote := rawQuery[0:1]
+			quotedExtracted := false
+			// 1. Check for quotes at the start (supports multiline)
+			if strings.HasPrefix(trimmedRest, "\"") || strings.HasPrefix(trimmedRest, "'") {
+				quote := trimmedRest[0:1]
 				// Find next quote
-				endQuote := strings.Index(rawQuery[1:], quote)
+				endQuote := strings.Index(trimmedRest[1:], quote)
 				if endQuote != -1 {
-					searchQuery = rawQuery[1 : 1+endQuote]
-				} else {
-					// Mismatched quotes, just strip leading
-					searchQuery = strings.TrimPrefix(rawQuery, quote)
+					searchQuery = trimmedRest[1 : 1+endQuote]
+					quotedExtracted = true
 				}
-			} else {
-				// 2. If no quotes, just take the line but strip trailing punctuation
-				searchQuery = strings.TrimRight(rawQuery, ".")
+			}
+
+			if !quotedExtracted && searchQuery == "" {
+				// Fallback to line-based extraction if not quoted properly
+				lineEnd := strings.Index(rawRest, "\n")
+				var rawQuery string
+				if lineEnd == -1 {
+					rawQuery = strings.TrimSpace(rawRest)
+				} else {
+					rawQuery = strings.TrimSpace(rawRest[:lineEnd])
+				}
+
+				// Stop at FINAL ANSWER if present in the same line
+				if loc := reFinalAnswer.FindStringIndex(rawQuery); loc != nil {
+					rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
+				}
+
+				// If it was a mismatched quote (started with quote but no end quote), strip the leading quote
+				if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
+					quote := rawQuery[0:1]
+					searchQuery = strings.TrimPrefix(rawQuery, quote)
+				} else {
+					// 2. If no quotes, first look for sentence boundary (. ) to strip chatter
+					if idx := strings.Index(rawQuery, ". "); idx != -1 {
+						rawQuery = rawQuery[:idx]
+					}
+					// Also strip trailing punctuation
+					searchQuery = strings.TrimRight(rawQuery, ".")
+				}
 			}
 
 			searchQuery = strings.TrimSpace(searchQuery)
+
+			if searchQuery == "" {
+				logger.Info("Agentic Search Step %d: Skipping empty search query", i+1)
+				history = append(history, ai.Content{Role: "user", Parts: []ai.Part{{Text: "OBSERVATION: Search query was empty. Please provide a valid search term."}}})
+				continue
+			}
 
 			logger.Info("Agentic Search Step %d: Searching for '%s'", i+1, searchQuery)
 
@@ -167,7 +187,28 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 				if len(contentSnippet) > 2000 {
 					contentSnippet = contentSnippet[:2000] + "...(truncated)"
 				}
-				obs.WriteString(fmt.Sprintf("- File: %s (Score: %.2f)\nContext: %s\n\n", r.Path, r.Score, contentSnippet))
+				obs.WriteString(fmt.Sprintf("- File: %s (Score: %.2f)\nContext: %s\n", r.Path, r.Score, contentSnippet))
+
+				if len(r.Context.RelatedIssues) > 0 {
+					obs.WriteString("  Related Issues:\n")
+					for _, issue := range r.Context.RelatedIssues {
+						obs.WriteString(fmt.Sprintf("    - [%s] %s (Status: %s)\n", issue.ID, issue.Subject, issue.Status))
+					}
+				}
+				if len(r.Context.Commits) > 0 {
+					obs.WriteString("  Recent Commits:\n")
+					for _, commit := range r.Context.Commits {
+						hashShort := commit.Hash
+						if len(hashShort) > 7 {
+							hashShort = hashShort[:7]
+						}
+						obs.WriteString(fmt.Sprintf("    - [%s] %s (by %s)\n", hashShort, commit.Message, commit.Author))
+					}
+				}
+				if len(r.Context.ExpertAuthors) > 0 {
+					obs.WriteString(fmt.Sprintf("  Experts: %s\n", strings.Join(r.Context.ExpertAuthors, ", ")))
+				}
+				obs.WriteString("\n")
 			}
 
 			history = append(history, ai.Content{Role: "user", Parts: []ai.Part{{Text: obs.String()}}})

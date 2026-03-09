@@ -282,14 +282,10 @@ func TestGetFileContext_IDMismatch(t *testing.T) {
 
 	c := ctx.Commits[0]
 
-	// We EXPECT the impact to be 0.8, but due to the bug (mismatched ID), it will be 0.0.
+	// We expect the impact to be 0.8.
+	// The code should now correctly normalize the ID so that 'in' ID matches 'history' ID.
 	if c.Impact != 0.8 {
-		t.Logf("Impact mismatch reproduced! Expected 0.8, got %f", c.Impact)
-		// Mark as expected failure for now if I were running step by step manually,
-		// but I want to SEE it fail first.
 		t.Errorf("Expected Impact 0.8, got %f", c.Impact)
-	} else {
-		t.Log("Impact match? This implies the bug is NOT reproduced or code handles it?")
 	}
 
 	if c.ID != "commit:123" {

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -70,6 +71,116 @@ func BenchmarkIngestStartup(b *testing.B) {
 		err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
 		if err != nil {
 			b.Fatalf("IngestRepo failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkParsing_Map simulates parsing a list of maps from []interface{}
+func BenchmarkParsing_Map(b *testing.B) {
+	// Setup large result set simulating DB return: []interface{} -> map[string]interface{} -> "id" -> string
+	count := 1000
+	results := make([]interface{}, count)
+	for i := 0; i < count; i++ {
+		results[i] = map[string]interface{}{
+			"id": fmt.Sprintf("commit:hash_%d", i),
+		}
+	}
+
+	// Simulate JSON unmarshal overhead if applicable, but we assume direct type assertion here
+	// The current code does:
+	/*
+		if results, ok := resRaw.([]interface{}); ok {
+			for _, item := range results {
+				if props, ok := item.(map[string]interface{}); ok {
+					if id, ok := props["id"].(string); ok {
+						idMap[id] = true
+					}
+				}
+			}
+		}
+	*/
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		idMap := make(map[string]bool)
+		for _, item := range results {
+			if props, ok := item.(map[string]interface{}); ok {
+				if id, ok := props["id"].(string); ok {
+					idMap[id] = true
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkParsing_String simulates parsing a list of strings from []interface{}
+func BenchmarkParsing_String(b *testing.B) {
+	// Setup result set simulating DB return: []interface{} -> string
+	count := 1000
+	results := make([]interface{}, count)
+	for i := 0; i < count; i++ {
+		results[i] = fmt.Sprintf("commit:hash_%d", i)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		idMap := make(map[string]bool)
+		for _, item := range results {
+			if id, ok := item.(string); ok {
+				idMap[id] = true
+			}
+		}
+	}
+}
+
+// BenchmarkJSON_Map simulates JSON unmarshal overhead for Map based result
+func BenchmarkJSON_Map(b *testing.B) {
+	// Setup JSON payload
+	count := 1000
+	raw := make([]map[string]string, count)
+	for i := 0; i < count; i++ {
+		raw[i] = map[string]string{"id": fmt.Sprintf("commit:hash_%d", i)}
+	}
+	bytes, _ := json.Marshal(raw)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		var res []map[string]interface{}
+		json.Unmarshal(bytes, &res)
+		idMap := make(map[string]bool)
+		for _, item := range res {
+			if id, ok := item["id"].(string); ok {
+				idMap[id] = true
+			}
+		}
+	}
+}
+
+// BenchmarkJSON_String simulates JSON unmarshal overhead for String based result
+func BenchmarkJSON_String(b *testing.B) {
+	// Setup JSON payload
+	count := 1000
+	raw := make([]string, count)
+	for i := 0; i < count; i++ {
+		raw[i] = fmt.Sprintf("commit:hash_%d", i)
+	}
+	bytes, _ := json.Marshal(raw)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		var res []string
+		json.Unmarshal(bytes, &res)
+		idMap := make(map[string]bool)
+		for _, id := range res {
+			idMap[id] = true
 		}
 	}
 }
