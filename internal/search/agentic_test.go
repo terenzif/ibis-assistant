@@ -32,10 +32,14 @@ func (m *TestAgentMockAI) GenerateContent(ctx context.Context, contents []ai.Con
 type TestAgentMockDB struct {
 	CapturedQueries []string
 	ReturnData      map[string]interface{}
+	ReturnError     error
 }
 
 func (m *TestAgentMockDB) Execute(sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
+	if m.ReturnError != nil {
+		return nil, m.ReturnError
+	}
 	for k, v := range m.ReturnData {
 		if strings.Contains(sql, k) {
 			return v, nil
@@ -46,6 +50,9 @@ func (m *TestAgentMockDB) Execute(sql string) (interface{}, error) {
 
 func (m *TestAgentMockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
+	if m.ReturnError != nil {
+		return nil, m.ReturnError
+	}
 	// Not needed for this specific test flow as AskProject uses Execute for search
 	return nil, nil
 }
@@ -246,5 +253,61 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 
 	if len(result.Steps) < 2 {
 		t.Errorf("BUG REPRODUCED: Expected at least 2 steps (Search -> Answer), got %d", len(result.Steps))
+	}
+}
+
+func TestAskProjectAgentic_SearchError(t *testing.T) {
+	// Simulate DB error during search
+	mockDB := &TestAgentMockDB{
+		ReturnError: fmt.Errorf("simulated db error"),
+	}
+
+	stepCounter := 0
+	mockAI := &TestAgentMockAI{
+		GenerateFunc: func(contents []ai.Content) (ai.Candidate, error) {
+			stepCounter++
+			if stepCounter == 1 {
+				// 1. Agent tries to search
+				return ai.Candidate{
+					Content: ai.Content{
+						Role: "model",
+						Parts: []ai.Part{
+							{Text: "SEARCH: something"},
+						},
+					},
+				}, nil
+			} else if stepCounter == 2 {
+				// 2. Agent receives error observation
+				lastMsg := contents[len(contents)-1]
+				text := lastMsg.Parts[0].Text
+				if !strings.Contains(text, "OBSERVATION: Search failed") || !strings.Contains(text, "simulated db error") {
+					return ai.Candidate{}, fmt.Errorf("expected error observation, got: %s", text)
+				}
+				// Agent gives up or tries something else
+				return ai.Candidate{
+					Content: ai.Content{
+						Role: "model",
+						Parts: []ai.Part{
+							{Text: "FINAL ANSWER: I failed."},
+						},
+					},
+				}, nil
+			}
+			return ai.Candidate{}, fmt.Errorf("unexpected step %d", stepCounter)
+		},
+	}
+
+	svc := &Service{
+		DB: mockDB,
+		AI: mockAI,
+	}
+
+	result, err := svc.AskProjectAgentic(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("AskProjectAgentic failed: %v", err)
+	}
+
+	if result.Answer != "I failed." {
+		t.Errorf("Unexpected answer: %s", result.Answer)
 	}
 }
