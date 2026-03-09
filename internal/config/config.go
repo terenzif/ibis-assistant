@@ -34,8 +34,20 @@ type Config struct {
 	IgnoredDirs         []string          `json:"ignored_dirs"`
 	IgnoredFiles        []string          `json:"ignored_files"`
 	SupportedExtensions []string          `json:"supported_extensions"`
+	LogsRoot            string            `json:"logs_root"`
+	SMTP                SMTPConfig        `json:"smtp"`
 	ConfigLoaded        bool              `json:"-"` // True if a config file was successfully loaded
 	ConfigPath          string            `json:"-"` // Path to the file that was loaded
+}
+
+type SMTPConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	To       string `json:"to"`
 }
 
 type GeminiKeyConfig struct {
@@ -51,21 +63,22 @@ type GeminiKeyConfig struct {
 func Load(paths ...string) *Config {
 	// 1. Defaults
 	cfg := &Config{
-		Port:             3030,
-		Mode:             "sse",
-		DBUrl:            "ws://localhost:8000/rpc",
-		DBNamespace:      "deckonline",
-		DBDatabase:       "analysis",
-		DBUser:           "root",
-		DBPassword:       "root",
-		GeminiDefaultRPM: 100,
+		Port:               3030,
+		Mode:               "sse",
+		DBUrl:              "ws://localhost:8000/rpc",
+		DBNamespace:        "deckonline",
+		DBDatabase:         "analysis",
+		DBUser:             "root",
+		DBPassword:         "root",
+		GeminiDefaultRPM:   100,
 		RedmineConcurrency: 10,
 		CodeConcurrency:    5,
 		DBTimeout:          300,
-		DiscoveryRoot:    ".",
-		AutoScan:         true,
-		LogLevel:         "INFO",
-		MaxFileSize:      10 * 1024 * 1024, // 10MB
+		DiscoveryRoot:      ".",
+		LogsRoot:           "./_logs",
+		AutoScan:           true,
+		LogLevel:           "INFO",
+		MaxFileSize:        10 * 1024 * 1024, // 10MB
 		IgnoredDirs: []string{
 			".git", "node_modules", "bin", "obj", "vendor",
 			".idea", ".vscode", "dist", "build", "coverage", "target",
@@ -187,6 +200,9 @@ func Load(paths ...string) *Config {
 	// Discovery
 	if v := os.Getenv("DISCOVERY_ROOT"); v != "" {
 		cfg.DiscoveryRoot = v
+	}
+	if v := os.Getenv("LOGS_ROOT"); v != "" {
+		cfg.LogsRoot = v
 	}
 	if v := os.Getenv("AUTO_SCAN"); v == "true" {
 		cfg.AutoScan = true

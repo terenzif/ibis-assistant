@@ -18,7 +18,17 @@
   "gemini_rpm": 100,
   "redmine_url": "https://redmine.users.noreply.github.com/",
   "redmine_key": "",
-  "discovery_root": "./repos",
+  "discovery_root": "./_repos",
+  "logs_root": "./_logs",
+  "smtp": {
+    "enabled": false,
+    "host": "smtp.example.com",
+    "port": 587,
+    "user": "",
+    "password": "",
+    "from": "noreply@example.com",
+    "to": "admin@example.com"
+  },
   "auto_scan": true,
   "git_repos": [],
   "log_file": "server.log",

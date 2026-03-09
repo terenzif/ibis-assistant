@@ -54,10 +54,10 @@ type Client struct {
 	jobQueue      chan EmbedJob
 	generateQueue chan GenerateJob
 	dbClient      db.Executor
-	workers  []*worker
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	workers       []*worker
+	wg            sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 type KeyConfig struct {
@@ -272,7 +272,6 @@ func (c *Client) GetBatchResults(ctx context.Context, outputURI string) ([][]flo
 	return nil, fmt.Errorf("not implemented: use GetBatchJob and check for inline responses or file URI")
 }
 
-
 // --- Worker Implementation ---
 
 func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
@@ -296,15 +295,15 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 	maxBucket := float64(safeTPM)
 
 	w := &worker{
-		apiKey:       cfg.Key,
-		owner:        cfg.Owner,
-		client:       &http.Client{Timeout: 30 * time.Second},
-		dbClient:     dbClient,
-		costInterval: costInterval,
-		limitTPM:     safeTPM,
-		limitRPD:     cfg.RPD,
-		lastResetTPM: time.Now(),
-		lastResetRPD: time.Now(),
+		apiKey:        cfg.Key,
+		owner:         cfg.Owner,
+		client:        &http.Client{Timeout: 30 * time.Second},
+		dbClient:      dbClient,
+		costInterval:  costInterval,
+		limitTPM:      safeTPM,
+		limitRPD:      cfg.RPD,
+		lastResetTPM:  time.Now(),
+		lastResetRPD:  time.Now(),
 		nextAvailable: time.Now(),
 
 		tpmBucket:     maxBucket,
@@ -597,7 +596,6 @@ func (w *worker) flushLoop(ctx context.Context) {
 	}
 }
 
-
 func (w *worker) updateUsageID() {
 	// ID: key_usage:<hash>_<date>
 	h := sha256.New()
@@ -748,7 +746,9 @@ func (w *worker) doGenerate(contents []Content, config GenerationConfig) (Candid
 		if len(result.Candidates) == 0 {
 			return Candidate{}, 0, fmt.Errorf("no candidates returned")
 		}
-		return result.Candidates[0], 0, nil
+		cand := result.Candidates[0]
+		cand.UsageMetadata = result.UsageMetadata
+		return cand, 0, nil
 	}
 
 	if resp.StatusCode == 429 {
@@ -779,7 +779,7 @@ func (w *worker) createBatchEmbedJob(ctx context.Context, texts []string) (strin
 
 	// Use displayName to store something useful? Maybe just timestamp.
 	payload := map[string]interface{}{
-		"model": EmbeddingModel,
+		"model":       EmbeddingModel,
 		"displayName": fmt.Sprintf("batch_%d", time.Now().UnixNano()),
 		"inputConfig": map[string]interface{}{
 			"requests": map[string]interface{}{
@@ -896,8 +896,8 @@ func (w *worker) getBatchJob(ctx context.Context, name string) (*BatchJobStatus,
 // --- DTOs ---
 
 type EmbeddingRequest struct {
-	Model   string   `json:"model"`
-	Content Content  `json:"content"`
+	Model   string  `json:"model"`
+	Content Content `json:"content"`
 }
 type Content struct {
 	Role  string `json:"role,omitempty"`
@@ -927,17 +927,25 @@ type GenerateContentRequest struct {
 }
 
 type GenerationConfig struct {
-	Temperature float64 `json:"temperature,omitempty"`
-	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	Temperature     float64 `json:"temperature,omitempty"`
+	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 }
 
 type GenerateContentResponse struct {
-	Candidates []Candidate `json:"candidates"`
+	Candidates    []Candidate    `json:"candidates"`
+	UsageMetadata *UsageMetadata `json:"usageMetadata,omitempty"`
 }
 
 type Candidate struct {
-	Content      Content `json:"content"`
-	FinishReason string  `json:"finishReason"`
+	Content       Content        `json:"content"`
+	FinishReason  string         `json:"finishReason"`
+	UsageMetadata *UsageMetadata `json:"-"`
+}
+
+type UsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
 }
 
 type ErrorResponse struct {

@@ -48,6 +48,12 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 	if err != nil {
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
+
+	if s.DB != nil {
+		tracker := ai.NewCostTracker(s.DB)
+		tracker.RecordEmbeddingUsage("system:search_vector", query)
+	}
+
 	vecJson, _ := json.Marshal(vec)
 
 	// 2. Vector Search (Time-Decayed)
@@ -100,7 +106,9 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 
 	top3 := make(map[string]bool)
 	for i, p := range uniquePaths {
-		if i >= 3 { break }
+		if i >= 3 {
+			break
+		}
 		top3[p] = true
 	}
 

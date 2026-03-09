@@ -1,0 +1,164 @@
+package logs
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/deckonline/knowledge_mcp/internal/ai"
+	"github.com/deckonline/knowledge_mcp/internal/config"
+	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
+)
+
+type LogAnalyzer struct {
+	Path        string
+	Cfg         *config.Config
+	DB          db.Executor
+	AI          *ai.Client
+	Project     string
+	LogFileID   string
+	CostTracker *ai.CostTracker
+}
+
+func NewLogAnalyzer(path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *LogAnalyzer {
+	base := filepath.Base(path)
+
+	// Fuzzy Match: very simple extraction for now
+	parts := strings.Split(base, "_")
+	project := "Unknown"
+	if len(parts) > 0 {
+		project = parts[0]
+	}
+
+	logFileID := fmt.Sprintf("%s:%s", schema.TableLogFile, db.SanitizeID(base))
+	projectID := fmt.Sprintf("%s:%s", schema.TableProject, db.SanitizeID(project))
+
+	if dbClient != nil {
+		dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", projectID, db.EscapeSQL(project)))
+		dbClient.Execute(fmt.Sprintf("UPDATE %s SET path = '%s', project = %s, tokens_used = 0;", logFileID, db.EscapeSQL(path), projectID))
+		dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", projectID, schema.EdgeHasLog, logFileID))
+	}
+
+	return &LogAnalyzer{
+		Path:        path,
+		Cfg:         cfg,
+		DB:          dbClient,
+		AI:          aiClient,
+		Project:     project,
+		LogFileID:   logFileID,
+		CostTracker: ai.NewCostTracker(dbClient),
+	}
+}
+
+func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	text := strings.Join(lines, "\n")
+
+	prompt := fmt.Sprintf(`Analyze the following log chunk from project %s. 
+Extract distinct errors or anomalies. 
+For each error, provide:
+1. "category": a normalized, general description of the error (ignore specific IDs/timestamps)
+2. "stack_trace": the relevant stack trace or context
+3. "file": the source code file mentioned in the stack trace (if any)
+4. "severity": a number from 1 to 10 (10 being critical)
+Format your response purely as a JSON array of objects with the above keys. No markdown blocks.
+Log text:
+%s`, a.Project, text)
+
+	contents := []ai.Content{{Parts: []ai.Part{{Text: prompt}}}}
+	cfg := ai.GenerationConfig{Temperature: 0.1}
+
+	if a.AI == nil || !a.AI.IsFunctional() {
+		return
+	}
+
+	candidate, err := a.AI.GenerateContent(ctx, contents, cfg)
+	if err != nil {
+		logger.Error("AI Generation error for %s: %v", a.Path, err)
+		return
+	}
+
+	if candidate.UsageMetadata != nil {
+		a.CostTracker.RecordUsage(a.LogFileID, candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
+	}
+
+	type SemanticError struct {
+		Category   string `json:"category"`
+		StackTrace string `json:"stack_trace"`
+		File       string `json:"file"`
+		Severity   int    `json:"severity"`
+	}
+	var errors []SemanticError
+
+	cleanJSON := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(candidate.Content.Parts[0].Text), "```"), "```json")
+	if err := json.Unmarshal([]byte(cleanJSON), &errors); err != nil {
+		logger.Debug("Failed to parse AI JSON for %s: %v", a.Path, err)
+		return
+	}
+
+	if len(errors) == 0 {
+		return
+	}
+	logger.Info("Detected %d semantic errors in %s", len(errors), a.Path)
+
+	for _, e := range errors {
+		a.ingestError(ctx, e.Category, e.StackTrace, e.File, e.Severity)
+	}
+}
+
+func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file string, severity int) {
+	if a.DB == nil {
+		return
+	}
+
+	h := sha256.New()
+	msg := category + stack
+	if msg == "" {
+		return
+	}
+	h.Write([]byte(msg))
+	hash := hex.EncodeToString(h.Sum(nil))
+
+	errorTypeID := fmt.Sprintf("%s:%s", schema.TableErrorType, hash)
+	logEntryID := fmt.Sprintf("%s:%s_%d", schema.TableLogEntry, hash, time.Now().UnixNano())
+	errorStateID := fmt.Sprintf("%s:%s_%d", schema.TableErrorState, hash, time.Now().UnixNano())
+
+	now := time.Now().Format(time.RFC3339)
+
+	_, err := a.DB.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d;",
+		errorTypeID, hash, db.EscapeSQL(category), db.EscapeSQL(stack), severity))
+	if err != nil {
+		logger.Error("Failed to upsert ErrorType: %v", err)
+		return
+	}
+
+	a.DB.Execute(fmt.Sprintf("CREATE %s SET timestamp = '%s', message = '%s';", logEntryID, now, db.EscapeSQL(category)))
+	a.DB.Execute(fmt.Sprintf("CREATE %s SET timestamp = '%s', status = 'ACTIVE', error_type = %s;", errorStateID, now, errorTypeID))
+
+	a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", a.LogFileID, schema.EdgeHasEntry, logEntryID))
+	a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", logEntryID, schema.EdgeIsTypeOf, errorTypeID))
+
+	embedding, err := a.AI.EmbedText(ctx, category+"\n"+stack)
+	if err == nil && len(embedding) > 0 {
+		var arr []string
+		for _, f := range embedding {
+			arr = append(arr, fmt.Sprintf("%f", f))
+		}
+		vecStr := "[" + strings.Join(arr, ",") + "]"
+		a.DB.Execute(fmt.Sprintf("UPDATE %s SET embedding = %s;", errorTypeID, vecStr))
+	}
+
+	if file != "" {
+		fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(file))
+		a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", errorTypeID, schema.EdgeRelatedTo, fileID))
+	}
+}

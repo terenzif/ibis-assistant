@@ -17,6 +17,9 @@ func TestSchemaConstants(t *testing.T) {
 		{"Author Table", schema.TableAuthor, "author"},
 		{"File Table", schema.TableFile, "file"},
 		{"Issue Table", schema.TableIssue, "issue"},
+		{"Project Table", schema.TableProject, "project"},
+		{"LogFile Table", schema.TableLogFile, "log_file"},
+		{"ErrorType Table", schema.TableErrorType, "error_type"},
 		{"Edge Changed", schema.EdgeChanged, "changed"},
 		{"Edge ParentOf", schema.EdgeParentOf, "parent_of"},
 	}

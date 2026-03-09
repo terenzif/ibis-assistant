@@ -50,6 +50,11 @@ QUESTION: <your question>
 		return "", err
 	}
 
+	if resp.UsageMetadata != nil && o.DB != nil {
+		tracker := ai.NewCostTracker(o.DB)
+		tracker.RecordUsage("system:optimizer_raft", resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount)
+	}
+
 	text := ""
 	for _, p := range resp.Content.Parts {
 		text += p.Text

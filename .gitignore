@@ -19,5 +19,6 @@ tmp/
 .env
 
 # Repositories (Indexed content)
-repos/
+_repos/
+_logs/
 .vscode/launch.json

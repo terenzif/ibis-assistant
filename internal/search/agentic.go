@@ -68,6 +68,11 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			return nil, fmt.Errorf("AI generation failed: %w", err)
 		}
 
+		if candidate.UsageMetadata != nil && s.DB != nil {
+			tracker := ai.NewCostTracker(s.DB)
+			tracker.RecordUsage("system:search_agentic", candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
+		}
+
 		response := ""
 		for _, p := range candidate.Content.Parts {
 			response += p.Text

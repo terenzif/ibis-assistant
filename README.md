@@ -9,6 +9,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
 * **Grafo della Conoscenza Unificato**: Collega File, Commit, Autori, Branch e Issue in un database a grafo (SurrealDB).
 * **Git Ingestion**: Analizza la storia di Git per costruire relazioni causali (`commit` -> `changed` -> `file`).
 * **Integrazione Redmine**: Collega le modifiche del codice ai ticket di gestione (`commit` -> `implements` -> `issue`), permettendo di capire *perché* una modifica è stata fatta.
+* **Analisi Log Avanzata**: Ingestione log e riconoscimento pattern d'errore (Error Type) unificati al grafo semantico (#root-cause-analysis).
+* **Cost Tracking Integrato**: Tracciamento dei token AI consumati per l'ottimizzazione del modello su DB SurrealDB aggregato per use case.
 * **Vector RAG Efficiente**: Utilizza l'API Batch di Gemini (`batchEmbedContents`) per generare embedding di centinaia di chunk in una singola chiamata, ottimizzando costi e latenza.
 * **Ricerca Ibrida**: Supporta query che combinano struttura (grafo) e semantica (vettori).
 * **MCP Compliant**: Espone strumenti standardizzati per l'integrazione plug-and-play con client MCP.
@@ -59,7 +61,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
      "gemini_rpm": 100,
      "redmine_url": "https://redmine.tuodominio.com",
      "redmine_key": "",
-     "auto_scan": true
+     "auto_scan": true,
+     "logs_root": "./_logs"
    }
    ```
    
