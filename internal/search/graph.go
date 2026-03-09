@@ -88,16 +88,21 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 				// Query: <-changed means we are at file, looking at incoming edges.
 				// Incoming edge 'in' is the start node (commit). 'out' is the end node (file).
 				if inRaw, ok := em["in"]; ok {
+					// Fix: The ID from the edge (inRaw) might be a driver-specific type (e.g. RecordID struct)
+					// while the ID from history is parsed via JSON unmarshal (which converts it to string).
+					// To ensure they match, we should try to treat inRaw as JSON if it's not a simple string.
 					var inID string
-					// Normalize ID via JSON roundtrip to match history parsing logic
-					if b, err := json.Marshal(inRaw); err == nil {
-						var v interface{}
-						if err := json.Unmarshal(b, &v); err == nil {
-							inID = fmt.Sprintf("%v", v)
-						} else {
-							inID = fmt.Sprintf("%v", inRaw)
+					if s, ok := inRaw.(string); ok {
+						inID = s
+					} else if b, err := json.Marshal(inRaw); err == nil {
+						// JSON strings are quoted, remove them
+						s := string(b)
+						if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+							s = s[1 : len(s)-1]
 						}
+						inID = s
 					} else {
+						// Fallback
 						inID = fmt.Sprintf("%v", inRaw)
 					}
 
