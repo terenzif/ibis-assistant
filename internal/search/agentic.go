@@ -113,41 +113,43 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			break
 		} else if action == "search" {
 			// Extract query using locSearch
-			rest := response[locSearch[1]:]
-			lineEnd := strings.Index(rest, "\n")
+			rawRest := response[locSearch[1]:]
+			trimmedRest := strings.TrimSpace(rawRest)
 
-			var rawQuery string
-			if lineEnd == -1 {
-				rawQuery = strings.TrimSpace(rest)
-			} else {
-				rawQuery = strings.TrimSpace(rest[:lineEnd])
-			}
-
-			// Stop at FINAL ANSWER if present in the same line
-			if loc := reFinalAnswer.FindStringIndex(rawQuery); loc != nil {
-				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
-			}
-
-			// Clean up query logic
 			searchQuery := ""
-			// 1. Check for quotes at the start
-			if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
-				quote := rawQuery[0:1]
+			// 1. Check for quotes at the start (supports multiline)
+			if strings.HasPrefix(trimmedRest, "\"") || strings.HasPrefix(trimmedRest, "'") {
+				quote := trimmedRest[0:1]
 				// Find next quote
-				endQuote := strings.Index(rawQuery[1:], quote)
+				endQuote := strings.Index(trimmedRest[1:], quote)
 				if endQuote != -1 {
-					searchQuery = rawQuery[1 : 1+endQuote]
+					searchQuery = trimmedRest[1 : 1+endQuote]
+				}
+			}
+
+			if searchQuery == "" {
+				// Fallback to line-based extraction if not quoted properly
+				lineEnd := strings.Index(rawRest, "\n")
+				var rawQuery string
+				if lineEnd == -1 {
+					rawQuery = strings.TrimSpace(rawRest)
 				} else {
-					// Mismatched quotes, just strip leading
+					rawQuery = strings.TrimSpace(rawRest[:lineEnd])
+				}
+
+				// Stop at FINAL ANSWER if present in the same line
+				if loc := reFinalAnswer.FindStringIndex(rawQuery); loc != nil {
+					rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
+				}
+
+				// If it was a mismatched quote (started with quote but no end quote), strip the leading quote
+				if strings.HasPrefix(rawQuery, "\"") || strings.HasPrefix(rawQuery, "'") {
+					quote := rawQuery[0:1]
 					searchQuery = strings.TrimPrefix(rawQuery, quote)
+				} else {
+					// 2. If no quotes, just take the line but strip trailing punctuation
+					searchQuery = strings.TrimRight(rawQuery, ".")
 				}
-			} else {
-				// 2. If no quotes, first look for sentence boundary (. ) to strip chatter
-				if idx := strings.Index(rawQuery, ". "); idx != -1 {
-					rawQuery = rawQuery[:idx]
-				}
-				// Also strip trailing punctuation
-				searchQuery = strings.TrimRight(rawQuery, ".")
 			}
 
 			searchQuery = strings.TrimSpace(searchQuery)
