@@ -17,6 +17,7 @@ type AgenticResult struct {
 	Steps   []string `json:"reasoning_steps"`
 }
 
+// Pre-compiled regexes for performance
 var (
 	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
 	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
@@ -37,12 +38,6 @@ GUIDELINES:
 - If the search results are not relevant, try a different query.
 - If you cannot find the answer, admit it.
 - Cite the file paths in your answer.`
-
-// Pre-compiled regexes for performance
-var (
-	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
-	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
-)
 
 // AskProjectAgentic performs a multi-step ReAct search
 func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*AgenticResult, error) {
@@ -117,6 +112,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			trimmedRest := strings.TrimSpace(rawRest)
 
 			searchQuery := ""
+			quotedExtracted := false
 			// 1. Check for quotes at the start (supports multiline)
 			if strings.HasPrefix(trimmedRest, "\"") || strings.HasPrefix(trimmedRest, "'") {
 				quote := trimmedRest[0:1]
@@ -124,10 +120,11 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 				endQuote := strings.Index(trimmedRest[1:], quote)
 				if endQuote != -1 {
 					searchQuery = trimmedRest[1 : 1+endQuote]
+					quotedExtracted = true
 				}
 			}
 
-			if searchQuery == "" {
+			if !quotedExtracted && searchQuery == "" {
 				// Fallback to line-based extraction if not quoted properly
 				lineEnd := strings.Index(rawRest, "\n")
 				var rawQuery string
@@ -147,7 +144,11 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 					quote := rawQuery[0:1]
 					searchQuery = strings.TrimPrefix(rawQuery, quote)
 				} else {
-					// 2. If no quotes, just take the line but strip trailing punctuation
+					// 2. If no quotes, first look for sentence boundary (. ) to strip chatter
+					if idx := strings.Index(rawQuery, ". "); idx != -1 {
+						rawQuery = rawQuery[:idx]
+					}
+					// Also strip trailing punctuation
 					searchQuery = strings.TrimRight(rawQuery, ".")
 				}
 			}

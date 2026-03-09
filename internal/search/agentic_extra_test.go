@@ -210,7 +210,7 @@ func (m *FailingAIMock) GenerateContent(ctx context.Context, contents []ai.Conte
 	}, nil
 }
 
-func TestAskProjectAgentic_SearchError(t *testing.T) {
+func TestAskProjectAgentic_AISearchError(t *testing.T) {
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{},
 	}
