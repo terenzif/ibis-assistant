@@ -316,49 +316,25 @@ func processGitLogStream(
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", parentID, schema.EdgeParentOf, commitID))
 			}
 
-			// 5. Link Issue (Simple linking based on regex-like scan)
-			// Scanning for # followed by digits
-			msgLen := len(subject)
-			for i := 0; i < msgLen; i++ {
-				if subject[i] == '#' {
-					// Check if next chars are digits
-					start := i + 1
-					end := start
-					for end < msgLen && subject[end] >= '0' && subject[end] <= '9' {
-						end++
+			// 5. Link Issues
+			issueRefs := ExtractIssueRefs(subject)
+			for _, ref := range issueRefs {
+				issueIDStr := ref.ID
+				issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
+
+				// In-Band Ingestion: Trigger Redmine fetch if client is available
+				if redmineClient != nil {
+					select {
+					case jobChan <- issueIDStr:
+					case <-ctx.Done():
 					}
-					if end > start {
-						// Found an issue ID
-						issueIDStr := subject[start:end]
-						// Create Issue Node (Placeholder first)
-						issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
-
-						// In-Band Ingestion: Trigger Redmine fetch if client is available
-						if redmineClient != nil {
-							select {
-							case jobChan <- issueIDStr:
-							case <-ctx.Done():
-							}
-						} else {
-							// Just ensure existence
-							batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
-						}
-
-						// Link Commit -> Issue with default confidence/weight
-						// Spec: 0.5 if just mentioned. 1.0 if "Fixes".
-						// For now, default to 1.0 for simplicity or parse properly.
-						// Let's do simple keyword check.
-						confidence := 0.5
-						lowerSub := strings.ToLower(subject)
-						if strings.Contains(lowerSub, "fix") || strings.Contains(lowerSub, "close") || strings.Contains(lowerSub, "resolve") {
-							confidence = 1.0
-						}
-
-						batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET confidence = %f, usage_weight = 1.0;\n",
-							commitID, schema.EdgeImplements, issueID, confidence))
-					}
-					i = end // Advance
+				} else {
+					// Just ensure existence
+					batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
 				}
+
+				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET confidence = %f, usage_weight = 1.0;\n",
+					commitID, schema.EdgeImplements, issueID, ref.Confidence))
 			}
 
 		} else {

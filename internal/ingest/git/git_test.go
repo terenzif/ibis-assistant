@@ -31,8 +31,12 @@ func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 // MockRedmineIngester for Git Ingestion
 type MockRedmine struct {
 	IngestedIDs []string
+	Delay       time.Duration
 }
 func (m *MockRedmine) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error {
+	if m.Delay > 0 {
+		time.Sleep(m.Delay)
+	}
 	m.IngestedIDs = append(m.IngestedIDs, issueIDStr)
 	return nil
 }
@@ -251,6 +255,61 @@ func TestIngestRepo_Incremental(t *testing.T) {
 	}
 	if !foundCommit2 {
 		t.Errorf("Expected Commit 2 to be ingested, but found no SQL for it")
+	}
+}
+
+func TestIngestRepo_SlowRedmine(t *testing.T) {
+	// 1. Setup Temp Git Repo
+	repoDir := t.TempDir()
+
+	initCmd := exec.Command("git", "init")
+	initCmd.Dir = repoDir
+	if err := initCmd.Run(); err != nil {
+		t.Fatalf("Failed to git init: %v", err)
+	}
+
+	// Config user
+	cfgName := exec.Command("git", "config", "user.name", "Test User")
+	cfgName.Dir = repoDir
+	cfgName.Run()
+	cfgEmail := exec.Command("git", "config", "user.email", "test@example.com")
+	cfgEmail.Dir = repoDir
+	cfgEmail.Run()
+
+	// Commit with Issue
+	os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main"), 0644)
+	helperExec(t, repoDir, "git", "add", ".")
+	helperExec(t, repoDir, "git", "commit", "-m", "Fix #100")
+
+	// 2. Setup Mock Clients with Delay
+	mockDB := &MockDB{}
+	mockRedmine := &MockRedmine{
+		Delay: 200 * time.Millisecond,
+	}
+
+	// 3. Run Ingest
+	// Using concurrency 1, so the worker will block for 200ms per issue.
+	// Since we only have 1 issue, it should take ~200ms + overhead.
+	start := time.Now()
+	err := IngestRepo(mockDB, mockRedmine, repoDir, 1)
+	if err != nil {
+		t.Fatalf("IngestRepo failed: %v", err)
+	}
+	duration := time.Since(start)
+
+	// 4. Assertions
+	if len(mockRedmine.IngestedIDs) != 1 {
+		t.Fatalf("Expected 1 issue ingested, got %d", len(mockRedmine.IngestedIDs))
+	}
+	if mockRedmine.IngestedIDs[0] != "100" {
+		t.Errorf("Expected issue '100', got '%s'", mockRedmine.IngestedIDs[0])
+	}
+
+	// Check that we waited for it (implied by IngestRepo returning only after wg.Wait())
+	// If IngestRepo returns immediately without waiting, duration would be small.
+	// But IngestRepo has defer wg.Wait().
+	if duration < 200*time.Millisecond {
+		t.Errorf("IngestRepo returned too quickly (%v), implying it didn't wait for Redmine ingestion", duration)
 	}
 }
 
