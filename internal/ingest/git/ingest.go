@@ -116,18 +116,16 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 			// Trying SmartQuery with slice.
 
 			vars["ids"] = ids
-			resRaw, err := client.SmartQuery("SELECT id FROM commit WHERE id IN $ids", vars)
+			resRaw, err := client.SmartQuery("SELECT VALUE id FROM commit WHERE id IN $ids", vars)
 			if err != nil {
 				return fmt.Errorf("failed to check existing commits: %w", err)
 			}
 
-			// Parse result to find existing (Optimized: Direct Type Assertion)
+			// Parse result to find existing (Optimized: Direct Type Assertion for SELECT VALUE)
 			if results, ok := resRaw.([]interface{}); ok {
 				for _, item := range results {
-					if props, ok := item.(map[string]interface{}); ok {
-						if id, ok := props["id"].(string); ok {
-							idMap[id] = true
-						}
+					if id, ok := item.(string); ok {
+						idMap[id] = true
 					}
 				}
 			}
