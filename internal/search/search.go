@@ -202,7 +202,7 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 	var err error
 	if sourceTable == schema.TableCommit && targetTable == schema.TableIssue {
 		err = runUpdate(schema.EdgeImplements)
-	} else if sourceTable == schema.TableCommit && targetTable == schema.TableFile {
+	} else if sourceTable == schema.TableCommit && (targetTable == schema.TableFile || targetTable == schema.TableFileChunk) {
 		// Try 'changed' (Commit -> File)
 		err = runUpdate(schema.EdgeChanged)
 	} else if sourceTable == schema.TableAuthor && targetTable == schema.TableCommit {

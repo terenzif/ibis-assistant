@@ -17,6 +17,11 @@ type AgenticResult struct {
 	Steps   []string `json:"reasoning_steps"`
 }
 
+var (
+	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
+	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
+)
+
 const SystemPrompt = `You are a Senior Software Engineer Agent.
 Your goal is to answer questions about the codebase using the provided SEARCH tool.
 
