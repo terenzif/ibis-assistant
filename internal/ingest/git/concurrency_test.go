@@ -43,8 +43,8 @@ func TestIngestRepo_ConcurrencyBounded(t *testing.T) {
 	// Setup Repo with multiple commits referencing different issues
 	repoDir := t.TempDir()
 	exec.Command("git", "init", repoDir).Run()
-	exec.Command("git", "config", "user.name", "Test").Run()
-	exec.Command("git", "config", "user.email", "test@example.com").Run()
+	exec.Command("git", "-C", repoDir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", repoDir, "config", "user.email", "test@example.com").Run()
 
 	issueCount := 20
 	for i := 0; i < issueCount; i++ {

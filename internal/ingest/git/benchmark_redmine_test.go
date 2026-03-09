@@ -17,8 +17,8 @@ func BenchmarkIngestRedmineMixed(b *testing.B) {
 	// 1. Setup Repo
 	repoDir := b.TempDir()
 	exec.Command("git", "init", repoDir).Run()
-	exec.Command("git", "config", "user.name", "Bench").Run()
-	exec.Command("git", "config", "user.email", "bench@example.com").Run()
+	exec.Command("git", "-C", repoDir, "config", "user.name", "Bench").Run()
+	exec.Command("git", "-C", repoDir, "config", "user.email", "bench@example.com").Run()
 
 	// Create 200 commits:
 	// 0-49: Issue (Slow)
