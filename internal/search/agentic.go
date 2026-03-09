@@ -33,6 +33,12 @@ GUIDELINES:
 - If you cannot find the answer, admit it.
 - Cite the file paths in your answer.`
 
+// Pre-compiled regexes for performance
+var (
+	reFinalAnswer = regexp.MustCompile(`(?i)FINAL ANSWER:`)
+	reSearch      = regexp.MustCompile(`(?i)SEARCH:`)
+)
+
 // AskProjectAgentic performs a multi-step ReAct search
 func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*AgenticResult, error) {
 	// Initialize History
@@ -78,10 +84,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 		history = append(history, modelContent)
 
 		// Parse Response (Case Insensitive using Regex to be Unicode safe)
-		reFinal := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-		locFinal := reFinal.FindStringIndex(response)
-
-		reSearch := regexp.MustCompile(`(?i)SEARCH:`)
+		locFinal := reFinalAnswer.FindStringIndex(response)
 		locSearch := reSearch.FindStringIndex(response)
 
 		// Determine which action to take (priority to first occurrence)
@@ -116,8 +119,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			}
 
 			// Stop at FINAL ANSWER if present in the same line
-			reFinalInQuery := regexp.MustCompile(`(?i)FINAL ANSWER:`)
-			if loc := reFinalInQuery.FindStringIndex(rawQuery); loc != nil {
+			if loc := reFinalAnswer.FindStringIndex(rawQuery); loc != nil {
 				rawQuery = strings.TrimSpace(rawQuery[:loc[0]])
 			}
 
@@ -144,6 +146,12 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 			}
 
 			searchQuery = strings.TrimSpace(searchQuery)
+
+			if searchQuery == "" {
+				logger.Info("Agentic Search Step %d: Skipping empty search query", i+1)
+				history = append(history, ai.Content{Role: "user", Parts: []ai.Part{{Text: "OBSERVATION: Search query was empty. Please provide a valid search term."}}})
+				continue
+			}
 
 			logger.Info("Agentic Search Step %d: Searching for '%s'", i+1, searchQuery)
 
