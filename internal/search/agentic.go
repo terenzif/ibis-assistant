@@ -22,7 +22,7 @@ Your goal is to answer questions about the codebase using the provided SEARCH to
 
 PROTOCOL:
 1. THOUGHT: Explain your reasoning. What do you need to know?
-2. ACTION: If you need information, output "SEARCH: <query>".
+2. ACTION: If you need information, output "SEARCH: \"<query>\"". Always use double quotes for the query.
 3. OBSERVATION: I will provide the search results.
 4. REPEAT: You can search multiple times if needed.
 5. FINAL ANSWER: When you have enough information, output "FINAL ANSWER: <your answer>".
@@ -135,7 +135,11 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 					searchQuery = strings.TrimPrefix(rawQuery, quote)
 				}
 			} else {
-				// 2. If no quotes, just take the line but strip trailing punctuation
+				// 2. If no quotes, first look for sentence boundary (. ) to strip chatter
+				if idx := strings.Index(rawQuery, ". "); idx != -1 {
+					rawQuery = rawQuery[:idx]
+				}
+				// Also strip trailing punctuation
 				searchQuery = strings.TrimRight(rawQuery, ".")
 			}
 
