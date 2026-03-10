@@ -213,12 +213,15 @@ func runServer(ctx context.Context) {
 
 	// 5. Connect DB
 	logger.Info("Connecting to SurrealDB at %s...", cfg.DBUrl)
-	dbClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
+	var dbClient db.Executor // Use interface type directly
+	concreteClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
 	if err != nil {
 		logger.Error("CRITICAL: Failed to connect to SurrealDB: %v", err)
+		// dbClient remains nil (interface nil)
 	} else {
+		dbClient = concreteClient
 		if cfg.DBTimeout > 0 {
-			dbClient.SetTimeout(time.Duration(cfg.DBTimeout) * time.Second)
+			concreteClient.SetTimeout(time.Duration(cfg.DBTimeout) * time.Second)
 		}
 		defer dbClient.Close()
 		logger.Info("Successfully connected to SurrealDB.")
@@ -244,8 +247,11 @@ func runServer(ctx context.Context) {
 	aiClient := ai.NewClient(aiKeys, dbClient)
 
 	// Start Batch Manager
-	batchManager := ai.NewBatchManager(dbClient, aiClient)
-	batchManager.Start()
+	var batchManager *ai.BatchManager
+	if dbClient != nil {
+		batchManager = ai.NewBatchManager(dbClient, aiClient)
+		batchManager.Start()
+	}
 
 	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
 	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
@@ -272,7 +278,7 @@ func runServer(ctx context.Context) {
 	var bgWg sync.WaitGroup
 
 	// Start Log Watcher
-	if cfg.LogsRoot != "" {
+	if cfg.LogsRoot != "" && dbClient != nil {
 		logWatcher := logs.NewWatcher(cfg, dbClient, aiClient)
 		if err := logWatcher.Start(ctx); err != nil {
 			logger.Error("Failed to start Log Watcher: %v", err)
@@ -286,7 +292,7 @@ func runServer(ctx context.Context) {
 		}
 	}
 
-	if len(activeRepos) > 0 {
+	if len(activeRepos) > 0 && dbClient != nil {
 		logger.Info("Triggering background indexing for %d repositories...", len(activeRepos))
 		bgWg.Add(1)
 		go func() {
@@ -613,8 +619,10 @@ func runServer(ctx context.Context) {
 	logger.Info("Stopping AI workers...")
 	aiClient.Stop()
 	// Stop Batch Manager
-	logger.Info("Stopping Batch Manager...")
-	batchManager.Stop()
+	if batchManager != nil {
+		logger.Info("Stopping Batch Manager...")
+		batchManager.Stop()
+	}
 
 	// 3. Close DB Connection (now safe as no workers are using it)
 	if dbClient != nil {

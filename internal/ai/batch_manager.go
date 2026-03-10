@@ -14,16 +14,16 @@ import (
 )
 
 const (
-	BatchSize = 100 // Adjust based on API limits. Google usually allows ~100-1000 requests per batch.
+	BatchSize    = 100 // Adjust based on API limits. Google usually allows ~100-1000 requests per batch.
 	PollInterval = 10 * time.Second
 )
 
 type BatchManager struct {
-	DB       db.Executor
-	AI       *Client // Use concrete client to access batch methods
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	DB     db.Executor
+	AI     *Client // Use concrete client to access batch methods
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewBatchManager(dbClient db.Executor, aiClient *Client) *BatchManager {
@@ -60,14 +60,19 @@ func (bm *BatchManager) runLoop() {
 			logger.Info("BatchManager: Stopping...")
 			return
 		case <-ticker.C:
-			bm.processPendingChunks()
-			bm.checkActiveBatches()
+			if bm.DB != nil {
+				bm.processPendingChunks()
+				bm.checkActiveBatches()
+			}
 		}
 	}
 }
 
 // processPendingChunks finds chunks waiting for embedding and submits them in batches
 func (bm *BatchManager) processPendingChunks() {
+	if bm.DB == nil {
+		return
+	}
 	// 1. Find pending chunks
 	// To avoid race conditions in a scaled env (though this is single instance),
 	// we should mark them as 'processing' or similar.
@@ -92,7 +97,9 @@ func (bm *BatchManager) processPendingChunks() {
 
 	for _, r := range rows {
 		row, ok := r.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		id, _ := row["id"].(string)
 		content, _ := row["content"].(string)
 
@@ -172,7 +179,9 @@ func (bm *BatchManager) checkActiveBatches() {
 
 	for _, r := range rows {
 		row, ok := r.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 
 		dbID, _ := row["id"].(string)
 		jobName, _ := row["name"].(string)

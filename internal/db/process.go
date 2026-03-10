@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -42,8 +43,13 @@ func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, 
 		fileArg,
 	}
 
-	cmd := exec.Command(binName, args...)
-	
+	absBinPath, err := filepath.Abs(binName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for database binary: %w", err)
+	}
+
+	cmd := exec.Command(absBinPath, args...)
+
 	// Check if log file exists/create it
 	logFile, err := os.OpenFile("surreal.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err == nil {
@@ -111,7 +117,7 @@ func (pm *ProcessManager) Stop() error {
 func waitForPort(port int, timeout time.Duration) error {
 	address := fmt.Sprintf("localhost:%d", port)
 	deadline := time.Now().Add(timeout)
-	
+
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
 		if err == nil {

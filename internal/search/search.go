@@ -49,10 +49,12 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
 
-	if s.DB != nil {
-		tracker := ai.NewCostTracker(s.DB)
-		tracker.RecordEmbeddingUsage("system:search_vector", query)
+	if s.DB == nil {
+		return nil, fmt.Errorf("database not connected")
 	}
+
+	tracker := ai.NewCostTracker(s.DB)
+	tracker.RecordEmbeddingUsage("system:search_vector", query)
 
 	vecJson, _ := json.Marshal(vec)
 
@@ -171,6 +173,9 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 
 // ReinforcePath updates the usage weight of a path in the graph
 func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error {
+	if s.DB == nil {
+		return fmt.Errorf("database not connected")
+	}
 	// Logic:
 	// 1. Find edge between source and target.
 	//    We assume a specific edge type or just any edge?
@@ -237,5 +242,8 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 
 // RawQuery executes a raw SurrealQL query for power users
 func (s *Service) RawQuery(ql string) (interface{}, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
 	return s.DB.Execute(ql)
 }

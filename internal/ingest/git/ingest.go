@@ -20,6 +20,9 @@ import (
 
 // IngestRepo analyzes a git repository and populates the Knowledge Graph
 func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath string, concurrency int) error {
+	if client == nil {
+		return fmt.Errorf("database client is nil")
+	}
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("invalid repo path: %w", err)

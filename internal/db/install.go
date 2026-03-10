@@ -50,11 +50,11 @@ func EnsureSurrealDB() error {
 	}
 
 	// 2. Get latest release info from GitHub
-	// Use a short timeout to avoid blocking startup too long if offline
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Use a reasonable timeout for the API check
+	apiCtx, apiCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer apiCancel()
 
-	release, err := getLatestRelease(ctx)
+	release, err := getLatestRelease(apiCtx)
 	if err != nil {
 		if localVer != "" {
 			logger.Warn("Failed to check for updates (using local version): %v", err)
@@ -75,7 +75,11 @@ func EnsureSurrealDB() error {
 	logger.Info("Newer SurrealDB version available: %s (Local: %s). Downloading...", remoteVer, localVer)
 
 	// 4. Download and Install
-	if err := installSurreal(ctx, release, binName); err != nil {
+	// Use a much longer timeout for the download (5 minutes)
+	downloadCtx, downloadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer downloadCancel()
+
+	if err := installSurreal(downloadCtx, release, binName); err != nil {
 		if localVer != "" {
 			logger.Warn("Failed to update SurrealDB (using local version): %v", err)
 			return nil
@@ -118,7 +122,10 @@ func getLocalVersion(binName string) (string, error) {
 
 	// Run "surreal version"
 	// Use absolute path or strict relative path
-	path := filepath.Join(".", binName)
+	path, err := filepath.Abs(binName)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.Command(path, "version")
 	out, err := cmd.Output()
 	if err != nil {

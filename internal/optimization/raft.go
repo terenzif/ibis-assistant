@@ -89,6 +89,9 @@ func (o *Optimizer) EvaluateRetrieval(ctx context.Context, question string, expe
 
 // OptimizeLoop runs the optimization process for a specified number of iterations.
 func (o *Optimizer) OptimizeLoop(ctx context.Context, iterations int) error {
+	if o.DB == nil {
+		return fmt.Errorf("database not connected")
+	}
 	logger.Info("Starting Optimization Loop for %d iterations...", iterations)
 
 	// 1. Select Candidates (Random)

@@ -79,11 +79,17 @@ func NewClient(endpoint, ns, db, user, pass string) (*Client, error) {
 }
 
 func (c *Client) Close() {
+	if c == nil || c.DB == nil {
+		return
+	}
 	c.DB.Close(context.Background())
 }
 
 // Execute performs a raw query against SurrealDB
 func (c *Client) Execute(sql string) (interface{}, error) {
+	if c == nil || c.DB == nil {
+		return nil, fmt.Errorf("database client not initialized")
+	}
 	logger.Debug("SQL: %s", sql)
 
 	ctx := context.Background()
@@ -96,14 +102,14 @@ func (c *Client) Execute(sql string) (interface{}, error) {
 	start := time.Now()
 	res, err := surrealdb.Query[interface{}](ctx, c.DB, sql, map[string]interface{}{})
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		logger.Error("SQL ERROR [%v]: %v", duration, err)
 		return nil, err
 	}
-	
+
 	logger.Debug("SQL SUCCESS [%v]", duration)
-	
+
 	// Unwrap if single result for backward compatibility
 	if len(*res) == 1 {
 		return (*res)[0].Result, nil
@@ -113,6 +119,9 @@ func (c *Client) Execute(sql string) (interface{}, error) {
 
 // SmartQuery is a helper for parameterized queries
 func (c *Client) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+	if c == nil || c.DB == nil {
+		return nil, fmt.Errorf("database client not initialized")
+	}
 	logger.Debug("SQL (Smart): %s | Vars: %+v", sql, vars)
 	varsMap, ok := vars.(map[string]interface{})
 	if !ok {
@@ -125,16 +134,16 @@ func (c *Client) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
 		defer cancel()
 	}
-	
+
 	start := time.Now()
 	res, err := surrealdb.Query[interface{}](ctx, c.DB, sql, varsMap)
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		logger.Error("SQL ERROR [%v]: %v", duration, err)
 		return nil, err
 	}
-	
+
 	logger.Debug("SQL SUCCESS [%v]", duration)
 
 	// Unwrap if single result
