@@ -104,7 +104,12 @@ func (c *Client) Execute(sql string) (interface{}, error) {
 	duration := time.Since(start)
 
 	if err != nil {
-		logger.Error("SQL ERROR [%v]: %v", duration, err)
+		errStr := err.Error()
+		if strings.Contains(strings.ToLower(errStr), "already exists") {
+			logger.Debug("SQL (Already Exists) [%v]: %v", duration, err)
+		} else {
+			logger.Error("SQL ERROR [%v]: %v", duration, err)
+		}
 		return nil, err
 	}
 

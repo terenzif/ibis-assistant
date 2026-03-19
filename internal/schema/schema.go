@@ -11,7 +11,7 @@ const (
 	TableBranch     = "branch"
 	TableCommit     = "commit"
 	TableAuthor     = "author"
-	TableFile       = "file"
+	TableFile       = "source_file"
 	TableFileChunk  = "file_chunk"
 	TableIssue      = "issue"       // Redmine Issue
 	TableTracker    = "tracker"     // Redmine Tracker/Epic
@@ -21,6 +21,7 @@ const (
 	TableLogEntry   = "log_entry"   // Singola riga/anomalia loggata
 	TableErrorType  = "error_type"  // Signature log errore
 	TableErrorState = "error_state" // Stato e temporalità dell'errore
+	TableKeyUsage   = "key_usage"   // Traccia costi Gemini
 
 	// Edges
 	EdgeContains   = "contains"   // Repo -> Branch, Repo -> File
@@ -38,6 +39,37 @@ const (
 )
 
 var Definition = []string{
+	// Define Tables (Required for SurrealDB v3 strictness)
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableRepo),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableBranch),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableCommit),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableAuthor),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableFile),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableFileChunk),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableIssue),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableTracker),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableBatchJob),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableProject),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableLogFile),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableLogEntry),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableErrorType),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableErrorState),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableKeyUsage),
+
+	// Define Edges (Tables for Relations)
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeContains, TableRepo, "any"),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeParentOf, TableCommit, TableCommit),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgePointedTo, TableBranch, TableCommit),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeChanged, TableCommit, TableFile),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeAuthored, TableAuthor, TableCommit),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeImplements, TableCommit, TableIssue),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgePartOf, TableIssue, TableTracker),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasRepo, TableProject, TableRepo),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasLog, TableProject, TableLogFile),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasEntry, TableLogFile, TableLogEntry),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeIsTypeOf, TableLogEntry, TableErrorType),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT any SCHEMALESS;", EdgeRelatedTo, TableErrorType),
+
 	// Define Indexes
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),
 	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path UNIQUE;", TableFile),
@@ -56,8 +88,8 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE INDEX chunk_batch_status ON TABLE %s COLUMNS batch_status;", TableFileChunk),
 
 	// Vector Index
-	fmt.Sprintf("DEFINE INDEX vector_embedding ON TABLE %s COLUMNS embedding M-TREE DIMENSION 768 DIST COSINE;", TableFileChunk),
-	fmt.Sprintf("DEFINE INDEX error_embedding ON TABLE %s COLUMNS embedding M-TREE DIMENSION 768 DIST COSINE;", TableErrorType),
+	fmt.Sprintf("DEFINE INDEX vector_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableFileChunk),
+	fmt.Sprintf("DEFINE INDEX error_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableErrorType),
 }
 
 // GenerateInitSQL returns the full SQL script to initialize the DB

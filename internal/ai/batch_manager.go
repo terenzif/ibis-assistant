@@ -100,7 +100,21 @@ func (bm *BatchManager) processPendingChunks() {
 		if !ok {
 			continue
 		}
-		id, _ := row["id"].(string)
+		
+		// Robust extraction of ID and content.
+		// In SurrealDB v3, IDs might be represented as RecordID strings or objects.
+		var id string
+		if rawID, exists := row["id"]; exists {
+			switch v := rawID.(type) {
+			case string:
+				id = v
+			case map[string]interface{}:
+				if idVal, ok := v["id"].(string); ok {
+					id = idVal
+				}
+			}
+		}
+		
 		content, _ := row["content"].(string)
 
 		if id != "" && content != "" {
@@ -110,6 +124,7 @@ func (bm *BatchManager) processPendingChunks() {
 	}
 
 	if len(chunkIDs) == 0 {
+		logger.Debug("BatchManager: No valid chunks found in %d candidate rows", len(rows))
 		return
 	}
 
@@ -151,7 +166,12 @@ func (bm *BatchManager) processPendingChunks() {
 
 	// Update Chunks
 	// We can use WHERE id IN [...]
-	idList := "[" + strings.Join(chunkIDs, ", ") + "]"
+	// Ensure IDs are properly quoted if they contain special characters.
+	quotedIDs := make([]string, len(chunkIDs))
+	for i, id := range chunkIDs {
+		quotedIDs[i] = fmt.Sprintf("'%s'", db.EscapeSQL(id))
+	}
+	idList := "[" + strings.Join(quotedIDs, ", ") + "]"
 	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_id = '%s', batch_status = 'submitted' WHERE id IN %s; ",
 		schema.TableFileChunk, jobID, idList))
 
@@ -252,7 +272,11 @@ func (bm *BatchManager) markJobFailed(jobID string, chunkIDs []string, reason st
 
 	// Reset chunks to 'pending' so they are picked up again (retry logic could be smarter)
 	// Maybe add retry count?
-	idList := "[" + strings.Join(chunkIDs, ", ") + "]"
+	quotedIDs := make([]string, len(chunkIDs))
+	for i, id := range chunkIDs {
+		quotedIDs[i] = fmt.Sprintf("'%s'", db.EscapeSQL(id))
+	}
+	idList := "[" + strings.Join(quotedIDs, ", ") + "]"
 	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_status = 'pending', batch_error = '%s' WHERE id IN %s; ",
 		schema.TableFileChunk, db.EscapeSQL(reason), idList))
 

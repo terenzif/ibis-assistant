@@ -225,6 +225,11 @@ func runServer(ctx context.Context) {
 		}
 		defer dbClient.Close()
 		logger.Info("Successfully connected to SurrealDB.")
+
+		// --- [NEW] Initialize Schema ---
+		if err := db.InitSchema(dbClient); err != nil {
+			logger.Warn("Database schema initialization warning: %v", err)
+		}
 	}
 
 	// 6. Initialize Clients

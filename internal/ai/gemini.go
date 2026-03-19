@@ -14,12 +14,13 @@ import (
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 const (
-	EmbeddingModel  = "models/gemini-embedding-001"
-	GenerationModel = "models/gemini-1.5-flash"
-	TableKeyUsage   = "key_usage"
+	EmbeddingModel           = "models/text-embedding-004"
+	GenerationModel          = "models/gemini-1.5-flash"
+	PreferredGenerationModel = "models/gemini-3-flash-preview"
 )
 
 var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -244,6 +245,15 @@ func (c *Client) CreateBatchEmbedJob(ctx context.Context, texts []string) (strin
 	// Ideally we should load balance or use a specific key for batch operations
 	w := c.workers[0]
 	return w.createBatchEmbedJob(ctx, texts)
+}
+
+// CreateBatchGenerateJob submits an asynchronous batch content generation job
+func (c *Client) CreateBatchGenerateJob(ctx context.Context, model string, contents [][]Content, config GenerationConfig) (string, error) {
+	if len(c.workers) == 0 {
+		return "", fmt.Errorf("no active workers")
+	}
+	w := c.workers[0]
+	return w.createBatchGenerateJob(ctx, model, contents, config)
 }
 
 // GetBatchJob retrieves the status of a batch job
@@ -602,7 +612,7 @@ func (w *worker) updateUsageID() {
 	h.Write([]byte(w.apiKey))
 	hash := hex.EncodeToString(h.Sum(nil))[:8] // Short hash
 	date := time.Now().Format("20060102")
-	w.usageID = fmt.Sprintf("%s:%s_%s", TableKeyUsage, hash, date)
+	w.usageID = fmt.Sprintf("%s:%s_%s", schema.TableKeyUsage, hash, date)
 }
 
 func (w *worker) loadUsageFromDB() {
@@ -716,50 +726,66 @@ func (w *worker) doEmbed(texts []string) ([][]float32, time.Duration, error) {
 func (w *worker) doGenerate(contents []Content, config GenerationConfig) (Candidate, time.Duration, error) {
 	logger.Debug("AI: Worker ...%s processing generation", w.shortKey())
 
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s", BaseURL, GenerationModel, w.apiKey)
+	// Try PreferredGenerationModel first, then GenerationModel
+	models := []string{PreferredGenerationModel, GenerationModel}
+	var lastErr error
 
-	payload := GenerateContentRequest{
-		Contents:         contents,
-		GenerationConfig: config,
-	}
-	jsonBody, err := json.Marshal(payload)
-	if err != nil {
-		return Candidate{}, 0, err
-	}
+	for _, model := range models {
+		url := fmt.Sprintf("%s/%s:generateContent?key=%s", BaseURL, model, w.apiKey)
 
-	start := time.Now()
-	resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return Candidate{}, 0, err
-	}
-	defer resp.Body.Close()
-	duration := time.Since(start)
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode == 200 {
-		logger.Debug("AI: Worker ...%s generation success (%v)", w.shortKey(), duration)
-		var result GenerateContentResponse
-		if err := json.Unmarshal(body, &result); err != nil {
-			return Candidate{}, 0, fmt.Errorf("parsing error: %w", err)
+		payload := GenerateContentRequest{
+			Contents:         contents,
+			GenerationConfig: config,
 		}
-		if len(result.Candidates) == 0 {
-			return Candidate{}, 0, fmt.Errorf("no candidates returned")
+		jsonBody, err := json.Marshal(payload)
+		if err != nil {
+			return Candidate{}, 0, err
 		}
-		cand := result.Candidates[0]
-		cand.UsageMetadata = result.UsageMetadata
-		return cand, 0, nil
+
+		start := time.Now()
+		resp, err := w.client.Post(url, "application/json", bytes.NewBuffer(jsonBody))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		defer resp.Body.Close()
+		duration := time.Since(start)
+
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode == 200 {
+			logger.Debug("AI: Worker ...%s generation success with %s (%v)", w.shortKey(), model, duration)
+			var result GenerateContentResponse
+			if err := json.Unmarshal(body, &result); err != nil {
+				return Candidate{}, 0, fmt.Errorf("parsing error: %w", err)
+			}
+			if len(result.Candidates) == 0 {
+				return Candidate{}, 0, fmt.Errorf("no candidates returned")
+			}
+			cand := result.Candidates[0]
+			cand.UsageMetadata = result.UsageMetadata
+			return cand, 0, nil
+		}
+
+		if resp.StatusCode == 429 {
+			retryDelay := parseRetryDelay(body)
+			if retryDelay == 0 {
+				retryDelay = 5 * time.Second
+			}
+			return Candidate{}, retryDelay, fmt.Errorf("rate limit exceeded")
+		}
+
+		// If 404, we try the next model
+		if resp.StatusCode == 404 {
+			logger.Warn("AI: Model %s not found, trying next...", model)
+			lastErr = fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
+			continue
+		}
+
+		return Candidate{}, 0, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
 	}
 
-	if resp.StatusCode == 429 {
-		retryDelay := parseRetryDelay(body)
-		if retryDelay == 0 {
-			retryDelay = 5 * time.Second
-		}
-		return Candidate{}, retryDelay, fmt.Errorf("rate limit exceeded")
-	}
-
-	return Candidate{}, 0, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, string(body))
+	return Candidate{}, 0, lastErr
 }
 
 // --- Worker Async Batch Implementation ---
@@ -886,6 +912,14 @@ func (w *worker) getBatchJob(ctx context.Context, name string) (*BatchJobStatus,
 					}
 				}
 			}
+
+			if candidatesRaw, ok := op.Response["candidates"]; ok {
+				jsonBytes, _ := json.Marshal(map[string]interface{}{"candidates": candidatesRaw})
+				var bgr BatchGenerateResponse
+				if err := json.Unmarshal(jsonBytes, &bgr); err == nil {
+					status.Candidates = bgr.Candidates
+				}
+			}
 		}
 		return status, nil
 	}
@@ -979,6 +1013,69 @@ type BatchJobStatus struct {
 	Done       bool
 	Error      error
 	Embeddings [][]float32
+	Candidates []Candidate
+}
+
+type BatchGenerateRequest struct {
+	Requests []GenerateContentRequest `json:"requests"`
+}
+
+type BatchGenerateResponse struct {
+	Candidates []Candidate `json:"candidates"`
+}
+
+func (w *worker) createBatchGenerateJob(ctx context.Context, model string, contents [][]Content, config GenerationConfig) (string, error) {
+	if model == "" {
+		model = PreferredGenerationModel
+	}
+	url := fmt.Sprintf("%s/%s:batchGenerateContent?key=%s", BaseURL, model, w.apiKey)
+
+	reqItems := make([]GenerateContentRequest, len(contents))
+	for i, c := range contents {
+		reqItems[i] = GenerateContentRequest{
+			Contents:         c,
+			GenerationConfig: config,
+		}
+	}
+
+	payload := map[string]interface{}{
+		"model":       model,
+		"displayName": fmt.Sprintf("gen_batch_%d", time.Now().UnixNano()),
+		"inputConfig": map[string]interface{}{
+			"requests": map[string]interface{}{
+				"requests": reqItems,
+			},
+		},
+	}
+
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 200 {
+		var op Operation
+		if err := json.Unmarshal(body, &op); err != nil {
+			return "", fmt.Errorf("parsing operation error: %w", err)
+		}
+		return op.Name, nil
+	}
+
+	return "", fmt.Errorf("gemini async batch gen error %d: %s", resp.StatusCode, string(body))
 }
 
 func parseRetryDelay(body []byte) time.Duration {

@@ -343,14 +343,20 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 	}
 
 	// Optimization: If current DB hash matches disk hash, we are 100% up to date.
-	if currentDBHash == hash {
+	if currentDBHash != "" && currentDBHash == hash {
 		return nil
+	}
+
+	if currentDBHash != "" {
+		logger.Debug("Hash mismatch for %s: DB=%s, Disk=%s", filepath.Base(path), currentDBHash[:8], hash[:8])
+	} else {
+		logger.Debug("File %s not found in DB or missing hash", filepath.Base(path))
 	}
 
 	logger.Info("Processing %s...", filepath.Base(path))
 
 	// 3. Update File Node (Update pointer to current version)
-	_, err = dbClient.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', path = '%s';", fileID, hash, db.EscapeSQL(path)))
+	_, err = dbClient.Execute(fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s';", fileID, hash, db.EscapeSQL(path)))
 	if err != nil {
 		return fmt.Errorf("db update error: %w", err)
 	}
