@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/kardianos/service"
 )
 
 type Level int
@@ -18,6 +21,11 @@ const (
 )
 
 var currentLevel Level = INFO
+var currentWriter io.Writer = os.Stderr
+
+func GetWriter() io.Writer {
+	return currentWriter
+}
 
 func SetLevel(levelStr string) {
 	switch strings.ToUpper(levelStr) {
@@ -34,8 +42,8 @@ func SetLevel(levelStr string) {
 	}
 }
 
-func Init(logFile string, level string) error {
-	SetLevel(level)
+func Init(logFile string, levelStr string) error {
+	SetLevel(levelStr)
 	
 	var writer io.Writer = os.Stderr
 	if logFile != "" {
@@ -43,11 +51,37 @@ func Init(logFile string, level string) error {
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %w", err)
 		}
-		writer = io.MultiWriter(os.Stderr, f)
+		if service.Interactive() {
+			writer = io.MultiWriter(os.Stderr, f)
+		} else {
+			writer = f
+		}
 	}
 	
+	currentWriter = writer
 	log.SetOutput(writer)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	// Configure slog to use the same writer
+	var slogLevel slog.Level
+	switch currentLevel {
+	case DEBUG:
+		slogLevel = slog.LevelDebug
+	case INFO:
+		slogLevel = slog.LevelInfo
+	case WARN:
+		slogLevel = slog.LevelWarn
+	case ERROR:
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+		Level: slogLevel,
+	})
+	slog.SetDefault(slog.New(handler))
+
 	return nil
 }
 

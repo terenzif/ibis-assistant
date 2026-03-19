@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -53,8 +52,15 @@ func main() {
 
 	cmd := os.Args[1]
 	switch cmd {
-	case "/run", "run", "-run", "--run":
-		// Normal interactive run or service run
+	case "/run":
+		// Service run mode: must use the service library to communicate with SCM
+		// We shift the arguments to skip the command for flag parsing later in runServer
+		if len(os.Args) > 1 {
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		}
+		handleService("/run")
+	case "run", "-run", "--run":
+		// Normal interactive run
 		// We shift the arguments to skip the command for flag parsing
 		if len(os.Args) > 2 {
 			os.Args = append(os.Args[:1], os.Args[2:]...)
@@ -153,15 +159,6 @@ func runServer(ctx context.Context) {
 		fmt.Printf("Error initializing logger: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Configure structured logging (used by dependencies like mcp-go) to use TextHandler (Console friendly)
-	// We map it to the same output writer if possible, but for now stdout/stderr is fine.
-	// mcp-go uses slog.Default().
-	var logHandler slog.Handler
-	logHandler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-	slog.SetDefault(slog.New(logHandler))
 
 	if cfg.ConfigLoaded {
 		logger.Info("Configuration loaded from: %s", cfg.ConfigPath)
