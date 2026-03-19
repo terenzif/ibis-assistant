@@ -260,6 +260,9 @@ go test ./...
   * `db/`: Wrapper per SurrealDB.
   * `search/`: Logica di interrogazione del grafo.
 
+## 📝 Registro del Lavoro
+Il file `work_log.md` nella root del progetto contiene il log storico di tutte le modifiche strutturali, fix e miglioramenti apportati durante lo sviluppo continuo.
+
 ---
 
 *Progetto sviluppato come parte dell'iniziativa "Universal Senior Engineer".*
