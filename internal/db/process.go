@@ -19,21 +19,27 @@ type ProcessManager struct {
 
 // StartEmbedded launches the surreal process in the background.
 // It expects the binary to be named 'surreal.exe' (Windows) or 'surreal' (Unix) in the current directory.
-func StartEmbedded(user, password, dataPath string, port int) (*ProcessManager, error) {
+func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (*ProcessManager, error) {
 	binName := "surreal"
 	if runtime.GOOS == "windows" {
 		binName = "surreal.exe"
 	}
 
 	// Ensure binary exists and is up to date
-	if err := EnsureSurrealDB(); err != nil {
+	if err := EnsureSurrealDB(autoUpdate); err != nil {
 		return nil, fmt.Errorf("failed to ensure database binary: %w", err)
 	}
 
 	// Construct command
-	// surreal start --user root --pass root. --bind 0.0.0.0:8000 file:project.db
-	bindAddr := fmt.Sprintf("0.0.0.0:%d", port)
-	fileArg := fmt.Sprintf("file:%s", dataPath)
+	// surreal start --user root --pass root --bind 127.0.0.1:8000 surrealkv:C:\path\to\project.db
+	bindAddr := fmt.Sprintf("127.0.0.1:%d", port)
+
+	absDataPath, err := filepath.Abs(dataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for data: %w", err)
+	}
+	// Using surrealkv as per manual change, but with absolute path.
+	fileArg := fmt.Sprintf("surrealkv:%s", absDataPath)
 
 	args := []string{
 		"start",

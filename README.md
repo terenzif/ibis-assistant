@@ -21,10 +21,8 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
 
 * **Go** 1.22 o superiore
 * **SurrealDB**: Il database backend.
-  * *Opzione Automatica*: Se l'eseguibile `surreal.exe` è presente nella root del progetto, il server tenterà di avviarlo automaticamente.
-    
-    > **Download**: Scarica la versione Windows da [surrealdb.com/install](https://surrealdb.com/install) o dai [Release di GitHub](https://github.com/surrealdb/surrealdb/releases), estrai e copia `surreal.exe` nella cartella di questo progetto.
-  * *Opzione Manuale*: SurrealDB pre-installato e in esecuzione.
+  * *Opzione Automatica (Consigliata)*: Il server gestisce automaticamente SurrealDB. Se `surreal.exe` non è presente, verrà scaricato l'ultimo rilascio da GitHub. Se è presente, verrà mantenuto aggiornato (comportamento esplicitamente controllabile tramite `db_auto_update` in `config.json`).
+  * *Opzione Manuale*: SurrealDB pre-installato e in esecuzione esternamente. Configura `db_url` di conseguenza.
 * **Git**: Installato e accessibile da terminale.
 * **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`, formato oggetto con `key`, `rpm`, `tpm`, `rpd` e `owner`) o via env (`GEMINI_API_KEY` separati da virgola, che useranno il `gemini_rpm` di default).
   * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Priority/Failover**. Il server proverà ad utilizzare la prima chiave disponibile che non ha superato i limiti (RPM, TPM, RPD). Se la prima chiave è limitata (o esaurita per il giorno), passerà alla successiva. Questo permette di definire una chiave "principale" (es. Free Tier) e usare le altre come backup.
@@ -59,17 +57,18 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
        { "key": "", "rpm": 100, "tpm": 100000, "rpd": 10000, "owner": "Project Budget" }
      ],
      "gemini_rpm": 100,
-     "redmine_url": "https://redmine.tuodominio.com",
-     "redmine_key": "",
-     "auto_scan": true,
-     "logs_root": "./_logs"
-   }
+      "redmine_url": "https://redmine.tuodominio.com",
+      "redmine_key": "",
+      "db_auto_update": true,
+      "auto_scan": true,
+      "logs_root": "./_logs"
+    }
    ```
    
    > **Nota su Redmine**: La chiave `redmine_key` nel config è la **System Key**, utilizzata per operazioni di background (es. ingestion automatica). Per operazioni utente (es. aggiornare un ticket), il client deve fornire la propria chiave via header `X-Redmine-API-Key`.
 
 4. **Avvia il Server**:
-   Se `surreal.exe` è nella cartella, l'avvio standard è:
+   Il server avvierà automaticamente SurrealDB se configurato per l'uso locale (default). L'avvio standard è:
    
    ```bash
    ./knowledge_server.exe /run
@@ -112,6 +111,13 @@ Il server segue una gerarchia di priorità per la configurazione:
 2. **Variabili d'ambiente** (es. `PORT=9000`).
 3. **File di configurazione** (`config.json`).
 4. **Default predefiniti**.
+
+#### 🗄️ Database Auto-Update
+Per impostazione predefinita, il server controlla e aggiorna automaticamente l'eseguibile `surreal.exe`. È possibile disabilitare questo comportamento nel `config.json`:
+```json
+"db_auto_update": false
+```
+O via variabile d'ambiente: `DB_AUTO_UPDATE=false`.
 
 Il file `config.json` viene cercato automaticamente nella directory corrente e nella directory in cui si trova l'eseguibile (utile quando eseguito come servizio). È possibile specificare un file diverso con il flag `-config <path>`.
 

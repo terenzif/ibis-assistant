@@ -32,8 +32,8 @@ type GitHubAsset struct {
 }
 
 // EnsureSurrealDB checks if the SurrealDB binary is present and up-to-date.
-// If not, it downloads the latest version from GitHub.
-func EnsureSurrealDB() error {
+// If autoUpdate is true, it downloads the latest version from GitHub if needed.
+func EnsureSurrealDB(autoUpdate bool) error {
 	binName := "surreal"
 	if runtime.GOOS == "windows" {
 		binName = "surreal.exe"
@@ -49,9 +49,17 @@ func EnsureSurrealDB() error {
 		logger.Info("SurrealDB not found or version check failed: %v", err)
 	}
 
+	if !autoUpdate {
+		if localVer != "" {
+			logger.Info("SurrealDB auto-update is disabled, using local version: %s", localVer)
+			return nil
+		}
+		logger.Warn("SurrealDB auto-update is disabled but no local binary found. Force checking for download...")
+	}
+
 	// 2. Get latest release info from GitHub
 	// Use a reasonable timeout for the API check
-	apiCtx, apiCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	apiCtx, apiCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer apiCancel()
 
 	release, err := getLatestRelease(apiCtx)

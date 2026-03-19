@@ -9,10 +9,11 @@ import (
 // Helper to clean up specific env vars
 func cleanEnv() {
 	vars := []string{
-		"PORT", "KNOWLEDGE_MODE", "KNOWLEDGE_RPM", 
-		"GEMINI_API_KEY", "SURREAL_URL", "SURREAL_NS", 
+		"PORT", "KNOWLEDGE_MODE", "KNOWLEDGE_RPM",
+		"GEMINI_API_KEY", "SURREAL_URL", "SURREAL_NS",
 		"SURREAL_DB", "SURREAL_USER", "SURREAL_PASS",
 		"REDMINE_URL", "REDMINE_API_KEY", "DISCOVERY_ROOT", "AUTO_SCAN",
+		"DB_AUTO_UPDATE",
 	}
 	for _, v := range vars {
 		os.Unsetenv(v)
@@ -21,9 +22,9 @@ func cleanEnv() {
 
 func TestLoadDefaults(t *testing.T) {
 	cleanEnv()
-	
+
 	cfg := Load()
-	
+
 	if cfg.Port != 3030 {
 		t.Errorf("Expected default Port 3030, got %d", cfg.Port)
 	}
@@ -43,6 +44,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	os.Setenv("KNOWLEDGE_MODE", "stdio")
 	os.Setenv("KNOWLEDGE_RPM", "120")
 	os.Setenv("GEMINI_API_KEY", "key1,   key2") // Test splitting
+	os.Setenv("DB_AUTO_UPDATE", "false")
 
 	cfg := Load()
 
@@ -55,7 +57,10 @@ func TestLoadEnvOverrides(t *testing.T) {
 	if cfg.GeminiDefaultRPM != 120 {
 		t.Errorf("Expected RPM 120, got %d", cfg.GeminiDefaultRPM)
 	}
-	
+	if cfg.DBAutoUpdate {
+		t.Errorf("Expected DBAutoUpdate false from Env, got true")
+	}
+
 	if len(cfg.GeminiKeys) != 2 {
 		t.Errorf("Expected 2 Gemini Keys, got %d", len(cfg.GeminiKeys))
 	}
@@ -73,7 +78,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 
 func TestLoadFileOverrides(t *testing.T) {
 	cleanEnv()
-	
+
 	// Create temp config file
 	tmpDir := t.TempDir()
 	originalWd, _ := os.Getwd()
@@ -102,7 +107,7 @@ func TestLoadFileOverrides(t *testing.T) {
 func TestEnvOverridesFile(t *testing.T) {
 	cleanEnv()
 	defer cleanEnv()
-	
+
 	// Temp config file
 	tmpDir := t.TempDir()
 	originalWd, _ := os.Getwd()

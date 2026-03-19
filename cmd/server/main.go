@@ -203,7 +203,7 @@ func runServer(ctx context.Context) {
 	dbPort := 8000
 
 	logger.Debug("Attempting to start embedded database...")
-	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, "project.db", dbPort)
+	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, "project.db", dbPort, cfg.DBAutoUpdate)
 	if err != nil {
 		logger.Info("Note: Could not start embedded database (or it is already running): %v", err)
 	} else {

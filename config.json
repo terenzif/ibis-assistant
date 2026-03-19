@@ -6,6 +6,7 @@
   "db_database": "analysis",
   "db_user": "root",
   "db_password": "root",
+  "db_auto_update": true,
   "gemini_keys": [
     {
       "key": "",
@@ -32,5 +33,6 @@
   "auto_scan": true,
   "git_repos": [],
   "log_file": "server.log",
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "surreal_auto_update": true
 }

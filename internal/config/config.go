@@ -25,6 +25,7 @@ type Config struct {
 	RedmineConcurrency  int               `json:"redmine_concurrency"`
 	CodeConcurrency     int               `json:"code_concurrency"`
 	DBTimeout           int               `json:"db_timeout"`
+	DBAutoUpdate        bool              `json:"db_auto_update"`
 	DiscoveryRoot       string            `json:"discovery_root"`
 	AutoScan            bool              `json:"auto_scan"`
 	GitRepos            []string          `json:"git_repos"` // Manual list override
@@ -66,7 +67,7 @@ func Load(paths ...string) *Config {
 		Port:               3030,
 		Mode:               "sse",
 		DBUrl:              "ws://localhost:8000/rpc",
-		DBNamespace:        "deckonline",
+		DBNamespace:        "",
 		DBDatabase:         "analysis",
 		DBUser:             "root",
 		DBPassword:         "root",
@@ -78,6 +79,7 @@ func Load(paths ...string) *Config {
 		LogsRoot:           "./_logs",
 		AutoScan:           true,
 		LogLevel:           "INFO",
+		DBAutoUpdate:       true,
 		MaxFileSize:        10 * 1024 * 1024, // 10MB
 		IgnoredDirs: []string{
 			".git", "node_modules", "bin", "obj", "vendor",
@@ -212,6 +214,9 @@ func Load(paths ...string) *Config {
 	}
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		cfg.LogLevel = strings.ToUpper(v)
+	}
+	if v := os.Getenv("DB_AUTO_UPDATE"); v != "" {
+		cfg.DBAutoUpdate = v == "true"
 	}
 
 	return cfg
