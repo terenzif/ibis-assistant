@@ -12,7 +12,7 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/search"
 )
 
-// Optimizer handles the Self-Optimization (RAFT) loop
+// Optimizer manages the Retrieval-Augmented Fine-Tuning (RAFT) self-optimization loop, improving knowledge graph relevance over time.
 type Optimizer struct {
 	DB     db.Executor
 	AI     search.AIProvider // Use the interface from search package
@@ -87,7 +87,7 @@ func (o *Optimizer) EvaluateRetrieval(ctx context.Context, question string, expe
 	return 0, nil
 }
 
-// OptimizeLoop runs the optimization process for a specified number of iterations.
+// OptimizeLoop executes the optimization process for a defined number of iterations, identifying and reinforcing valuable connections.
 func (o *Optimizer) OptimizeLoop(ctx context.Context, iterations int) error {
 	if o.DB == nil {
 		return fmt.Errorf("database not connected")

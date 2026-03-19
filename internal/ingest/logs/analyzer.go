@@ -30,19 +30,22 @@ type LogAnalyzer struct {
 func NewLogAnalyzer(path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *LogAnalyzer {
 	base := filepath.Base(path)
 
-	// Fuzzy Match: very simple extraction for now
-	parts := strings.Split(base, "_")
+	// Determine the project name from the file name (e.g., "ProjectA_server.log").
 	project := "Unknown"
-	if len(parts) > 0 {
+	if parts := strings.Split(base, "_"); len(parts) > 0 {
 		project = parts[0]
 	}
 
+	// Initialize database records for the log file and its associated project.
 	logFileID := fmt.Sprintf("%s:%s", schema.TableLogFile, db.SanitizeID(base))
 	projectID := fmt.Sprintf("%s:%s", schema.TableProject, db.SanitizeID(project))
 
 	if dbClient != nil {
 		dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", projectID, db.EscapeSQL(project)))
-		dbClient.Execute(fmt.Sprintf("UPDATE %s SET path = '%s', project = %s, tokens_used = 0;", logFileID, db.EscapeSQL(path), projectID))
+		upsertQL := fmt.Sprintf("INSERT INTO %s (id, path, project, tokens_used, offset) VALUES ('%s', '%s', %s, 0, 0) "+
+			"ON DUPLICATE KEY UPDATE path = '%s', project = %s;",
+			schema.TableLogFile, logFileID, db.EscapeSQL(path), projectID, db.EscapeSQL(path), projectID)
+		dbClient.Execute(upsertQL)
 		dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", projectID, schema.EdgeHasLog, logFileID))
 	}
 
@@ -161,4 +164,30 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 		fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(file))
 		a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", errorTypeID, schema.EdgeRelatedTo, fileID))
 	}
+}
+func (a *LogAnalyzer) UpdateOffset(offset int64) {
+	if a.DB == nil {
+		return
+	}
+	a.DB.Execute(fmt.Sprintf("UPDATE %s SET offset = %d;", a.LogFileID, offset))
+}
+
+func (a *LogAnalyzer) GetOffset() int64 {
+	if a.DB == nil {
+		return 0
+	}
+	res, err := a.DB.Execute(fmt.Sprintf("SELECT offset FROM %s;", a.LogFileID))
+	if err != nil {
+		return 0
+	}
+	rows, ok := res.([]interface{})
+	if !ok || len(rows) == 0 {
+		return 0
+	}
+	row, ok := rows[0].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	offset, _ := row["offset"].(float64)
+	return int64(offset)
 }

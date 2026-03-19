@@ -32,9 +32,11 @@ func NewTailer(path string, cfg *config.Config, dbClient db.Executor, aiClient *
 }
 
 func (t *Tailer) Tail(ctx context.Context) {
-	logger.Info("Starting tail on: %s", t.Path)
+	// Retrieve the last processed position to ensure idempotency across restarts.
+	offset := t.Analyzer.GetOffset()
+	logger.Info("Initializing log tailer for: %s (Resuming from offset: %d)", t.Path, offset)
 
-	seekInfo := &tail.SeekInfo{Offset: 0, Whence: 0}
+	seekInfo := &tail.SeekInfo{Offset: offset, Whence: 0}
 
 	tc := tail.Config{
 		Follow:    true,
@@ -57,6 +59,8 @@ func (t *Tailer) Tail(ctx context.Context) {
 	}()
 
 	var batch []string
+	var totalErrors int
+	startTime := time.Now()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -67,6 +71,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 				if len(batch) > 0 {
 					t.Analyzer.ProcessBatch(ctx, batch)
 				}
+				t.finalize(totalErrors, startTime)
 				logger.Info("Stopped tail on: %s", t.Path)
 				return
 			}
@@ -77,17 +82,47 @@ func (t *Tailer) Tail(ctx context.Context) {
 			text := strings.TrimSpace(line.Text)
 			if text != "" {
 				batch = append(batch, text)
-				// Small batch logic to prevent huge memory buildup
 				if len(batch) >= 100 {
 					t.Analyzer.ProcessBatch(ctx, batch)
+					totalErrors += len(batch) // Rough estimate or count from analyzer
 					batch = nil
+					// Persist offset
+					if pos, err := tailer.Tell(); err == nil {
+						t.Analyzer.UpdateOffset(pos)
+					}
 				}
 			}
+		case <-ctx.Done():
+			if len(batch) > 0 {
+				t.Analyzer.ProcessBatch(ctx, batch)
+			}
+			t.finalize(totalErrors, startTime)
+			logger.Info("Context cancelled, stopping tail on: %s", t.Path)
+			return
 		case <-ticker.C:
 			if len(batch) > 0 {
 				t.Analyzer.ProcessBatch(ctx, batch)
+				totalErrors += len(batch)
 				batch = nil
+				if pos, err := tailer.Tell(); err == nil {
+					t.Analyzer.UpdateOffset(pos)
+				}
 			}
+		}
+	}
+}
+
+func (t *Tailer) finalize(totalErrors int, start time.Time) {
+	// Trigger Report and Email if we processed anything
+	if totalErrors > 0 {
+		reporter := NewReporter(t.Cfg, t.DB)
+		// Cost calculation - simple estimate
+		cost := float64(totalErrors) * 0.0001 
+		
+		reportPath, err := reporter.GenerateReport(t.Analyzer.Project, t.Path, totalErrors, cost)
+		if err == nil {
+			notifier := NewNotifier(t.Cfg)
+			notifier.SendEmail(reportPath)
 		}
 	}
 }

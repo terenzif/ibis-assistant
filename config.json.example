@@ -1,11 +1,9 @@
 {
-  "port": 3333,
+  "port": 3030,
   "mode": "sse",
-  "db_url": "ws://localhost:8000/rpc",
-  "db_namespace": "",
-  "db_database": "analysis",
   "db_user": "root",
   "db_password": "root",
+  "db_data_path": "project.db",
   "db_auto_update": true,
   "gemini_keys": [
     {
@@ -13,11 +11,11 @@
       "rpm": 100,
       "tpm": 30000,
       "rpd": 1000,
-      "owner": "Your Name"
+      "owner": "Administrator"
     }
   ],
   "gemini_rpm": 100,
-  "redmine_url": "https://redmine.users.noreply.github.com/",
+  "redmine_url": "https://redmine.example.com",
   "redmine_key": "",
   "discovery_root": "./_repos",
   "logs_root": "./_logs",
@@ -27,11 +25,9 @@
     "port": 587,
     "user": "",
     "password": "",
-    "from": "noreply@example.com",
+    "from": "knowledge-server@example.com",
     "to": "admin@example.com"
   },
   "auto_scan": true,
-  "git_repos": [],
-  "log_file": "server.log",
   "log_level": "INFO"
 }

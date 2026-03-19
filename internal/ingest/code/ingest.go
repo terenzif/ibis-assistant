@@ -23,8 +23,8 @@ type AIClient interface {
 	IsFunctional() bool
 }
 
-// IngestCodebase scans the repo and updates embeddings for changed files
-func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient, repoPath string, cfg *config.Config) error {
+// IngestCodebase scans the repository and updates vector embeddings for any modified or new files.
+func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient, repoPath string, repoName string, cfg *config.Config) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return err
@@ -83,17 +83,21 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
+			for path := range pathsChan {
 				select {
 				case <-ctx.Done():
 					return
-				case path, ok := <-pathsChan:
-					if !ok {
-						return
-					}
-					if err := processFile(ctx, dbClient, path); err != nil {
-						logger.Error("Error processing file %s: %v", path, err)
-					}
+				default:
+					// Continue processing
+				}
+
+				relPath, err := filepath.Rel(absPath, path)
+				if err != nil {
+					logger.Error("Error calculating relative path for %s: %v", path, err)
+					continue
+				}
+				if err := processFile(ctx, dbClient, path, relPath, repoName); err != nil {
+					logger.Error("Error processing %s: %v", path, err)
 				}
 			}
 		}()
@@ -309,8 +313,8 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 	return nil
 }
 
-func processFile(ctx context.Context, dbClient db.Executor, path string) error {
-	f, err := os.Open(path)
+func processFile(ctx context.Context, dbClient db.Executor, absPath string, relPath string, repoName string) error {
+	f, err := os.Open(absPath)
 	if err != nil {
 		return fmt.Errorf("open error: %w", err)
 	}
@@ -322,7 +326,10 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 		return fmt.Errorf("hashing error: %w", err)
 	}
 
-	fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(path))
+	// USE REPO-RELATIVE PATH FOR ID Consistency
+	// Prefix with repoName to avoid collisions between multiple repositories
+	safeRepoName := db.SanitizeID(repoName)
+	fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, safeRepoName, db.SanitizeID(relPath))
 
 	// 2. Check if changed / check if version already exists
 
@@ -348,21 +355,22 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 	}
 
 	if currentDBHash != "" {
-		logger.Debug("Hash mismatch for %s: DB=%s, Disk=%s", filepath.Base(path), currentDBHash[:8], hash[:8])
+		logger.Debug("Hash mismatch for %s: DB=%s, Disk=%s", relPath, currentDBHash[:8], hash[:8])
 	} else {
-		logger.Debug("File %s not found in DB or missing hash", filepath.Base(path))
+		logger.Debug("File %s not found in DB or missing hash", relPath)
 	}
 
-	logger.Info("Processing %s...", filepath.Base(path))
+	logger.Info("Processing %s...", relPath)
 
 	// 3. Update File Node (Update pointer to current version)
-	_, err = dbClient.Execute(fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s';", fileID, hash, db.EscapeSQL(path)))
+	// We store absolute path in the record for local discovery, but the ID is relative.
+	_, err = dbClient.Execute(fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s', rel_path = '%s', repo_name = '%s';", 
+		fileID, hash, db.EscapeSQL(absPath), db.EscapeSQL(relPath), db.EscapeSQL(repoName)))
 	if err != nil {
 		return fmt.Errorf("db update error: %w", err)
 	}
 
-	// 4. Check if we already have chunks for this hash (from history or another branch)
-	// We assume if one chunk exists for this hash, they all do.
+	// Check if chunks already exist for this file hash to avoid redundant AI processing and storage.
 	checkQL := fmt.Sprintf("SELECT count() FROM %s WHERE file = %s AND hash = '%s';", schema.TableFileChunk, fileID, hash)
 	checkRes, err := dbClient.Execute(checkQL)
 	if err == nil {
@@ -429,12 +437,12 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 
 		for k, chunkContentStr := range validBatch {
 			originalIndex := validIndices[k]
-			chunkID := fmt.Sprintf("%s:%s_%s_%d", schema.TableFileChunk, db.SanitizeID(path), hash, originalIndex)
+			// Chunk ID also uses prefixed relative path
+			chunkID := fmt.Sprintf("%s:%s_%s_%s_%d", schema.TableFileChunk, safeRepoName, db.SanitizeID(relPath), hash, originalIndex)
 
 			contentBytes, _ := json.Marshal(chunkContentStr)
 
-			// Logic: IF (SELECT * FROM chunkID) IS EMPTY THEN CREATE chunkID ... END
-			// This ensures we only insert if it's missing, effectively an INSERT IGNORE.
+			// Ensure chunks are inserted only if they don't already exist, maintaining idempotency and preserving any existing embeddings.
 			ql := fmt.Sprintf(`IF array::len((SELECT * FROM %s)) = 0 THEN CREATE %s SET file=%s, hash='%s', content=%s, embedding=NONE, batch_status='pending'; END; `,
 				chunkID, chunkID, fileID, hash, string(contentBytes))
 
@@ -444,9 +452,9 @@ func processFile(ctx context.Context, dbClient db.Executor, path string) error {
 		qlBuilder.WriteString("COMMIT;")
 
 		if _, err := dbClient.Execute(qlBuilder.String()); err != nil {
-			logger.Error("Failed to persist pending chunks for %s: %v", path, err)
+			logger.Error("Failed to persist pending chunks for %s: %v", relPath, err)
 		}
-		logger.Info("  - Queued %d/%d chunks for %s", end, len(chunks), filepath.Base(path))
+		logger.Info("  - Queued %d/%d chunks for %s", end, len(chunks), relPath)
 	}
 
 	return nil

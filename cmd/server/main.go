@@ -32,7 +32,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// AuthMiddleware extracts the X-Redmine-API-Key header and puts it in the context
+// AuthMiddleware injects the X-Redmine-API-Key into the request context for downstream services.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("X-Redmine-API-Key")
@@ -138,6 +138,7 @@ func runServer(ctx context.Context) {
 	_ = fs.String("config", "", "Path to config.json")
 
 	fs.Parse(os.Args[1:])
+	logger.Info("[INIT] Flags parsed. Mode: %s, Port: %d", *modeFlag, *portFlag)
 
 	// 4. Apply overrides back to cfg
 	cfg.Port = *portFlag
@@ -200,10 +201,14 @@ func runServer(ctx context.Context) {
 
 	// --- [NEW] Start Embedded DB ---
 	var dbProcess *db.ProcessManager
+	// Extract port from DBUrl
 	dbPort := 8000
+	if parts := strings.Split(cfg.DBUrl, ":"); len(parts) > 1 {
+		fmt.Sscanf(parts[len(parts)-1], "%d", &dbPort)
+	}
 
-	logger.Debug("Attempting to start embedded database...")
-	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, "project.db", dbPort, cfg.DBAutoUpdate)
+	logger.Debug("Attempting to start embedded database on port %d...", dbPort)
+	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, cfg.DBDataPath, dbPort, cfg.DBAutoUpdate)
 	if err != nil {
 		logger.Info("Note: Could not start embedded database (or it is already running): %v", err)
 	} else {
@@ -317,9 +322,15 @@ func runServer(ctx context.Context) {
 						return
 					}
 
-					logger.Info("Background: Indexing Git history for %s...", r)
-					if err := git.IngestRepo(dbClient, redmineClient, r, cfg.RedmineConcurrency); err != nil {
-						logger.Error("Background: Git ingestion error for %s: %v", r, err)
+					// Calculate a canonical Name for the repository relative to discovery root
+					repoName, err := filepath.Rel(cfg.DiscoveryRoot, r)
+					if err != nil {
+						repoName = filepath.Base(r) // Fallback
+					}
+
+					logger.Info("Background: Indexing Git history for %s...", repoName)
+					if err := git.IngestRepo(ctx, dbClient, redmineClient, r, repoName, cfg.RedmineConcurrency); err != nil {
+						logger.Error("Background: Git ingestion error for %s: %v", repoName, err)
 					}
 				}()
 
@@ -332,9 +343,15 @@ func runServer(ctx context.Context) {
 						return
 					}
 
-					logger.Info("Background: Vectorizing codebase for %s...", r)
-					if err := code.IngestCodebase(ctx, dbClient, aiClient, r, cfg); err != nil {
-						logger.Error("Background: Code ingestion error for %s: %v", r, err)
+					// Calculate a canonical Name for the repository relative to discovery root
+					repoName, err := filepath.Rel(cfg.DiscoveryRoot, r)
+					if err != nil {
+						repoName = filepath.Base(r) // Fallback
+					}
+
+					logger.Info("Background: Vectorizing codebase for %s...", repoName)
+					if err := code.IngestCodebase(ctx, dbClient, aiClient, r, repoName, cfg); err != nil {
+						logger.Error("Background: Code ingestion error for %s: %v", repoName, err)
 					}
 				}()
 			}
@@ -368,7 +385,8 @@ func runServer(ctx context.Context) {
 
 		var output strings.Builder
 		for _, r := range targets {
-			if err := git.IngestRepo(dbClient, redmineClient, r, cfg.RedmineConcurrency); err != nil {
+			repoName, _ := filepath.Rel(cfg.DiscoveryRoot, r)
+			if err := git.IngestRepo(ctx, dbClient, redmineClient, r, repoName, cfg.RedmineConcurrency); err != nil {
 				output.WriteString(fmt.Sprintf("Error ingesting %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully ingested %s\n", r))
@@ -399,7 +417,8 @@ func runServer(ctx context.Context) {
 
 		var output strings.Builder
 		for _, r := range targets {
-			if err := code.IngestCodebase(ctx, dbClient, aiClient, r, cfg); err != nil {
+			repoName, _ := filepath.Rel(cfg.DiscoveryRoot, r)
+			if err := code.IngestCodebase(ctx, dbClient, aiClient, r, repoName, cfg); err != nil {
 				output.WriteString(fmt.Sprintf("Error scanning %s: %v\n", r, err))
 			} else {
 				output.WriteString(fmt.Sprintf("Successfully scanned %s\n", r))
@@ -447,7 +466,7 @@ func runServer(ctx context.Context) {
 		}
 
 		go func() {
-			if err := optimizer.OptimizeLoop(context.Background(), iter); err != nil {
+			if err := optimizer.OptimizeLoop(ctx, iter); err != nil {
 				logger.Error("Optimization failed: %v", err)
 			}
 		}()
@@ -565,32 +584,44 @@ func runServer(ctx context.Context) {
 		logger.Info("Starting SSE server on port %d...", cfg.Port)
 		sseServer := server.NewSSEServer(s)
 
-		// Run Server in Goroutine
+		// SSE Mode: Standard HTTP server with graceful shutdown
+		mux := http.NewServeMux()
+		mux.Handle("/sse", sseServer.SSEHandler())
+		mux.Handle("/message", sseServer.MessageHandler())
+
+		// Wrap the entire mux with AuthMiddleware
+		handler := AuthMiddleware(mux)
+
+		// Store server instance for graceful shutdown
+		httpSrv := &http.Server{
+			Addr:    fmt.Sprintf(":%d", cfg.Port),
+			Handler: handler,
+		}
+
 		go func() {
-			mux := http.NewServeMux()
-			mux.Handle("/sse", sseServer.SSEHandler())
-			mux.Handle("/message", sseServer.MessageHandler())
-
-			// Wrap the entire mux with AuthMiddleware
-			handler := AuthMiddleware(mux)
-
-			server := &http.Server{
-				Addr:    fmt.Sprintf(":%d", cfg.Port),
-				Handler: handler,
-			}
-
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Error("Server error: %v", err)
 				sigChan <- syscall.SIGTERM
 			}
 		}()
 
-		// Wait for signal or context cancellation
+
+		// Block until a shutdown signal or context cancellation is received.
+		logger.Info("Knowledge Server is operational. Press Ctrl+C to stop.")
 		select {
 		case <-sigChan:
-			logger.Info("Received signal, shutting down...")
+			logger.Info("Shutdown signal received.")
 		case <-ctx.Done():
-			logger.Info("Context cancelled, shutting down...")
+			logger.Info("Cancellation signal received.")
+		}
+
+		// Graceful HTTP Shutdown
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("HTTP server graceful shutdown failed: %v", err)
+		} else {
+			logger.Info("HTTP server stopped gracefully.")
 		}
 
 	} else {
@@ -636,7 +667,7 @@ func runServer(ctx context.Context) {
 	}
 
 	// Give the websocket connection time to close properly before killing the DB process
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	// 4. Stop DB Process
 	if dbProcess != nil {

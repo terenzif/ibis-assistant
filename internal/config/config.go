@@ -25,6 +25,7 @@ type Config struct {
 	RedmineConcurrency  int               `json:"redmine_concurrency"`
 	CodeConcurrency     int               `json:"code_concurrency"`
 	DBTimeout           int               `json:"db_timeout"`
+	DBDataPath          string            `json:"db_data_path"`
 	DBAutoUpdate        bool              `json:"db_auto_update"`
 	DiscoveryRoot       string            `json:"discovery_root"`
 	AutoScan            bool              `json:"auto_scan"`
@@ -75,6 +76,7 @@ func Load(paths ...string) *Config {
 		RedmineConcurrency: 10,
 		CodeConcurrency:    5,
 		DBTimeout:          300,
+		DBDataPath:         "project.db",
 		DiscoveryRoot:      ".",
 		LogsRoot:           "./_logs",
 		AutoScan:           true,

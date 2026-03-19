@@ -76,3 +76,48 @@ func MigrateLegacyFileTable(db Executor) error {
 	logger.Info("[MIGRATION] Successfully migrated %d records from 'file' to 'source_file'.", count)
 	return nil
 }
+
+// ClearAbsoluteFileRecords removes records that use absolute path IDs.
+// This is called once during the transition to relative path indexing.
+func ClearAbsoluteFileRecords(db Executor) error {
+	logger.Info("[MIGRATION] Checking for legacy absolute-path file records...")
+
+	// We detect absolute-path records by the LACK of 'rel_path' field.
+	// In SurrealDB schemaless, we can check for field existence or just delete those where it's NONE.
+	
+	// Count records to delete
+	res, err := db.Execute("SELECT count() FROM source_file WHERE rel_path = NONE;")
+	if err != nil {
+		return fmt.Errorf("failed to check for absolute records: %w", err)
+	}
+
+	var count int64
+	if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
+		if row, ok := rows[0].(map[string]interface{}); ok {
+			if c, ok := row["count"].(float64); ok { count = int64(c) }
+			if c, ok := row["count"].(int64); ok { count = c }
+		}
+	}
+
+	if count == 0 {
+		logger.Debug("[MIGRATION] No absolute-path records found.")
+		return nil
+	}
+
+	logger.Info("[MIGRATION] Purging %d legacy absolute-path records to allow relative indexing...", count)
+
+	cleanupSQL := `
+		BEGIN TRANSACTION;
+		DELETE file_chunk;
+		DELETE source_file;
+		COMMIT;
+	`
+
+	_, err = db.Execute(cleanupSQL)
+	if err != nil {
+		return fmt.Errorf("cleanup transaction failed: %w", err)
+	}
+
+	logger.Info("[MIGRATION] Successfully purged legacy records.")
+	return nil
+}

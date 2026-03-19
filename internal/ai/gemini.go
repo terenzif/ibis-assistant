@@ -50,7 +50,7 @@ type GenerateResult struct {
 	Error    error
 }
 
-// Client abstracts interaction with the AI Provider using a Worker Pool
+// Client manages interactions with the Gemini AI Provider using a robust worker pool for load balancing and rate limiting.
 type Client struct {
 	jobQueue      chan EmbedJob
 	generateQueue chan GenerateJob
@@ -236,7 +236,7 @@ func (c *Client) GenerateContent(ctx context.Context, contents []Content, config
 
 // --- Async Batch API Methods ---
 
-// CreateBatchEmbedJob submits an asynchronous batch embedding job
+// CreateBatchEmbedJob initiates an asynchronous batch embedding process via the Gemini v1beta API.
 func (c *Client) CreateBatchEmbedJob(ctx context.Context, texts []string) (string, error) {
 	if len(c.workers) == 0 {
 		return "", fmt.Errorf("no active workers")

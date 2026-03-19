@@ -121,7 +121,7 @@ func (pm *ProcessManager) Stop() error {
 }
 
 func waitForPort(port int, timeout time.Duration) error {
-	address := fmt.Sprintf("localhost:%d", port)
+	address := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {

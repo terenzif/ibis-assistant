@@ -39,7 +39,7 @@ COMMIT|hash5|hash4|Author Five|2024-01-05T00:00:00Z|Test tab split failure fallb
 	mockDB := &MockDB{}
 	mockRedmine := &MockRedmine{}
 
-	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", 1)
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1)
 	if err != nil {
 		t.Fatalf("processGitLogStream failed: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestProcessGitLogStream_Parsing_Robustness(t *testing.T) {
 	mockDB := &MockDB{}
 	mockRedmine := &MockRedmine{}
 
-	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", 1)
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1)
 	if err != nil {
 		t.Fatalf("processGitLogStream failed: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestProcessGitLogStream_TabInPath(t *testing.T) {
 	mockDB := &MockDB{}
 	mockRedmine := &MockRedmine{}
 
-	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", 1)
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1)
 	if err != nil {
 		t.Fatalf("processGitLogStream failed: %v", err)
 	}

@@ -88,7 +88,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 		// Reset calls to avoid infinite growth if that matters (slices)
 		mockDB.ExecuteCalls = nil
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 		if err != nil {
 			b.Fatalf("Error: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
@@ -143,7 +143,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		}
 		mockAI := &MockAI{}
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 		if err != nil {
 			t.Fatalf("IngestCodebase failed: %v", err)
 		}
@@ -211,7 +211,7 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 	mockDB := &MockDB{ReturnData: map[string]interface{}{}}
 	mockAI := &MockAI{}
 
-	err = IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	err = IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 	if err != nil {
 		t.Fatalf("IngestCodebase failed: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestIngestCodebase_Pruning(t *testing.T) {
 	}
 	mockAI := &MockAI{}
 
-	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 	if err != nil {
 		t.Fatalf("Error: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Helper to set content and run ingest
 	runIngest := func(content string, mockAI *MockAI, mockDB *MockDB) {
 		os.WriteFile(path, []byte(content), 0644)
-		IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, config.Load())
+		IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", config.Load())
 	}
 
 	// 1. Ingest V1
@@ -426,7 +426,7 @@ func BenchmarkIngestCodebase_Write(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		mockDB.ExecuteCalls = nil
 
-		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+		err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 		if err != nil {
 			b.Fatalf("Error: %v", err)
 		}
@@ -452,7 +452,7 @@ func TestIngestCodebase_Batching(t *testing.T) {
 	mockAI := &MockAI{}
 	cfg := config.Load()
 
-	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 	if err != nil {
 		t.Fatalf("Error: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestIngestCodebase_Pruning_QuerySyntax(t *testing.T) {
 
 	// We just need to trigger pruneRepo.
 	// It's called at the end of IngestCodebase.
-	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, cfg)
+	err := IngestCodebase(context.Background(), mockDB, mockAI, tmpDir, "test-repo", cfg)
 	if err != nil {
 		t.Fatalf("IngestCodebase failed: %v", err)
 	}

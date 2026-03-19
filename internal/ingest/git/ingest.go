@@ -18,8 +18,9 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
-// IngestRepo analyzes a git repository and populates the Knowledge Graph
-func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath string, concurrency int) error {
+// IngestRepo analyzes the Git history and structure of a repository, populating the Knowledge Graph with commits, authors, and file relationships.
+func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.Ingester, repoPath string, repoName string, concurrency int) error {
+	logger.Info("Ingesting git repository: %s (Name: %s)", repoPath, repoName)
 	if client == nil {
 		return fmt.Errorf("database client is nil")
 	}
@@ -27,11 +28,9 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	if err != nil {
 		return fmt.Errorf("invalid repo path: %w", err)
 	}
-	repoName := filepath.Base(absPath)
-
-	logger.Info("Starting ingestion for repo: %s (%s)", repoName, absPath)
 
 	// Register Repo Node
+	// Use repoName for stable ID
 	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, db.SanitizeID(repoName))
 	logger.Debug("Upserting repo node: %s", repoID)
 	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, db.EscapeSQL(absPath)))
@@ -40,7 +39,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	}
 
 	// 1. Start Hash Generator (Stream all commits)
-	cmdHashes := exec.Command("git", "log", "--all", "--reverse", "--format=%H")
+	cmdHashes := exec.CommandContext(ctx, "git", "log", "--all", "--reverse", "--format=%H")
 	cmdHashes.Dir = absPath
 	stdoutHashes, err := cmdHashes.StdoutPipe()
 	if err != nil {
@@ -52,7 +51,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 
 	// 2. Start Ingest Worker (Consumes new hashes, produces log output)
 	// We use --no-walk --stdin to ingest only specific commits provided on stdin.
-	cmdIngest := exec.Command("git", "log", "--no-walk", "--stdin", "--numstat", "--format=COMMIT|%H|%P|%an|%aI|%s")
+	cmdIngest := exec.CommandContext(ctx, "git", "log", "--no-walk", "--stdin", "--numstat", "--format=COMMIT|%H|%P|%an|%aI|%s")
 	cmdIngest.Dir = absPath
 	stdinIngest, err := cmdIngest.StdinPipe()
 	if err != nil {
@@ -183,7 +182,7 @@ func IngestRepo(client db.Executor, redmineClient redmine.Ingester, repoPath str
 	scannerIngest.Buffer(buf, 1024*1024)
 
 	// We pass nil for existingCommits because we already filtered them!
-	ingestErr := processGitLogStream(context.Background(), scannerIngest, client, redmineClient, repoID, concurrency)
+	ingestErr := processGitLogStream(ctx, scannerIngest, client, redmineClient, repoID, repoName, concurrency)
 
 	// Wait for feeder
 	feederErr := <-feederErrChan
@@ -210,6 +209,7 @@ func processGitLogStream(
 	client db.Executor,
 	redmineClient redmine.Ingester,
 	repoID string,
+	repoName string,
 	concurrency int,
 ) error {
 	var (
@@ -294,7 +294,7 @@ func processGitLogStream(
 
 			commitID := fmt.Sprintf("%s:%s", schema.TableCommit, hash)
 
-			// Assume filtering already happened upstream in the feeder goroutine
+			// Skip processing if the commit has already been ingested.
 			skipping = false
 			currentCommitID = commitID
 
@@ -399,10 +399,7 @@ func processGitLogStream(
 				}
 			}
 
-			// Calculate Impact
-			// Logic: log(lines_changed + 1) normalized?
-			// Spec says: "Calculate based on lines changed".
-			// Let's use log10 to dampen huge diffs.
+			// Calculate the modification impact based on the total number of lines changed.
 			totalChanged := float64(added + deleted)
 			impact := 0.0
 			if totalChanged > 0 {
@@ -417,7 +414,8 @@ func processGitLogStream(
 				impact = totalChanged / (totalChanged + 50.0)
 			}
 
-			fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(path))
+			safeRepoName := db.SanitizeID(repoName)
+			fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, safeRepoName, db.SanitizeID(path))
 
 			// 1. Upsert File
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, db.EscapeSQL(path)))

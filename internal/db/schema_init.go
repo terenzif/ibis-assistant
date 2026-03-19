@@ -36,9 +36,9 @@ func InitSchema(db Executor) error {
 
 	logger.Info("[INFO] Database Schema initialized successfully.")
 
-	// --- [MIGRATION] Handle SurrealDB 3.0.4 Reserved Keywords ---
-	if err := MigrateLegacyFileTable(db); err != nil {
-		logger.Warn("[WARN] Schema migration warning: %v", err)
+	// --- [MIGRATION] Handle transition to relative paths ---
+	if err := ClearAbsoluteFileRecords(db); err != nil {
+		logger.Warn("[WARN] Relative path migration warning: %v", err)
 	}
 
 	return nil
