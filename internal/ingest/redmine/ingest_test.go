@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // MockDB implements db.Executor
@@ -78,11 +81,11 @@ func TestIngestIssue_Integration(t *testing.T) {
 
 	// Check for SQL parts
 	mustContain := []string{
-		"UPDATE tracker:2 SET name = $tracker_name",
-		"UPDATE author:john_doe SET name = $author_name",
-		"UPDATE issue:123 SET subject = $subject",
-		"RELATE issue:123->part_of->tracker:2",
-		"RELATE author:john_doe->authored->issue:123",
+		fmt.Sprintf("UPDATE %s SET name = $tracker_name", db.FormatRecordID(schema.TableTracker, "2")),
+		fmt.Sprintf("UPDATE %s SET name = $author_name", db.FormatRecordID(schema.TableAuthor, db.SanitizeID("John Doe"))),
+		fmt.Sprintf("UPDATE %s SET subject = $subject", db.FormatRecordID(schema.TableIssue, "123")),
+		fmt.Sprintf("RELATE %s->part_of->%s", db.FormatRecordID(schema.TableIssue, "123"), db.FormatRecordID(schema.TableTracker, "2")),
+		fmt.Sprintf("RELATE %s->authored->%s", db.FormatRecordID(schema.TableAuthor, db.SanitizeID("John Doe")), db.FormatRecordID(schema.TableIssue, "123")),
 	}
 
 	for _, s := range mustContain {

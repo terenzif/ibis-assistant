@@ -66,7 +66,7 @@ COMMIT|hash5|hash4|Author Five|2024-01-05T00:00:00Z|Test tab split failure fallb
 	// The DB query should contain: UPDATE source_file:test_repo_path_to_quoted_file_txt SET path = 'path/to/quoted file.txt'
 	foundQuotedPath := false
 	targetPath := "path/to/quoted file.txt"
-	expectedID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(targetPath))
+	expectedID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID(targetPath)))
 
 	for _, qry := range mockDB.CapturedQueries {
 		if strings.Contains(qry, fmt.Sprintf("UPDATE %s", expectedID)) && strings.Contains(qry, fmt.Sprintf("path = '%s'", db.EscapeSQL(targetPath))) {
@@ -80,7 +80,7 @@ COMMIT|hash5|hash4|Author Five|2024-01-05T00:00:00Z|Test tab split failure fallb
 	// 3. Check Binary File Parsing (hash1)
 	// added=0, deleted=0 for binary
 	foundBinary := false
-	binaryID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("binary.png"))
+	binaryID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("binary.png")))
 	for _, qry := range mockDB.CapturedQueries {
 		// Look for RELATE ...->source_file:test_repo_binary_png ... added = 0, deleted = 0
 		if strings.Contains(qry, binaryID) && strings.Contains(qry, "added = 0") && strings.Contains(qry, "deleted = 0") {

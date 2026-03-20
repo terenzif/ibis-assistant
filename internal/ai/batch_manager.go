@@ -159,7 +159,7 @@ func (bm *BatchManager) processPendingChunks() {
 	chunkIDsJson, _ := json.Marshal(chunkIDs)
 
 	// jobID: batch_job:<jobName_sanitized>
-	jobID := fmt.Sprintf("%s:%s", schema.TableBatchJob, db.SanitizeID(jobName))
+	jobID := db.FormatRecordID(schema.TableBatchJob, db.SanitizeID(jobName))
 
 	sb.WriteString(fmt.Sprintf("CREATE %s SET name = '%s', status = 'submitted', chunk_ids = %s, created_at = time::now(); ",
 		jobID, jobName, string(chunkIDsJson)))
@@ -167,12 +167,13 @@ func (bm *BatchManager) processPendingChunks() {
 	// Update Chunks
 	// We can use WHERE id IN [...]
 	// Ensure IDs are properly quoted if they contain special characters.
-	quotedIDs := make([]string, len(chunkIDs))
+	formattedIDs := make([]string, len(chunkIDs))
 	for i, id := range chunkIDs {
-		quotedIDs[i] = fmt.Sprintf("'%s'", db.EscapeSQL(id))
+		// id might be 'table:id'. Format it for SurrealQL safety.
+		formattedIDs[i] = db.FormatRecordID("", id)
 	}
-	idList := "[" + strings.Join(quotedIDs, ", ") + "]"
-	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_id = '%s', batch_status = 'submitted' WHERE id IN %s; ",
+	idList := "[" + strings.Join(formattedIDs, ", ") + "]"
+	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_id = %s, batch_status = 'submitted' WHERE id IN %s; ",
 		schema.TableFileChunk, jobID, idList))
 
 	sb.WriteString("COMMIT TRANSACTION;")
@@ -251,8 +252,8 @@ func (bm *BatchManager) processJobResults(jobID string, chunkIDs []string, embed
 	for i, id := range chunkIDs {
 		vecJson, _ := json.Marshal(embeddings[i])
 		// batch_status = 'completed'
-		sb.WriteString(fmt.Sprintf("UPDATE %s SET embedding = %s, batch_status = 'completed' WHERE id = %s; ",
-			id, string(vecJson), id))
+		sb.WriteString(fmt.Sprintf("UPDATE %s SET embedding = %s, batch_status = 'completed'; ",
+			id, string(vecJson)))
 	}
 
 	// Update Job Status
@@ -270,13 +271,9 @@ func (bm *BatchManager) markJobFailed(jobID string, chunkIDs []string, reason st
 	var sb strings.Builder
 	sb.WriteString("BEGIN TRANSACTION; ")
 
-	// Reset chunks to 'pending' so they are picked up again (retry logic could be smarter)
-	// Maybe add retry count?
-	quotedIDs := make([]string, len(chunkIDs))
-	for i, id := range chunkIDs {
-		quotedIDs[i] = fmt.Sprintf("'%s'", db.EscapeSQL(id))
-	}
-	idList := "[" + strings.Join(quotedIDs, ", ") + "]"
+	// Reset chunks to 'pending' so they are picked up again
+	// Ensure IDs are properly formatted/quoted. Since they are ⟨table:id⟩, they don't need quotes in SurrealQL.
+	idList := "[" + strings.Join(chunkIDs, ", ") + "]"
 	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_status = 'pending', batch_error = '%s' WHERE id IN %s; ",
 		schema.TableFileChunk, db.EscapeSQL(reason), idList))
 

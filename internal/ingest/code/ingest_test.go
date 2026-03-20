@@ -23,8 +23,8 @@ type MockDB struct {
 
 func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.ExecuteCalls = append(m.ExecuteCalls, sql)
-	for prefix, val := range m.ReturnData {
-		if strings.HasPrefix(sql, prefix) {
+	for pattern, val := range m.ReturnData {
+		if strings.Contains(strings.ToLower(sql), strings.ToLower(pattern)) {
 			return val, nil
 		}
 	}
@@ -32,7 +32,7 @@ func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 }
 
 func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
-	return nil, nil
+	return m.Execute(ctx, sql)
 }
 
 func (m *MockDB) Close() {}
@@ -68,7 +68,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("main.go"))
+	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("main.go")))
 
 	// We want to benchmark the loop where DB says "Hash Matches".
 	// In the unoptimized version, this will still chunk and embed.
@@ -111,7 +111,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("main.go"))
+	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("main.go")))
 	cfg := config.Load()
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
@@ -153,7 +153,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
 			// Check for assignment in CREATE
-			if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+			if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 				foundUpdate = true
 				break
 			}
@@ -223,7 +223,7 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 	wasProcessed := func(path string) bool {
 		rel, _ := filepath.Rel(tmpDir, path)
 		// Table:Repo_File
-		target := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(rel))
+		target := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID(rel)))
 		for _, sql := range mockDB.ExecuteCalls {
 			if strings.Contains(sql, target) {
 				return true
@@ -268,16 +268,16 @@ func TestIngestCodebase_Pruning(t *testing.T) {
 
 	// 4. Setup MockDB with existing files
 	ignoredRel, _ := filepath.Rel(tmpDir, ignoredFile)
-	ignoredID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(ignoredRel))
+	ignoredID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID(ignoredRel)))
 
 	// deletedFile (not on disk)
 	deletedFile := filepath.Join(tmpDir, "gone.go")
-	deletedID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("gone.go"))
+	deletedID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("gone.go")))
 
 	// existingFile (should be kept)
 	existingFile := filepath.Join(tmpDir, "main.go")
 	os.WriteFile(existingFile, []byte("package main"), 0644)
-	existingID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("main.go"))
+	existingID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("main.go")))
 
 	// Mock Response
 	mockDB := &MockDB{
@@ -342,7 +342,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Check for CREATE (Queueing)
 	foundInsert := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+		if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 			foundInsert = true
 			break
 		}
@@ -359,7 +359,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Check for CREATE (Queueing)
 	foundInsertV2 := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+		if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 			foundInsertV2 = true
 			break
 		}
@@ -375,12 +375,11 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// WE NEED TO MOCK THIS RETURN to > 0
 
 	// Count query in ingest.go: countQuery := fmt.Sprintf("SELECT count() FROM %s WHERE file = $file AND hash = $hash;", TableFileChunk)
-	countQuery := fmt.Sprintf("SELECT count() FROM %s", schema.TableFileChunk)
 
 	mockDB = &MockDB{
 		ReturnData: map[string]interface{}{
-			countQuery: []interface{}{
-				map[string]interface{}{"count": 5}, // Assume 5 chunks exist
+			"SELECT count()": []interface{}{
+				map[string]interface{}{"count": 5},
 			},
 		},
 	}
@@ -389,7 +388,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 
 	// Verify NO queuing happened
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "CREATE file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+		if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
 			t.Errorf("Expected 0 queuing calls for returning to V1 (Cache Hit), got call: %s", sql)
 		}
 	}

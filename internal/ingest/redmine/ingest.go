@@ -74,9 +74,9 @@ func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDS
 		return nil // Not found
 	}
 
-	issueID := fmt.Sprintf("%s:%d", schema.TableIssue, issue.ID)
-	trackerID := fmt.Sprintf("%s:%d", schema.TableTracker, issue.Tracker.ID)
-	authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, db.SanitizeID(issue.Author.Name))
+	issueID := db.FormatRecordID(schema.TableIssue, fmt.Sprintf("%d", issue.ID))
+	trackerID := db.FormatRecordID(schema.TableTracker, fmt.Sprintf("%d", issue.Tracker.ID))
+	authorID := db.FormatRecordID(schema.TableAuthor, db.SanitizeID(issue.Author.Name))
 
 	// Combined Update Transaction
 	// 1. Create/Update Tracker

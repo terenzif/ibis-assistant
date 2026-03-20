@@ -57,7 +57,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableKeyUsage),
 
 	// Define Edges (Tables for Relations)
-	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeContains, TableRepo, "any"),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT record SCHEMALESS;", EdgeContains, TableRepo),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeParentOf, TableCommit, TableCommit),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgePointedTo, TableBranch, TableCommit),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeChanged, TableCommit, TableFile),
@@ -68,7 +68,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasLog, TableProject, TableLogFile),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasEntry, TableLogFile, TableLogEntry),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeIsTypeOf, TableLogEntry, TableErrorType),
-	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT any SCHEMALESS;", EdgeRelatedTo, TableErrorType),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT record SCHEMALESS;", EdgeRelatedTo, TableErrorType),
 
 	// Define Indexes
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),

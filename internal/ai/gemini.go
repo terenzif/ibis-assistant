@@ -19,7 +19,7 @@ import (
 
 const (
 	EmbeddingModel           = "models/text-embedding-004"
-	GenerationModel          = "models/gemini-1.5-flash"
+	GenerationModel          = "models/gemini-1.5-flash-latest"
 	PreferredGenerationModel = "models/gemini-3-flash-preview"
 )
 

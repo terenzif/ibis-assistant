@@ -31,7 +31,7 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 
 	// Register Repo Node
 	// 1. Ensure Repo Node exists
-	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, db.SanitizeID(repoName))
+	repoID := db.FormatRecordID(schema.TableRepo, db.SanitizeID(repoName))
 	_, err = client.Execute(ctx, fmt.Sprintf("UPSERT %s SET name = '%s';", repoID, db.EscapeSQL(repoName)))
 	if err != nil {
 		return fmt.Errorf("failed to upsert repo: %w", err)
@@ -101,7 +101,7 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 			// Build ID list
 			// "SELECT id FROM commit WHERE id IN ['commit:hash1', 'commit:hash2', ...]"
 			for _, h := range batch {
-				id := fmt.Sprintf("%s:%s", schema.TableCommit, h)
+				id := db.FormatRecordID(schema.TableCommit, h)
 				ids = append(ids, id)
 			}
 
@@ -134,7 +134,7 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 			// Identify New
 			var newCount int
 			for _, h := range batch {
-				id := fmt.Sprintf("%s:%s", schema.TableCommit, h)
+				id := db.FormatRecordID(schema.TableCommit, h)
 				if !idMap[id] {
 					// Is new, write to ingest stdin
 					if _, err := io.WriteString(stdinIngest, h+"\n"); err != nil {
@@ -291,14 +291,14 @@ func processGitLogStream(
 			date := parts[4]
 			subject := parts[5]
 
-			commitID := fmt.Sprintf("%s:%s", schema.TableCommit, hash)
+			commitID := db.FormatRecordID(schema.TableCommit, hash)
 
 			// Skip processing if the commit has already been ingested.
 			skipping = false
 			currentCommitID = commitID
 
 			// Author Node
-			authorID := fmt.Sprintf("%s:%s", schema.TableAuthor, db.SanitizeID(authorName))
+			authorID := db.FormatRecordID(schema.TableAuthor, db.SanitizeID(authorName))
 
 			// --- Batch Construction ---
 
@@ -314,7 +314,7 @@ func processGitLogStream(
 
 			// 4. Link Parents (Timeline)
 			for _, pHash := range parents {
-				parentID := fmt.Sprintf("%s:%s", schema.TableCommit, pHash)
+				parentID := db.FormatRecordID(schema.TableCommit, pHash)
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", parentID, schema.EdgeParentOf, commitID))
 			}
 
@@ -322,7 +322,7 @@ func processGitLogStream(
 			issueRefs := ExtractIssueRefs(subject)
 			for _, ref := range issueRefs {
 				issueIDStr := ref.ID
-				issueID := fmt.Sprintf("%s:%s", schema.TableIssue, issueIDStr)
+				issueID := db.FormatRecordID(schema.TableIssue, issueIDStr)
 
 				// In-Band Ingestion: Trigger Redmine fetch if client is available
 				if redmineClient != nil {
@@ -414,7 +414,7 @@ func processGitLogStream(
 			}
 
 			safeRepoName := db.SanitizeID(repoName)
-			fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, safeRepoName, db.SanitizeID(path))
+			fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", safeRepoName, db.SanitizeID(path)))
 
 			// 1. Upsert File
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, db.EscapeSQL(path)))

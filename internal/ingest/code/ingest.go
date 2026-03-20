@@ -329,7 +329,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 	// USE REPO-RELATIVE PATH FOR ID Consistency
 	// Prefix with repoName to avoid collisions between multiple repositories
 	safeRepoName := db.SanitizeID(repoName)
-	fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, safeRepoName, db.SanitizeID(relPath))
+	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", safeRepoName, db.SanitizeID(relPath)))
 
 	// 2. Check if changed / check if version already exists
 
@@ -438,7 +438,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		for k, chunkContentStr := range validBatch {
 			originalIndex := validIndices[k]
 			// Chunk ID also uses prefixed relative path
-			chunkID := fmt.Sprintf("%s:%s_%s_%s_%d", schema.TableFileChunk, safeRepoName, db.SanitizeID(relPath), hash, originalIndex)
+			chunkID := db.FormatRecordID(schema.TableFileChunk, fmt.Sprintf("%s_%s_%s_%d", safeRepoName, db.SanitizeID(relPath), hash, originalIndex))
 
 			contentBytes, _ := json.Marshal(chunkContentStr)
 

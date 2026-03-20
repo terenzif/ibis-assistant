@@ -12,6 +12,15 @@ var (
 	multiUnderscore = regexp.MustCompile(`_+`)
 )
 
+// FormatRecordID returns a SurrealDB record ID formatted with angled brackets for v3.0 compatibility.
+func FormatRecordID(table, id string) string {
+	if strings.Contains(id, ":") {
+		// Already formatted or contains table
+		return "⟨" + id + "⟩"
+	}
+	return "⟨" + table + ":" + id + "⟩"
+}
+
 // SanitizeID makes a string safe for use as a SurrealDB record ID suffix.
 // It replaces characters that are illegal in unquoted identifiers (-, ., /, \, space, etc.) with underscores.
 func SanitizeID(s string) string {

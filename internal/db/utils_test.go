@@ -50,3 +50,22 @@ func TestEscapeSQL(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatRecordID(t *testing.T) {
+	tests := []struct {
+		table    string
+		id       string
+		expected string
+	}{
+		{"source_file", "extensionmethods_cs", "⟨source_file:extensionmethods_cs⟩"},
+		{"error_type", "abc", "⟨error_type:abc⟩"},
+		{"", "table:id", "⟨table:id⟩"},
+	}
+
+	for _, tt := range tests {
+		got := FormatRecordID(tt.table, tt.id)
+		if got != tt.expected {
+			t.Errorf("FormatRecordID(%q, %q) = %q; want %q", tt.table, tt.id, got, tt.expected)
+		}
+	}
+}

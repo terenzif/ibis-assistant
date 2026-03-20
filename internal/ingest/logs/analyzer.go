@@ -37,8 +37,8 @@ func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClie
 	}
 
 	// Initialize database records for the log file and its associated project.
-	logFileID := fmt.Sprintf("%s:%s", schema.TableLogFile, db.SanitizeID(base))
-	projectID := fmt.Sprintf("%s:%s", schema.TableProject, db.SanitizeID(project))
+	logFileID := db.FormatRecordID(schema.TableLogFile, db.SanitizeID(base))
+	projectID := db.FormatRecordID(schema.TableProject, db.SanitizeID(project))
 
 	if dbClient != nil {
 		dbClient.Execute(ctx, fmt.Sprintf("UPDATE %s SET name = '%s';", projectID, db.EscapeSQL(project)))
@@ -131,8 +131,8 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 	h.Write([]byte(msg))
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	errorTypeID := fmt.Sprintf("%s:%s", schema.TableErrorType, hash)
-	logEntryID := fmt.Sprintf("%s:%s_%d", schema.TableLogEntry, hash, time.Now().UnixNano())
+	errorTypeID := db.FormatRecordID(schema.TableErrorType, hash)
+	logEntryID := db.FormatRecordID(schema.TableLogEntry, fmt.Sprintf("%s_%d", hash, time.Now().UnixNano()))
 
 
 	_, err := a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d;",
@@ -155,7 +155,7 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 	}
 
 	if file != "" {
-		fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(file))
+		fileID := db.FormatRecordID(schema.TableFile, db.SanitizeID(file))
 		a.DB.Execute(ctx, fmt.Sprintf("RELATE %s->%s->%s;", errorTypeID, schema.EdgeRelatedTo, fileID))
 	}
 }
