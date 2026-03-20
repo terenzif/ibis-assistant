@@ -15,7 +15,7 @@ type CapturingDB struct {
 	ReturnData      map[string]interface{}
 }
 
-func (m *CapturingDB) Execute(sql string) (interface{}, error) {
+func (m *CapturingDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	m.CapturedVars = append(m.CapturedVars, nil) // Keep aligned
 	// Check return data
@@ -27,7 +27,7 @@ func (m *CapturingDB) Execute(sql string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *CapturingDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *CapturingDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	m.CapturedVars = append(m.CapturedVars, vars)
 	for k, v := range m.ReturnData {
@@ -142,7 +142,7 @@ func TestEndToEnd_SearchReinforcement(t *testing.T) {
 	// Use the retrieved Commit ID to reinforce the connection to the Issue
 	// This simulates the UI flow where the user clicks "Reinforce" on an Issue associated with a Commit.
 
-	err = svc.ReinforcePath(firstCommit.ID, result.Context.RelatedIssues[0].ID, 1.0)
+	err = svc.ReinforcePath(context.Background(), firstCommit.ID, result.Context.RelatedIssues[0].ID, 1.0)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}

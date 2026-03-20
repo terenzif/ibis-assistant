@@ -27,7 +27,7 @@ type LogAnalyzer struct {
 	CostTracker *ai.CostTracker
 }
 
-func NewLogAnalyzer(path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *LogAnalyzer {
+func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *LogAnalyzer {
 	base := filepath.Base(path)
 
 	// Determine the project name from the file name (e.g., "ProjectA_server.log").
@@ -41,12 +41,12 @@ func NewLogAnalyzer(path string, cfg *config.Config, dbClient db.Executor, aiCli
 	projectID := fmt.Sprintf("%s:%s", schema.TableProject, db.SanitizeID(project))
 
 	if dbClient != nil {
-		dbClient.Execute(fmt.Sprintf("UPDATE %s SET name = '%s';", projectID, db.EscapeSQL(project)))
+		dbClient.Execute(ctx, fmt.Sprintf("UPDATE %s SET name = '%s';", projectID, db.EscapeSQL(project)))
 		upsertQL := fmt.Sprintf("INSERT INTO %s (id, path, project, tokens_used, offset) VALUES ('%s', '%s', %s, 0, 0) "+
 			"ON DUPLICATE KEY UPDATE path = '%s', project = %s;",
 			schema.TableLogFile, logFileID, db.EscapeSQL(path), projectID, db.EscapeSQL(path), projectID)
-		dbClient.Execute(upsertQL)
-		dbClient.Execute(fmt.Sprintf("RELATE %s->%s->%s;", projectID, schema.EdgeHasLog, logFileID))
+		dbClient.Execute(ctx, upsertQL)
+		dbClient.Execute(ctx, fmt.Sprintf("RELATE %s->%s->%s;", projectID, schema.EdgeHasLog, logFileID))
 	}
 
 	return &LogAnalyzer{
@@ -91,7 +91,7 @@ Log text:
 	}
 
 	if candidate.UsageMetadata != nil {
-		a.CostTracker.RecordUsage(a.LogFileID, candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
+		a.CostTracker.RecordUsage(ctx, a.LogFileID, candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
 	}
 
 	type SemanticError struct {
@@ -133,22 +133,16 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 
 	errorTypeID := fmt.Sprintf("%s:%s", schema.TableErrorType, hash)
 	logEntryID := fmt.Sprintf("%s:%s_%d", schema.TableLogEntry, hash, time.Now().UnixNano())
-	errorStateID := fmt.Sprintf("%s:%s_%d", schema.TableErrorState, hash, time.Now().UnixNano())
 
-	now := time.Now().Format(time.RFC3339)
 
-	_, err := a.DB.Execute(fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d;",
+	_, err := a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d;",
 		errorTypeID, hash, db.EscapeSQL(category), db.EscapeSQL(stack), severity))
 	if err != nil {
 		logger.Error("Failed to upsert ErrorType: %v", err)
 		return
 	}
 
-	a.DB.Execute(fmt.Sprintf("CREATE %s SET timestamp = '%s', message = '%s';", logEntryID, now, db.EscapeSQL(category)))
-	a.DB.Execute(fmt.Sprintf("CREATE %s SET timestamp = '%s', status = 'ACTIVE', error_type = %s;", errorStateID, now, errorTypeID))
-
-	a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", a.LogFileID, schema.EdgeHasEntry, logEntryID))
-	a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", logEntryID, schema.EdgeIsTypeOf, errorTypeID))
+	a.DB.Execute(ctx, fmt.Sprintf("RELATE %s->%s->%s;", logEntryID, schema.EdgeIsTypeOf, errorTypeID))
 
 	embedding, err := a.AI.EmbedText(ctx, category+"\n"+stack)
 	if err == nil && len(embedding) > 0 {
@@ -157,26 +151,26 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 			arr = append(arr, fmt.Sprintf("%f", f))
 		}
 		vecStr := "[" + strings.Join(arr, ",") + "]"
-		a.DB.Execute(fmt.Sprintf("UPDATE %s SET embedding = %s;", errorTypeID, vecStr))
+		a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET embedding = %s;", errorTypeID, vecStr))
 	}
 
 	if file != "" {
 		fileID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(file))
-		a.DB.Execute(fmt.Sprintf("RELATE %s->%s->%s;", errorTypeID, schema.EdgeRelatedTo, fileID))
+		a.DB.Execute(ctx, fmt.Sprintf("RELATE %s->%s->%s;", errorTypeID, schema.EdgeRelatedTo, fileID))
 	}
 }
-func (a *LogAnalyzer) UpdateOffset(offset int64) {
+func (a *LogAnalyzer) UpdateOffset(ctx context.Context, offset int64) {
 	if a.DB == nil {
 		return
 	}
-	a.DB.Execute(fmt.Sprintf("UPDATE %s SET offset = %d;", a.LogFileID, offset))
+	a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET offset = %d;", a.LogFileID, offset))
 }
 
-func (a *LogAnalyzer) GetOffset() int64 {
+func (a *LogAnalyzer) GetOffset(ctx context.Context) int64 {
 	if a.DB == nil {
 		return 0
 	}
-	res, err := a.DB.Execute(fmt.Sprintf("SELECT offset FROM %s;", a.LogFileID))
+	res, err := a.DB.Execute(ctx, fmt.Sprintf("SELECT offset FROM %s;", a.LogFileID))
 	if err != nil {
 		return 0
 	}

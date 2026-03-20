@@ -54,7 +54,7 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 	}
 
 	tracker := ai.NewCostTracker(s.DB)
-	tracker.RecordEmbeddingUsage("system:search_vector", query)
+	tracker.RecordEmbeddingUsage(ctx, "system:search_vector", query)
 
 	vecJson, _ := json.Marshal(vec)
 
@@ -75,7 +75,7 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 		ORDER BY score DESC 
 		LIMIT 10;`, string(vecJson), schema.TableFileChunk)
 
-	resRaw, err := s.DB.Execute(ql)
+	resRaw, err := s.DB.Execute(ctx, ql)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
@@ -140,13 +140,13 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 
 		if top3[c.Path] {
 			var gCtx *GraphContext
-			if ctx, ok := contextCache[c.Path]; ok {
-				gCtx = ctx
+			if ctxVal, ok := contextCache[c.Path]; ok {
+				gCtx = ctxVal
 			} else {
-				ctx, err := GetFileContext(s.DB, c.Path)
+				gCtxVal, err := GetFileContext(ctx, s.DB, c.Path)
 				if err == nil {
-					contextCache[c.Path] = ctx
-					gCtx = ctx
+					contextCache[c.Path] = gCtxVal
+					gCtx = gCtxVal
 				}
 			}
 
@@ -172,7 +172,7 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 }
 
 // ReinforcePath updates the usage weight of a path in the graph
-func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error {
+func (s *Service) ReinforcePath(ctx context.Context, sourceID, targetID string, score float64) error {
 	if s.DB == nil {
 		return fmt.Errorf("database not connected")
 	}
@@ -192,7 +192,7 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 	// Helper to run update for a table
 	runUpdate := func(table string) error {
 		ql := fmt.Sprintf("UPDATE %s SET usage_weight = (usage_weight OR 1.0) + %f WHERE in = $source AND out = $target;", table, delta)
-		_, err := s.DB.SmartQuery(ql, map[string]interface{}{
+		_, err := s.DB.SmartQuery(ctx, ql, map[string]interface{}{
 			"source": sourceID,
 			"target": targetID,
 		})
@@ -231,7 +231,7 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 	// UPDATE target SET access_count += 1
 	if score > 0 {
 		ql := "UPDATE $target SET access_count = (access_count OR 0) + 1, last_accessed = time::now();"
-		_, err = s.DB.SmartQuery(ql, map[string]interface{}{"target": targetID})
+		_, err = s.DB.SmartQuery(ctx, ql, map[string]interface{}{"target": targetID})
 		if err != nil {
 			return err
 		}
@@ -241,9 +241,9 @@ func (s *Service) ReinforcePath(sourceID, targetID string, score float64) error 
 }
 
 // RawQuery executes a raw SurrealQL query for power users
-func (s *Service) RawQuery(ql string) (interface{}, error) {
+func (s *Service) RawQuery(ctx context.Context, ql string) (interface{}, error) {
 	if s.DB == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
-	return s.DB.Execute(ql)
+	return s.DB.Execute(ctx, ql)
 }

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,7 +45,7 @@ func TestIngestRepoIntegration(t *testing.T) {
 	mockRedmine := &MockRedmine{}
 
 	// 3. Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
+	err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", 10)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestIngestRepo_QuotedPaths(t *testing.T) {
 	mockRedmine := &MockRedmine{}
 
 	// 3. Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
+	err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", 10)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}
@@ -114,17 +115,18 @@ func TestIngestRepo_QuotedPaths(t *testing.T) {
 	foundFileUpdate := false
 	expectedPath := fileName
 	// sanitizeID("file with spaces.txt") -> "file_with_spaces_txt"
-	expectedID := fmt.Sprintf("%s:%s", schema.TableFile, db.SanitizeID(fileName))
+	// IngestRepo uses <Table>:<Repo>_<File>
+	expectedID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(fileName))
 
 	for _, qry := range mockDB.CapturedQueries {
-		// Check for UPDATE file:file_with_spaces_txt SET path = 'file with spaces.txt'
+		// Check for UPDATE source_file:test_repo_file_with_spaces_txt SET path = 'file with spaces.txt'
 		if strings.Contains(qry, fmt.Sprintf("UPDATE %s", expectedID)) {
-			if strings.Contains(qry, fmt.Sprintf("path = '%s'", expectedPath)) {
+			if strings.Contains(qry, fmt.Sprintf("path = '%s'", db.EscapeSQL(expectedPath))) {
 				foundFileUpdate = true
 			}
 		}
-		// Also ensure no double quotes in the ID part of the query like file:"..."
-		if strings.Contains(qry, "file:\"") {
+		// Also ensure no double quotes in the ID part of the query like source_file:"..."
+		if strings.Contains(qry, fmt.Sprintf("%s:\"", schema.TableFile)) {
 			t.Errorf("Found double quotes in file ID in query: %s", qry)
 		}
 	}
@@ -177,7 +179,7 @@ func TestIngestRepo_Incremental(t *testing.T) {
 	}
 
 	// 3. Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
+	err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", 10)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}
@@ -246,7 +248,7 @@ Delay: 200 * time.Millisecond,
 // Using concurrency 1, so the worker will block for 200ms per issue.
 // Since we only have 1 issue, it should take ~200ms + overhead.
 start := time.Now()
-err := IngestRepo(mockDB, mockRedmine, repoDir, 1)
+err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", 1)
 if err != nil {
 t.Fatalf("IngestRepo failed: %v", err)
 }

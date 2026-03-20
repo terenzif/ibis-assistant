@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -53,7 +54,7 @@ func TestGetFileContext_Robustness_ScalarWeight(t *testing.T) {
 
 	// This call should NOT panic or return error, but parse the weight correctly if possible.
 	// If the current implementation expects []float64, it will likely fail unmarshaling.
-	ctx, err := GetFileContext(mockDB, "/file")
+	ctx, err := GetFileContext(context.Background(), mockDB, "/file")
 	if err != nil {
 		t.Fatalf("GetFileContext failed unexpectedly: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestGetFileContext_Robustness_ArrayWeight(t *testing.T) {
 		},
 	}
 
-	ctx, err := GetFileContext(mockDB, "/file")
+	ctx, err := GetFileContext(context.Background(), mockDB, "/file")
 	if err != nil {
 		t.Fatalf("GetFileContext failed: %v", err)
 	}
@@ -156,7 +157,7 @@ func TestGetFileContext_Robustness_MixedTypes(t *testing.T) {
 		},
 	}
 
-	ctx, err := GetFileContext(mockDB, "/file")
+	ctx, err := GetFileContext(context.Background(), mockDB, "/file")
 	if err != nil {
 		t.Fatal(err)
 	}

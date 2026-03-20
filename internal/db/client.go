@@ -14,8 +14,8 @@ import (
 )
 
 type Executor interface {
-	Execute(sql string) (interface{}, error)
-	SmartQuery(sql string, vars interface{}) (interface{}, error)
+	Execute(ctx context.Context, sql string) (interface{}, error)
+	SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error)
 	Close()
 }
 
@@ -86,25 +86,48 @@ func (c *Client) Close() {
 }
 
 // Execute performs a raw query against SurrealDB
-func (c *Client) Execute(sql string) (interface{}, error) {
+func (c *Client) Execute(ctx context.Context, sql string) (interface{}, error) {
 	if c == nil || c.DB == nil {
 		return nil, fmt.Errorf("database client not initialized")
 	}
 	logger.Debug("SQL: %s", sql)
 
-	ctx := context.Background()
+	// Wrap caller context with client timeout
+	dbCtx := ctx
 	if c.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		dbCtx, cancel = context.WithTimeout(ctx, c.Timeout)
 		defer cancel()
 	}
 
-	start := time.Now()
-	res, err := surrealdb.Query[interface{}](ctx, c.DB, sql, map[string]interface{}{})
-	duration := time.Since(start)
+	maxRetries := 3
+	var res *[]surrealdb.QueryResult[interface{}]
+	var err error
+	var duration time.Duration
 
-	if err != nil {
+	for i := 0; i < maxRetries; i++ {
+		start := time.Now()
+		res, err = surrealdb.Query[interface{}](dbCtx, c.DB, sql, map[string]interface{}{})
+		duration = time.Since(start)
+
+		if err == nil {
+			logger.Debug("SQL SUCCESS [%v]", duration)
+			break
+		}
+
+		// Handle cancellation gracefully
+		if dbCtx.Err() != nil {
+			logger.Debug("SQL Cancelled/Timed Out during execution: %v", dbCtx.Err())
+			return nil, dbCtx.Err()
+		}
+
 		errStr := err.Error()
+		if strings.Contains(strings.ToLower(errStr), "transaction conflict") && i < maxRetries-1 {
+			logger.Warn("SQL Transaction Conflict. Retrying (%d/%d)...", i+1, maxRetries)
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+			continue
+		}
+
 		if strings.Contains(strings.ToLower(errStr), "already exists") {
 			logger.Debug("SQL (Already Exists) [%v]: %v", duration, err)
 		} else {
@@ -112,8 +135,6 @@ func (c *Client) Execute(sql string) (interface{}, error) {
 		}
 		return nil, err
 	}
-
-	logger.Debug("SQL SUCCESS [%v]", duration)
 
 	// Unwrap if single result for backward compatibility
 	if len(*res) == 1 {
@@ -123,7 +144,7 @@ func (c *Client) Execute(sql string) (interface{}, error) {
 }
 
 // SmartQuery is a helper for parameterized queries
-func (c *Client) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (c *Client) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	if c == nil || c.DB == nil {
 		return nil, fmt.Errorf("database client not initialized")
 	}
@@ -133,23 +154,45 @@ func (c *Client) SmartQuery(sql string, vars interface{}) (interface{}, error) {
 		return nil, fmt.Errorf("vars must be map[string]interface{}")
 	}
 
-	ctx := context.Background()
+	// Wrap caller context with client timeout
+	dbCtx := ctx
 	if c.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		dbCtx, cancel = context.WithTimeout(ctx, c.Timeout)
 		defer cancel()
 	}
 
-	start := time.Now()
-	res, err := surrealdb.Query[interface{}](ctx, c.DB, sql, varsMap)
-	duration := time.Since(start)
+	maxRetries := 3
+	var res *[]surrealdb.QueryResult[interface{}]
+	var err error
+	var duration time.Duration
 
-	if err != nil {
+	for i := 0; i < maxRetries; i++ {
+		start := time.Now()
+		res, err = surrealdb.Query[interface{}](dbCtx, c.DB, sql, varsMap)
+		duration = time.Since(start)
+
+		if err == nil {
+			logger.Debug("SQL SUCCESS [%v]", duration)
+			break
+		}
+
+		// Handle cancellation gracefully
+		if dbCtx.Err() != nil {
+			logger.Debug("SQL Cancelled/Timed Out during execution: %v", dbCtx.Err())
+			return nil, dbCtx.Err()
+		}
+
+		errStr := err.Error()
+		if strings.Contains(strings.ToLower(errStr), "transaction conflict") && i < maxRetries-1 {
+			logger.Warn("SQL Transaction Conflict. Retrying (%d/%d)...", i+1, maxRetries)
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond) // Exponential backoff
+			continue
+		}
+
 		logger.Error("SQL ERROR [%v]: %v", duration, err)
 		return nil, err
 	}
-
-	logger.Debug("SQL SUCCESS [%v]", duration)
 
 	// Unwrap if single result
 	if len(*res) == 1 {

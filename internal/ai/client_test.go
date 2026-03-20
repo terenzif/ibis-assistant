@@ -13,8 +13,8 @@ import (
 // Accessing private fields for testing is allowed in same package
 
 type MockDB struct{}
-func (m *MockDB) Execute(sql string) (interface{}, error) { return nil, nil }
-func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) { return nil, nil }
+func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) { return nil, nil }
+func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) { return nil, nil }
 func (m *MockDB) Close() {}
 
 func TestClientWorkerPool(t *testing.T) {

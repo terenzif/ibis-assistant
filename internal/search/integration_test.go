@@ -98,7 +98,7 @@ func TestSearchLifecycle(t *testing.T) {
 
 	// Step 3: User provides feedback (Positive reinforcement)
 	// We reinforce the path from Commit -> Issue
-	err = svc.ReinforcePath(commitID, foundIssueID, 1.0)
+	err = svc.ReinforcePath(context.Background(), commitID, foundIssueID, 1.0)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}

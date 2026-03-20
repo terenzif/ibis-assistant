@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
@@ -19,7 +20,7 @@ func TestReinforcePath_EdgeCases(t *testing.T) {
 
 		// Test Case: "Authored Edge" (author -> commit)
 		// Expected behavior: Edge update query (usage_weight) AND target access count update.
-		err := svc.ReinforcePath("author:1", "commit:1", 0.5)
+		err := svc.ReinforcePath(context.Background(), "author:1", "commit:1", 0.5)
 		if err != nil {
 			t.Fatalf("ReinforcePath failed: %v", err)
 		}
@@ -47,7 +48,7 @@ func TestReinforcePath_EdgeCases(t *testing.T) {
 
 		// Test Case: "Truly Unknown Edge" (e.g. foo -> bar)
 		// Expected behavior: No edge update query, ONLY target access count update.
-		err := svc.ReinforcePath("foo:1", "bar:1", 0.5)
+		err := svc.ReinforcePath(context.Background(), "foo:1", "bar:1", 0.5)
 		if err != nil {
 			t.Fatalf("ReinforcePath failed: %v", err)
 		}
@@ -77,13 +78,13 @@ func TestReinforcePath_AmbiguousID(t *testing.T) {
 	// Scenario: A file path contains the word "issue".
 	// ID convention: table:id
 	// source: commit:1
-	// target: file:my_issue.go
+	// target: source_file:my_issue.go
 	// This represents a "changed" edge (commit -> file).
 
-	sourceID := "commit:1"
-	targetID := "file:my_issue.go"
+	sourceID := schema.TableCommit + ":1"
+	targetID := schema.TableFile + ":my_issue.go"
 
-	err := svc.ReinforcePath(sourceID, targetID, 0.5)
+	err := svc.ReinforcePath(context.Background(), sourceID, targetID, 0.5)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}

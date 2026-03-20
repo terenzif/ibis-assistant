@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/deckonline/knowledge_mcp/internal/schema"
@@ -11,7 +12,7 @@ type MockClient struct {
 	CapturedQueries []string
 }
 
-func (m *MockClient) Execute(sql string) (interface{}, error) {
+func (m *MockClient) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	return nil, nil
 }
@@ -32,16 +33,17 @@ func TestSchemaConstants(t *testing.T) {
 func TestMockIngestionFlow(t *testing.T) {
 	// This test validates the expected logic flow without needing a running SurrealDB
 	client := &MockClient{}
+	ctx := context.Background()
 
 	// Simulate "Project Knowledge" logic
 	// 1. Create Repo
-	client.Execute("CREATE repo:test SET path = '/tmp/test';")
+	client.Execute(ctx, "CREATE repo:test SET path = '/tmp/test';")
 	
 	// 2. Create Commit
-	client.Execute("CREATE commit:abc SET message = 'Fix bug #123';")
+	client.Execute(ctx, "CREATE commit:abc SET message = 'Fix bug #123';")
 
 	// 3. Link
-	client.Execute("RELATE commit:abc->implements->issue:123;")
+	client.Execute(ctx, "RELATE commit:abc->implements->issue:123;")
 
 	if len(client.CapturedQueries) != 3 {
 		t.Errorf("Expected 3 queries, got %d", len(client.CapturedQueries))

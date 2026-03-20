@@ -79,7 +79,7 @@ func (bm *BatchManager) processPendingChunks() {
 	// For now, we select limit N.
 
 	ql := fmt.Sprintf("SELECT id, content FROM %s WHERE batch_status = 'pending' LIMIT %d;", schema.TableFileChunk, BatchSize)
-	res, err := bm.DB.Execute(ql)
+	res, err := bm.DB.Execute(bm.ctx, ql)
 	if err != nil {
 		logger.Error("BatchManager: Failed to fetch pending chunks: %v", err)
 		return
@@ -177,7 +177,7 @@ func (bm *BatchManager) processPendingChunks() {
 
 	sb.WriteString("COMMIT TRANSACTION;")
 
-	if _, err := bm.DB.Execute(sb.String()); err != nil {
+	if _, err := bm.DB.Execute(bm.ctx, sb.String()); err != nil {
 		logger.Error("BatchManager: Failed to save batch job info: %v", err)
 	}
 }
@@ -186,7 +186,7 @@ func (bm *BatchManager) processPendingChunks() {
 func (bm *BatchManager) checkActiveBatches() {
 	// 1. Find submitted jobs
 	ql := fmt.Sprintf("SELECT id, name, chunk_ids FROM %s WHERE status = 'submitted';", schema.TableBatchJob)
-	res, err := bm.DB.Execute(ql)
+	res, err := bm.DB.Execute(bm.ctx, ql)
 	if err != nil {
 		logger.Error("BatchManager: Failed to fetch active batches: %v", err)
 		return
@@ -259,7 +259,7 @@ func (bm *BatchManager) processJobResults(jobID string, chunkIDs []string, embed
 	sb.WriteString(fmt.Sprintf("UPDATE %s SET status = 'completed', completed_at = time::now(); ", jobID))
 	sb.WriteString("COMMIT TRANSACTION;")
 
-	if _, err := bm.DB.Execute(sb.String()); err != nil {
+	if _, err := bm.DB.Execute(bm.ctx, sb.String()); err != nil {
 		logger.Error("BatchManager: Failed to apply results for %s: %v", jobID, err)
 	} else {
 		logger.Info("BatchManager: Successfully updated %d chunks from job %s", len(chunkIDs), jobID)
@@ -286,5 +286,5 @@ func (bm *BatchManager) markJobFailed(jobID string, chunkIDs []string, reason st
 
 	sb.WriteString("COMMIT TRANSACTION;")
 
-	bm.DB.Execute(sb.String())
+	bm.DB.Execute(bm.ctx, sb.String())
 }

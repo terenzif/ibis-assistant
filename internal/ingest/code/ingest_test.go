@@ -12,6 +12,7 @@ import (
 
 	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // MockDB implements db.Executor
@@ -20,7 +21,7 @@ type MockDB struct {
 	ReturnData   map[string]interface{} // Map SQL prefix -> Return value
 }
 
-func (m *MockDB) Execute(sql string) (interface{}, error) {
+func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.ExecuteCalls = append(m.ExecuteCalls, sql)
 	for prefix, val := range m.ReturnData {
 		if strings.HasPrefix(sql, prefix) {
@@ -30,7 +31,7 @@ func (m *MockDB) Execute(sql string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	return nil, nil
 }
 
@@ -67,7 +68,7 @@ func BenchmarkIngestCodebase_NoChange(b *testing.B) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := fmt.Sprintf("file:%s", db.SanitizeID(filePath))
+	fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("main.go"))
 
 	// We want to benchmark the loop where DB says "Hash Matches".
 	// In the unoptimized version, this will still chunk and embed.
@@ -110,7 +111,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := fmt.Sprintf("file:%s", db.SanitizeID(filePath))
+	fileID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("main.go"))
 	cfg := config.Load()
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
@@ -220,8 +221,9 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 	// We expect processFile to be called only for main.go
 	// Helper to check if a path was processed
 	wasProcessed := func(path string) bool {
-		sanitized := db.SanitizeID(path)
-		target := fmt.Sprintf("file:%s", sanitized)
+		rel, _ := filepath.Rel(tmpDir, path)
+		// Table:Repo_File
+		target := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(rel))
 		for _, sql := range mockDB.ExecuteCalls {
 			if strings.Contains(sql, target) {
 				return true
@@ -265,21 +267,22 @@ func TestIngestCodebase_Pruning(t *testing.T) {
 	cfg := config.Load()
 
 	// 4. Setup MockDB with existing files
-	ignoredID := fmt.Sprintf("file:%s", db.SanitizeID(ignoredFile))
+	ignoredRel, _ := filepath.Rel(tmpDir, ignoredFile)
+	ignoredID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(ignoredRel))
 
 	// deletedFile (not on disk)
 	deletedFile := filepath.Join(tmpDir, "gone.go")
-	deletedID := fmt.Sprintf("file:%s", db.SanitizeID(deletedFile))
+	deletedID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("gone.go"))
 
 	// existingFile (should be kept)
 	existingFile := filepath.Join(tmpDir, "main.go")
 	os.WriteFile(existingFile, []byte("package main"), 0644)
-	existingID := fmt.Sprintf("file:%s", db.SanitizeID(existingFile))
+	existingID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("main.go"))
 
 	// Mock Response
 	mockDB := &MockDB{
 		ReturnData: map[string]interface{}{
-			"SELECT id, path FROM file": []interface{}{
+			"SELECT id, path FROM source_file": []interface{}{
 				map[string]interface{}{"id": ignoredID, "path": ignoredFile},
 				map[string]interface{}{"id": deletedID, "path": deletedFile},
 				map[string]interface{}{"id": existingID, "path": existingFile},
@@ -324,7 +327,6 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "main.go")
-	fileID := fmt.Sprintf("file:%s", db.SanitizeID(path))
 
 	// Helper to set content and run ingest
 	runIngest := func(content string, mockAI *MockAI, mockDB *MockDB) {
@@ -372,8 +374,8 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Queries "SELECT count() ... WHERE hash=V1_HASH".
 	// WE NEED TO MOCK THIS RETURN to > 0
 
-	v1Hash, _ := getHash("version1")
-	countQuery := fmt.Sprintf("SELECT count() FROM file_chunk WHERE file = %s AND hash = '%s';", fileID, v1Hash)
+	// Count query in ingest.go: countQuery := fmt.Sprintf("SELECT count() FROM %s WHERE file = $file AND hash = $hash;", TableFileChunk)
+	countQuery := fmt.Sprintf("SELECT count() FROM %s", schema.TableFileChunk)
 
 	mockDB = &MockDB{
 		ReturnData: map[string]interface{}{
@@ -490,7 +492,7 @@ func TestIngestCodebase_Pruning_QuerySyntax(t *testing.T) {
 
 	foundQuery := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "SELECT id, path FROM file WHERE") {
+		if strings.Contains(sql, "SELECT id, path FROM source_file WHERE") {
 			foundQuery = true
 			if strings.Contains(sql, "BEGINSWITH") {
 				t.Errorf("Query uses deprecated BEGINSWITH syntax: %s", sql)
@@ -498,6 +500,8 @@ func TestIngestCodebase_Pruning_QuerySyntax(t *testing.T) {
 			if !strings.Contains(sql, "string::starts_with") {
 				t.Errorf("Query should use string::starts_with syntax: %s", sql)
 			}
+		} else if strings.Contains(sql, "UPDATE source_file") {
+			// Check IDs in UPSERT too if needed, but the pruning test is about SELECT
 		}
 	}
 

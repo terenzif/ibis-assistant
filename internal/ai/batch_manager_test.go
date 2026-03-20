@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -14,12 +13,12 @@ type MockDBBatch struct {
 	Rows    interface{}
 }
 
-func (m *MockDBBatch) Execute(sql string) (interface{}, error) {
+func (m *MockDBBatch) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.LastSQL = sql
 	return m.Rows, nil
 }
 
-func (m *MockDBBatch) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *MockDBBatch) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.LastSQL = sql
 	return nil, nil
 }
@@ -67,20 +66,19 @@ func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := &MockDBBatch{Rows: tc.rows}
-			bm := &BatchManager{
-				DB: db,
-				AI: &Client{}, // Client is not used if we don't call CreateBatchEmbedJob
-			}
-
-			// We need to bypass the actual AI call in the test or mock the AI client
-			// For this test, we just want to see if it parses correctly and tries to call AI.
-			// Since AI is a concrete struct, we might need to mock its methods if we wanted a full integration test.
-			// But here we can check if it even reaches the AI call stage by checking if chunkIDs is empty.
+			// Use context.Background() for the manager
+			bm := NewBatchManager(db, &Client{})
 			
-			// Let's modify processPendingChunks to return the count of chunks found for testing purpose
-			// (or just rely on the fact that if it doesn't return early, it found something).
-			// Since I can't easily modify the signature without breaking things, 
-			// I'll check the logs or use a mock AI.
+			// We can't easily check the internal state of chunkIDs without exposing it or using a hook.
+			// But we can check if it attempted to call Execute for the selecting pending chunks.
+			bm.processPendingChunks()
+			
+			if !strings.Contains(db.LastSQL, schema.TableFileChunk) {
+				t.Errorf("Expected query on %s, got %s", schema.TableFileChunk, db.LastSQL)
+			}
+			if !strings.Contains(db.LastSQL, "batch_status = 'pending'") {
+				t.Errorf("Expected filter on pending status, got %s", db.LastSQL)
+			}
 		})
 	}
 }
@@ -92,7 +90,8 @@ func TestBatchManager_SQLQuoting(t *testing.T) {
 		},
 	}
 	
-	// We need to mock bm.AI.CreateBatchEmbedJob
-	// Since AI is a pointer to Client, and Client is a struct with a worker pool,
-	// it's hard to mock without an interface.
+	bm := NewBatchManager(db, &Client{})
+	// This test is mostly a place holder for now since mocking AI.CreateBatchEmbedJob is hard without an interface.
+	// But we've ensured the MockDB supports context.
+	bm.processPendingChunks()
 }

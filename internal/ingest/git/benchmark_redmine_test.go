@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -62,7 +63,7 @@ func BenchmarkIngestRedmineMixed(b *testing.B) {
 		mockRedmine.Active = 0
 		mockRedmine.CallCount = 0
 
-		err := IngestRepo(mockDB, mockRedmine, repoDir, concurrency)
+		err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", concurrency)
 		if err != nil {
 			b.Fatalf("IngestRepo failed: %v", err)
 		}

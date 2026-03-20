@@ -18,3 +18,7 @@
 - [x] Refine Deployment & Configuration (Folder Scan, Submodules) <!-- id: 13 -->
 - [x] Implement SurrealDB Auto-Update Toggle (`db_auto_update`) <!-- id: 16 -->
 - [x] Evaluate "Why Similarity Isn’t Enough for Memory" and apply to project <!-- id: 14 -->
+- [x] Refactor AI and Database layers for consistent `context.Context` propagation <!-- id: 26 -->
+- [x] Implement graceful shutdown and resolve TCP connection reset errors <!-- id: 27 -->
+- [x] Support executable-relative paths for Windows Service deployment <!-- id: 28 -->
+- [x] Stabilize and synchronize the full test suite (config, batch, schema) <!-- id: 29 -->

@@ -64,7 +64,7 @@ func TestIngestRepo_ConcurrencyBounded(t *testing.T) {
 	concurrency := 5
 
 	// Run Ingest
-	err := IngestRepo(mockDB, mockRedmine, repoDir, concurrency)
+	err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", concurrency)
 	if err != nil {
 		t.Fatalf("IngestRepo failed: %v", err)
 	}

@@ -229,7 +229,7 @@ func runServer(ctx context.Context) {
 		logger.Info("Successfully connected to SurrealDB.")
 
 		// --- [NEW] Initialize Schema ---
-		if err := db.InitSchema(dbClient); err != nil {
+		if err := db.InitSchema(ctx, dbClient); err != nil {
 			logger.Warn("Database schema initialization warning: %v", err)
 		}
 	}
@@ -244,11 +244,12 @@ func runServer(ctx context.Context) {
 			rpm = cfg.GeminiDefaultRPM
 		}
 		aiKeys = append(aiKeys, ai.KeyConfig{
-			Key:   k.Key,
-			RPM:   rpm,
-			TPM:   k.TPM,
-			RPD:   k.RPD,
-			Owner: k.Owner,
+			Key:          k.Key,
+			RPM:          rpm,
+			TPM:          k.TPM,
+			RPD:          k.RPD,
+			Owner:        k.Owner,
+			AllowOverage: k.AllowOverage,
 		})
 	}
 	aiClient := ai.NewClient(aiKeys, dbClient)
@@ -487,7 +488,7 @@ func runServer(ctx context.Context) {
 		target, _ := args["target"].(string)
 		score, _ := args["score"].(float64)
 
-		err := searchService.ReinforcePath(source, target, score)
+		err := searchService.ReinforcePath(ctx, source, target, score)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Reinforcement failed: %v", err)), nil
 		}

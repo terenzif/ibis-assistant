@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // Reusing MockDB and MockRedmine from git_test.go (same package)
@@ -62,26 +63,27 @@ COMMIT|hash5|hash4|Author Five|2024-01-05T00:00:00Z|Test tab split failure fallb
 
 	// 2. Check Quoted Path Parsing (hash3)
 	// We expect "path/to/quoted file.txt" to be sanitized and used.
-	// The DB query should contain: UPDATE file:path_to_quoted_file_txt SET path = 'path/to/quoted file.txt'
+	// The DB query should contain: UPDATE source_file:test_repo_path_to_quoted_file_txt SET path = 'path/to/quoted file.txt'
 	foundQuotedPath := false
 	targetPath := "path/to/quoted file.txt"
+	expectedID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID(targetPath))
 
 	for _, qry := range mockDB.CapturedQueries {
-		if strings.Contains(qry, fmt.Sprintf("path = '%s'", db.EscapeSQL(targetPath))) {
+		if strings.Contains(qry, fmt.Sprintf("UPDATE %s", expectedID)) && strings.Contains(qry, fmt.Sprintf("path = '%s'", db.EscapeSQL(targetPath))) {
 			foundQuotedPath = true
 		}
 	}
 	if !foundQuotedPath {
-		// This likely fails because the input string probably has spaces instead of tabs due to editing/copy-paste.
-		t.Errorf("Failed to parse quoted path: %s (Check tabs in input string)", targetPath)
+		t.Errorf("Failed to parse quoted path: %s (Check tabs in input string and RepoName prefix)", targetPath)
 	}
 
 	// 3. Check Binary File Parsing (hash1)
 	// added=0, deleted=0 for binary
 	foundBinary := false
+	binaryID := fmt.Sprintf("%s:%s_%s", schema.TableFile, db.SanitizeID("test-repo"), db.SanitizeID("binary.png"))
 	for _, qry := range mockDB.CapturedQueries {
-		// Look for RELATE ...->file:binary_png ... added = 0, deleted = 0
-		if strings.Contains(qry, "file:binary_png") && strings.Contains(qry, "added = 0") && strings.Contains(qry, "deleted = 0") {
+		// Look for RELATE ...->source_file:test_repo_binary_png ... added = 0, deleted = 0
+		if strings.Contains(qry, binaryID) && strings.Contains(qry, "added = 0") && strings.Contains(qry, "deleted = 0") {
 			foundBinary = true
 		}
 	}

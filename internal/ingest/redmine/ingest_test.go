@@ -16,12 +16,12 @@ type MockDB struct {
 	MockResult      interface{}
 }
 
-func (m *MockDB) Execute(sql string) (interface{}, error) {
+func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	return m.MockResult, nil
 }
 
-func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	// For now, we capture SmartQuery as well but format it nicely
 	varsMap, _ := vars.(map[string]interface{})
 	formatted := fmt.Sprintf("SMART: %s | VARS: %v", sql, varsMap)

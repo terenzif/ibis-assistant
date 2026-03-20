@@ -14,12 +14,12 @@ type SimulatedLatencyDB struct {
 	Latency time.Duration
 }
 
-func (m *SimulatedLatencyDB) Execute(sql string) (interface{}, error) {
+func (m *SimulatedLatencyDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	time.Sleep(m.Latency)
 	return nil, nil
 }
 
-func (m *SimulatedLatencyDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *SimulatedLatencyDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	time.Sleep(m.Latency)
 	return nil, nil
 }

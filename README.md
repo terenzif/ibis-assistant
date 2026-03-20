@@ -260,6 +260,10 @@ go test ./...
   * `db/`: Wrapper per SurrealDB.
   * `search/`: Logica di interrogazione del grafo.
 
+### 📚 Documentazione Architetturale
+Per dettagli tecnici sulle recenti evoluzioni del sistema, consulta:
+* **[Stability Refactor 2026](docs/STABILITY_REFACTOR_2026.md)**: Dettagli su Context propagation, Shutdown management e Windows Service optimization.
+
 ## 📝 Registro del Lavoro
 Il file `work_log.md` nella root del progetto contiene il log storico di tutte le modifiche strutturali, fix e miglioramenti apportati durante lo sviluppo continuo.
 

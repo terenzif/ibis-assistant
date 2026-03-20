@@ -68,6 +68,7 @@ type KeyConfig struct {
 	RPD           int
 	Owner         string
 	FlushInterval time.Duration
+	AllowOverage  bool
 }
 
 // worker holds the state for a single API key
@@ -99,6 +100,7 @@ type worker struct {
 
 	mu            sync.Mutex
 	flushInterval time.Duration
+	allowOverage  bool
 }
 
 func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
@@ -123,7 +125,7 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 	}
 
 	for _, cfg := range apiKeys {
-		w := newWorker(cfg, dbClient)
+		w := newWorker(ctx, cfg, dbClient)
 		c.workers = append(c.workers, w)
 		c.wg.Add(1)
 		go func(w *worker) {
@@ -284,7 +286,7 @@ func (c *Client) GetBatchResults(ctx context.Context, outputURI string) ([][]flo
 
 // --- Worker Implementation ---
 
-func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
+func newWorker(ctx context.Context, cfg KeyConfig, dbClient db.Executor) *worker {
 	// Apply Safety Factor (0.9) to prevent edge-case overages
 	safeRPM := int(float64(cfg.RPM) * 0.9)
 	safeTPM := int(float64(cfg.TPM) * 0.9)
@@ -321,6 +323,7 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 		refillRate:    refillRate,
 		lastRefill:    time.Now(),
 		flushInterval: 5 * time.Second,
+		allowOverage:  cfg.AllowOverage,
 	}
 
 	if cfg.FlushInterval > 0 {
@@ -328,7 +331,7 @@ func newWorker(cfg KeyConfig, dbClient db.Executor) *worker {
 	}
 
 	w.updateUsageID()
-	w.loadUsageFromDB()
+	w.loadUsageFromDB(ctx)
 
 	return w
 }
@@ -465,7 +468,7 @@ func (w *worker) waitRateLimits(texts []string, ctx context.Context) {
 	w.mu.Lock()
 	if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
 		// Flush final usage for the previous day
-		w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
+		w.updateDBUsage(ctx, w.usageID, w.usedRPD, w.owner)
 
 		w.usedRPD = 0
 		w.lastResetRPD = now
@@ -476,8 +479,8 @@ func (w *worker) waitRateLimits(texts []string, ctx context.Context) {
 	usedRPD := w.usedRPD
 	w.mu.Unlock()
 
-	// Check RPD (Hard Stop)
-	if limitRPD > 0 && usedRPD+1 > limitRPD {
+	// Check RPD (Hard Stop) - Bypass if overage allowed
+	if !w.allowOverage && limitRPD > 0 && usedRPD+1 > limitRPD {
 		// This worker is done for the day.
 		logger.Warn("AI Worker (...%s) exhausted RPD (%d). Pausing...", w.shortKey(), limitRPD)
 		for {
@@ -491,7 +494,7 @@ func (w *worker) waitRateLimits(texts []string, ctx context.Context) {
 			if now.Format("2006-01-02") != w.lastResetRPD.Format("2006-01-02") {
 				// New Day!
 				// Flush final usage for the previous day
-				w.updateDBUsage(w.usageID, w.usedRPD, w.owner)
+				w.updateDBUsage(ctx, w.usageID, w.usedRPD, w.owner)
 
 				w.usedRPD = 0
 				w.lastResetRPD = now
@@ -587,7 +590,8 @@ func (w *worker) flushLoop(ctx context.Context) {
 			currID := w.usageID
 			w.mu.Unlock()
 			if currRPD != lastFlushedRPD || currID != lastFlushedID {
-				w.updateDBUsage(currID, currRPD, w.owner)
+				// Flush final usage
+				w.updateDBUsage(ctx, currID, currRPD, w.owner)
 			}
 			return
 
@@ -598,7 +602,7 @@ func (w *worker) flushLoop(ctx context.Context) {
 			w.mu.Unlock()
 
 			if currRPD != lastFlushedRPD || currID != lastFlushedID {
-				w.updateDBUsage(currID, currRPD, w.owner)
+				w.updateDBUsage(ctx, currID, currRPD, w.owner)
 				lastFlushedRPD = currRPD
 				lastFlushedID = currID
 			}
@@ -615,13 +619,13 @@ func (w *worker) updateUsageID() {
 	w.usageID = fmt.Sprintf("%s:%s_%s", schema.TableKeyUsage, hash, date)
 }
 
-func (w *worker) loadUsageFromDB() {
+func (w *worker) loadUsageFromDB(ctx context.Context) {
 	if w.dbClient == nil {
 		return
 	}
 	// Select requests
 	ql := fmt.Sprintf("SELECT requests FROM %s;", w.usageID)
-	res, err := w.dbClient.Execute(ql)
+	res, err := w.dbClient.Execute(ctx, ql)
 	if err == nil {
 		// Parse result. Expecting []interface{} -> map -> requests
 		if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
@@ -635,7 +639,7 @@ func (w *worker) loadUsageFromDB() {
 	}
 }
 
-func (w *worker) updateDBUsage(id string, count int, owner string) {
+func (w *worker) updateDBUsage(ctx context.Context, id string, count int, owner string) {
 	if w.dbClient == nil {
 		return
 	}
@@ -646,7 +650,7 @@ func (w *worker) updateDBUsage(id string, count int, owner string) {
 		"req": count,
 	}
 
-	_, err := w.dbClient.SmartQuery(updateQL, vars)
+	_, err := w.dbClient.SmartQuery(ctx, updateQL, vars)
 	if err != nil {
 		// If update failed (likely doesn't exist), try CREATE
 		createQL := fmt.Sprintf("CREATE %s SET requests = $req, owner = $owner, date = time::now();", id)
@@ -654,7 +658,7 @@ func (w *worker) updateDBUsage(id string, count int, owner string) {
 			"req":   count,
 			"owner": owner,
 		}
-		w.dbClient.SmartQuery(createQL, createVars)
+		w.dbClient.SmartQuery(ctx, createQL, createVars)
 	}
 }
 

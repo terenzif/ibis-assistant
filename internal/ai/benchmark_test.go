@@ -13,11 +13,11 @@ type CountingMockDB struct {
 	UpdateCount int64
 }
 
-func (m *CountingMockDB) Execute(sql string) (interface{}, error) {
+func (m *CountingMockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *CountingMockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *CountingMockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	atomic.AddInt64(&m.UpdateCount, 1)
 	return nil, nil
 }

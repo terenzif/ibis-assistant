@@ -100,7 +100,7 @@ func (w *Watcher) addTailer(ctx context.Context, path string) {
 	if _, exists := w.tailers[absPath]; exists {
 		return // already tailing
 	}
-	t := NewTailer(absPath, w.Config, w.DB, w.AI)
+	t := NewTailer(ctx, absPath, w.Config, w.DB, w.AI)
 	w.tailers[absPath] = t
 	go t.Tail(ctx)
 }

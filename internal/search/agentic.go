@@ -70,7 +70,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*Agentic
 
 		if candidate.UsageMetadata != nil && s.DB != nil {
 			tracker := ai.NewCostTracker(s.DB)
-			tracker.RecordUsage("system:search_agentic", candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
+			tracker.RecordUsage(ctx, "system:search_agentic", candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
 		}
 
 		response := ""

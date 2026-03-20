@@ -52,7 +52,7 @@ QUESTION: <your question>
 
 	if resp.UsageMetadata != nil && o.DB != nil {
 		tracker := ai.NewCostTracker(o.DB)
-		tracker.RecordUsage("system:optimizer_raft", resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount)
+		tracker.RecordUsage(ctx, "system:optimizer_raft", resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount)
 	}
 
 	text := ""
@@ -95,10 +95,8 @@ func (o *Optimizer) OptimizeLoop(ctx context.Context, iterations int) error {
 	logger.Info("Starting Optimization Loop for %d iterations...", iterations)
 
 	// 1. Select Candidates (Random)
-	// Using "rand()" in SurrealDB might require a specific function or just sorting by uuid?
-	// SurrealDB `rand()` function exists.
 	ql := fmt.Sprintf("SELECT id, content FROM file_chunk ORDER BY rand() LIMIT %d;", iterations)
-	res, err := o.DB.Execute(ql)
+	res, err := o.DB.Execute(ctx, ql)
 	if err != nil {
 		return fmt.Errorf("failed to select chunks: %w", err)
 	}
@@ -146,12 +144,13 @@ func (o *Optimizer) OptimizeLoop(ctx context.Context, iterations int) error {
 		if score > 0 {
 			// Found! Reinforce the node to signal it's valuable information.
 			// We pass "system" as source to indicate system-generated reinforcement.
-			if err := o.Search.ReinforcePath("system", c.ID, 0.5); err != nil {
+			if err := o.Search.ReinforcePath(ctx, "system", c.ID, 0.5); err != nil {
 				logger.Warn("Optimization: Reinforce failed: %v", err)
 			}
 		} else {
 			// Missed.
 			logger.Warn("Optimization: MISS. Question '%s' did not retrieve %s.", question, c.ID)
+
 			// Future: Add synthetic link/concept
 		}
 	}

@@ -1,9 +1,10 @@
 package search
 
 import (
-"strings"
-"testing"
-"github.com/deckonline/knowledge_mcp/internal/schema"
+	"context"
+	"strings"
+	"testing"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // TestReinforcePath_Weakness_IDParsing verifies that ReinforcePath does NOT update edge weights
@@ -21,9 +22,9 @@ AI: &MockAI{},
 // It should NOT update 'implements' because the source table is not 'commit'.
 
 sourceID := "pro_committer:1"
-targetID := "issue:1"
+targetID := schema.TableIssue + ":1"
 
-err := svc.ReinforcePath(sourceID, targetID, 0.5)
+err := svc.ReinforcePath(context.Background(), sourceID, targetID, 0.5)
 if err != nil {
 t.Fatalf("ReinforcePath failed unexpectedly: %v", err)
 }
@@ -43,9 +44,9 @@ t.Errorf("WEAKNESS DETECTED: ReinforcePath updated '%s' for source '%s'. It matc
 
 mockDB.SmartCalls = nil // Reset
 sourceID = "author_comment:1"
-targetID = "commit:1"
+targetID = schema.TableCommit + ":1"
 
-err = svc.ReinforcePath(sourceID, targetID, 0.5)
+err = svc.ReinforcePath(context.Background(), sourceID, targetID, 0.5)
 if err != nil {
 t.Fatalf("ReinforcePath failed unexpectedly: %v", err)
 }
@@ -75,10 +76,10 @@ mockDB.SmartCalls = nil // Reset calls
 // Expected behavior: No edge update query (because Issue->Issue is not supported).
 // Current buggy behavior: Updates schema.EdgeImplements because strings.Contains("commit") is true.
 
-sourceID := "issue:fix_commit_bug"
-targetID := "issue:123"
+sourceID := schema.TableIssue + ":fix_commit_bug"
+targetID := schema.TableIssue + ":123"
 
-err := svc.ReinforcePath(sourceID, targetID, 0.5)
+err := svc.ReinforcePath(context.Background(), sourceID, targetID, 0.5)
 if err != nil {
 t.Fatalf("ReinforcePath failed: %v", err)
 }
@@ -114,10 +115,10 @@ mockDB.SmartCalls = nil
 // strings.Contains(target, "issue") is true.
 // So it might try to update `edge_implements` instead of `edge_changed`.
 
-sourceID := "commit:1"
-targetID := "file:issue_tracker.go"
+sourceID := schema.TableCommit + ":1"
+targetID := schema.TableFile + ":issue_tracker.go"
 
-err := svc.ReinforcePath(sourceID, targetID, 0.5)
+err := svc.ReinforcePath(context.Background(), sourceID, targetID, 0.5)
 if err != nil {
 t.Fatalf("ReinforcePath failed: %v", err)
 }

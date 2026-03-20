@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -10,12 +11,12 @@ type CapturingMockDB struct {
 	LastVars interface{}
 }
 
-func (m *CapturingMockDB) Execute(sql string) (interface{}, error) {
+func (m *CapturingMockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.LastSQL = sql
 	return nil, nil
 }
 
-func (m *CapturingMockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *CapturingMockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.LastSQL = sql
 	m.LastVars = vars
 	return nil, nil
@@ -34,7 +35,7 @@ func TestWorkerUsageIDFormat(t *testing.T) {
 		Owner: "Test",
 	}
 
-	w := newWorker(cfg, mockDB)
+	w := newWorker(context.Background(), cfg, mockDB)
 
 	// Check the usageID field directly
 	// It should look like "key_usage:hash_YYYYMMDD"
@@ -71,7 +72,7 @@ func TestWorkerUsageIDFormat(t *testing.T) {
 	}
 
 	// Also verify that the generated SQL in updateDBUsage uses this ID
-	w.updateDBUsage(w.usageID, 5, "Test")
+	w.updateDBUsage(context.Background(), w.usageID, 5, "Test")
 
 	if !strings.Contains(mockDB.LastSQL, w.usageID) {
 		t.Errorf("Expected SQL to contain usageID %s, got %s", w.usageID, mockDB.LastSQL)

@@ -92,7 +92,7 @@ func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDS
 		RELATE %s->%s->%s;
 	`, trackerID, authorID, issueID, issueID, schema.EdgePartOf, trackerID, authorID, schema.EdgeAuthored, issueID)
 
-	if _, err := dbClient.SmartQuery(ql, map[string]interface{}{
+	if _, err := dbClient.SmartQuery(ctx, ql, map[string]interface{}{
 		"tracker_name": issue.Tracker.Name,
 		"author_name":  issue.Author.Name,
 		"subject":      issue.Subject,

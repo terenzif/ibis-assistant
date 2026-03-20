@@ -16,12 +16,12 @@ type MockDB struct {
 	CapturedVars    []interface{}
 }
 
-func (m *MockDB) Execute(sql string) (interface{}, error) {
+func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	return m.MockResult, nil
 }
 func (m *MockDB) Close() {}
-func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	m.CapturedVars = append(m.CapturedVars, vars)
 	return m.MockResult, nil

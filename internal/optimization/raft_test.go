@@ -15,7 +15,7 @@ type MockOptDB struct {
 	UpdateCalled    bool
 }
 
-func (m *MockOptDB) Execute(sql string) (interface{}, error) {
+func (m *MockOptDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 
 	// 1. Handle Random Chunk Selection (OptimizeLoop step 1)
@@ -49,7 +49,7 @@ func (m *MockOptDB) Execute(sql string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *MockOptDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *MockOptDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 
 	// 3. Handle ReinforcePath Update

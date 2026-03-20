@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestGetFileContext_Success(t *testing.T) {
 	}
 
 	// Call GetFileContext
-	ctx, err := GetFileContext(mockDB, "/path/to/file")
+	ctx, err := GetFileContext(context.Background(), mockDB, "/path/to/file")
 	if err != nil {
 		t.Fatalf("GetFileContext failed: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestGetFileContext_RobustID(t *testing.T) {
 		},
 	}
 
-	ctx, err := GetFileContext(mockDB, "/path/to/file")
+	ctx, err := GetFileContext(context.Background(), mockDB, "/path/to/file")
 	if err != nil {
 		t.Fatalf("GetFileContext failed: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestGetFileContext_EdgeCases(t *testing.T) {
 			},
 		}
 
-		ctx, err := GetFileContext(mockDB, "/file")
+		ctx, err := GetFileContext(context.Background(), mockDB, "/file")
 		if err != nil {
 			t.Fatalf("GetFileContext failed: %v", err)
 		}
@@ -176,7 +177,7 @@ func TestGetFileContext_EdgeCases(t *testing.T) {
 			},
 		}
 
-		ctx, err := GetFileContext(mockDB, "/file")
+		ctx, err := GetFileContext(context.Background(), mockDB, "/file")
 		if err != nil {
 			t.Fatalf("GetFileContext failed: %v", err)
 		}
@@ -201,7 +202,7 @@ func TestGetFileContext_EdgeCases(t *testing.T) {
 		// Based on current implementation, it might not return error but empty context, or error depending on cast.
 		// "rows, ok := res.([]interface{})"
 
-		ctx, err := GetFileContext(mockDB, "/file")
+		ctx, err := GetFileContext(context.Background(), mockDB, "/file")
 		if err != nil {
 			// It might not return error, just empty.
 			// The code says "if !ok ... return graphCtx, nil"
@@ -271,7 +272,7 @@ func TestGetFileContext_IDMismatch(t *testing.T) {
 		},
 	}
 
-	ctx, err := GetFileContext(mockDB, "/path/to/file")
+	ctx, err := GetFileContext(context.Background(), mockDB, "/path/to/file")
 	if err != nil {
 		t.Fatalf("GetFileContext failed: %v", err)
 	}

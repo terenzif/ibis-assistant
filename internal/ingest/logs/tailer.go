@@ -21,19 +21,19 @@ type Tailer struct {
 	Analyzer *LogAnalyzer
 }
 
-func NewTailer(path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *Tailer {
+func NewTailer(ctx context.Context, path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *Tailer {
 	return &Tailer{
 		Path:     path,
 		Cfg:      cfg,
 		DB:       dbClient,
 		AI:       aiClient,
-		Analyzer: NewLogAnalyzer(path, cfg, dbClient, aiClient),
+		Analyzer: NewLogAnalyzer(ctx, path, cfg, dbClient, aiClient),
 	}
 }
 
 func (t *Tailer) Tail(ctx context.Context) {
 	// Retrieve the last processed position to ensure idempotency across restarts.
-	offset := t.Analyzer.GetOffset()
+	offset := t.Analyzer.GetOffset(ctx)
 	logger.Info("Initializing log tailer for: %s (Resuming from offset: %d)", t.Path, offset)
 
 	seekInfo := &tail.SeekInfo{Offset: offset, Whence: 0}
@@ -88,7 +88,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 					batch = nil
 					// Persist offset
 					if pos, err := tailer.Tell(); err == nil {
-						t.Analyzer.UpdateOffset(pos)
+						t.Analyzer.UpdateOffset(ctx, pos)
 					}
 				}
 			}
@@ -105,7 +105,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 				totalErrors += len(batch)
 				batch = nil
 				if pos, err := tailer.Tell(); err == nil {
-					t.Analyzer.UpdateOffset(pos)
+					t.Analyzer.UpdateOffset(ctx, pos)
 				}
 			}
 		}

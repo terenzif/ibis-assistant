@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -127,5 +128,66 @@ func TestEnvOverridesFile(t *testing.T) {
 
 	if cfg.Port != 6060 {
 		t.Errorf("Expected Port 6060 from Env, got %d", cfg.Port)
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	baseDir := "C:\\app\\bin"
+	
+	tests := []struct {
+		name     string
+		baseDir  string
+		path     string
+		expected string
+	}{
+		{
+			name:     "Absolute Path remains same",
+			baseDir:  baseDir,
+			path:     "D:\\data\\file.db",
+			expected: "D:\\data\\file.db",
+		},
+		{
+			name:     "Relative Path is resolved",
+			baseDir:  baseDir,
+			path:     "data/file.db",
+			expected: filepath.Join(baseDir, "data/file.db"),
+		},
+		{
+			name:     "Empty Path remains empty",
+			baseDir:  baseDir,
+			path:     "",
+			expected: "",
+		},
+		{
+			name:     "Current directory dot",
+			baseDir:  baseDir,
+			path:     ".",
+			expected: baseDir,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolvePath(tt.baseDir, tt.path)
+			if got != tt.expected {
+				t.Errorf("resolvePath() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfigLoadResolution(t *testing.T) {
+	// We can't easily mock os.Executable() here without complex monkey patching,
+	// but we can verify it doesn't crash and returns absolute paths.
+	cfg := Load()
+	
+	if !filepath.IsAbs(cfg.DBDataPath) {
+		t.Errorf("DBDataPath should be absolute, got %s", cfg.DBDataPath)
+	}
+	if !filepath.IsAbs(cfg.DiscoveryRoot) {
+		t.Errorf("DiscoveryRoot should be absolute, got %s", cfg.DiscoveryRoot)
+	}
+	if !filepath.IsAbs(cfg.LogsRoot) {
+		t.Errorf("LogsRoot should be absolute, got %s", cfg.LogsRoot)
 	}
 }

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -12,11 +13,11 @@ type BenchMockDB struct {
 	AllCommits []interface{}
 }
 
-func (m *BenchMockDB) Execute(sql string) (interface{}, error) {
+func (m *BenchMockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	return nil, nil
 }
 func (m *BenchMockDB) Close() {}
-func (m *BenchMockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *BenchMockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	// New Optimized Path: returns only requested IDs
 	if strings.Contains(sql, "IN $ids") {
 		// In the benchmark, the repo has a real commit hash (e.g. "a1b2...").
@@ -68,7 +69,7 @@ func BenchmarkIngestStartup(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		err := IngestRepo(mockDB, mockRedmine, repoDir, 10)
+		err := IngestRepo(context.Background(), mockDB, mockRedmine, repoDir, "test-repo", 10)
 		if err != nil {
 			b.Fatalf("IngestRepo failed: %v", err)
 		}

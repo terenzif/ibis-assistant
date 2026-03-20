@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	"github.com/deckonline/knowledge_mcp/internal/logger"
@@ -8,7 +10,7 @@ import (
 )
 
 // InitSchema initializes the database schema by defining tables and indexes.
-func InitSchema(db Executor) error {
+func InitSchema(ctx context.Context, dbClient Executor) error {
 	logger.Info("[INFO] Initializing Database Schema...")
 
 	sql := schema.GenerateInitSQL()
@@ -23,7 +25,7 @@ func InitSchema(db Executor) error {
 		// Re-append semicolon as Split removes it
 		fullStmt := stmt + ";"
 
-		_, err := db.Execute(fullStmt)
+		_, err := dbClient.Execute(ctx, fullStmt)
 		if err != nil {
 			// Some statements might fail if already exists, but DEFINE usually handles it or we log it.
 			// Specifically for SurrealDB, DEFINE INDEX might fail if it exists but it's usually fine.
@@ -37,9 +39,19 @@ func InitSchema(db Executor) error {
 	logger.Info("[INFO] Database Schema initialized successfully.")
 
 	// --- [MIGRATION] Handle transition to relative paths ---
-	if err := ClearAbsoluteFileRecords(db); err != nil {
+	if err := ClearAbsoluteFileRecords(ctx, dbClient); err != nil {
 		logger.Warn("[WARN] Relative path migration warning: %v", err)
 	}
 
+	return nil
+}
+
+// EnsureIndexes is used to recreate only indexes (e.g. after schema change)
+func EnsureIndexes(ctx context.Context, dbClient Executor) error {
+	logger.Info("[INFO] Ensuring Database Indexes...")
+	sql := schema.GenerateInitSQL()
+	if _, err := dbClient.Execute(ctx, sql); err != nil {
+		return fmt.Errorf("failed to ensure indexes: %w", err)
+	}
 	return nil
 }

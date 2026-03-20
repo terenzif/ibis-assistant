@@ -30,12 +30,11 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 	}
 
 	// Register Repo Node
-	// Use repoName for stable ID
+	// 1. Ensure Repo Node exists
 	repoID := fmt.Sprintf("%s:%s", schema.TableRepo, db.SanitizeID(repoName))
-	logger.Debug("Upserting repo node: %s", repoID)
-	_, err = client.Execute(fmt.Sprintf("UPDATE %s SET path = '%s';", repoID, db.EscapeSQL(absPath)))
+	_, err = client.Execute(ctx, fmt.Sprintf("UPSERT %s SET name = '%s';", repoID, db.EscapeSQL(repoName)))
 	if err != nil {
-		return fmt.Errorf("failed to upsert repo node: %w", err)
+		return fmt.Errorf("failed to upsert repo: %w", err)
 	}
 
 	// 1. Start Hash Generator (Stream all commits)
@@ -118,7 +117,7 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 			// Trying SmartQuery with slice.
 
 			vars["ids"] = ids
-			resRaw, err := client.SmartQuery("SELECT VALUE id FROM commit WHERE id IN $ids", vars)
+			resRaw, err := client.SmartQuery(ctx, "SELECT VALUE id FROM commit WHERE id IN $ids", vars)
 			if err != nil {
 				return fmt.Errorf("failed to check existing commits: %w", err)
 			}
@@ -258,7 +257,7 @@ func processGitLogStream(
 		// Execute transaction
 		ql := "BEGIN TRANSACTION;\n" + batchQL.String() + "COMMIT TRANSACTION;"
 		logger.Debug("Flushing batch of %d operations", batchCount)
-		_, err := client.Execute(ql)
+		_, err := client.Execute(ctx, ql)
 		if err != nil {
 			return fmt.Errorf("batch execution failed: %w", err)
 		}

@@ -177,7 +177,7 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 	queryPrefix := db.EscapeSQL(repoPath + separator)
 	ql := fmt.Sprintf("SELECT id, path FROM %s WHERE string::starts_with(path, '%s');", schema.TableFile, queryPrefix)
 
-	res, err := dbClient.Execute(ql)
+	res, err := dbClient.Execute(ctx, ql)
 	if err != nil {
 		return fmt.Errorf("failed to fetch files for pruning: %w", err)
 	}
@@ -299,13 +299,13 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 
 		// 1. Delete Chunks
 		chunkQL := fmt.Sprintf("DELETE %s WHERE file IN %s;", schema.TableFileChunk, idList)
-		if _, err := dbClient.Execute(chunkQL); err != nil {
+		if _, err := dbClient.Execute(ctx, chunkQL); err != nil {
 			logger.Warn("Failed to delete chunks: %v", err)
 		}
 
 		// 2. Delete Files
 		fileQL := fmt.Sprintf("DELETE %s;", idList) // DELETE [id1, id2]; works in SurrealDB
-		if _, err := dbClient.Execute(fileQL); err != nil {
+		if _, err := dbClient.Execute(ctx, fileQL); err != nil {
 			logger.Warn("Failed to delete files: %v", err)
 		}
 	}
@@ -340,7 +340,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 	// Fetch current state
 	var currentDBHash string
 	ql := fmt.Sprintf("SELECT hash FROM %s;", fileID)
-	res, err := dbClient.Execute(ql)
+	res, err := dbClient.Execute(ctx, ql)
 	if err == nil {
 		if rows, ok := res.([]interface{}); ok && len(rows) > 0 {
 			if row, ok := rows[0].(map[string]interface{}); ok {
@@ -364,7 +364,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 	// 3. Update File Node (Update pointer to current version)
 	// We store absolute path in the record for local discovery, but the ID is relative.
-	_, err = dbClient.Execute(fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s', rel_path = '%s', repo_name = '%s';", 
+	_, err = dbClient.Execute(ctx, fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s', rel_path = '%s', repo_name = '%s';", 
 		fileID, hash, db.EscapeSQL(absPath), db.EscapeSQL(relPath), db.EscapeSQL(repoName)))
 	if err != nil {
 		return fmt.Errorf("db update error: %w", err)
@@ -372,7 +372,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 	// Check if chunks already exist for this file hash to avoid redundant AI processing and storage.
 	checkQL := fmt.Sprintf("SELECT count() FROM %s WHERE file = %s AND hash = '%s';", schema.TableFileChunk, fileID, hash)
-	checkRes, err := dbClient.Execute(checkQL)
+	checkRes, err := dbClient.Execute(ctx, checkQL)
 	if err == nil {
 		// SurrealDB count returns [{ count: N }]
 		if rows, ok := checkRes.([]interface{}); ok && len(rows) > 0 {
@@ -451,7 +451,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 		qlBuilder.WriteString("COMMIT;")
 
-		if _, err := dbClient.Execute(qlBuilder.String()); err != nil {
+		if _, err := dbClient.Execute(ctx, qlBuilder.String()); err != nil {
 			logger.Error("Failed to persist pending chunks for %s: %v", relPath, err)
 		}
 		logger.Info("  - Queued %d/%d chunks for %s", end, len(chunks), relPath)

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -31,7 +32,7 @@ type IssueSummary struct {
 }
 
 // GetFileContext (renamed logic) traverses the weighted graph
-func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error) {
+func GetFileContext(ctx context.Context, dbClient db.Executor, filePath string) (*GraphContext, error) {
 	// Query logic:
 	// 1. Find commits linked via 'changed'. Sort by Date primarily, but could use Impact.
 	//    We fetch the edge 'impact' property.
@@ -56,7 +57,7 @@ func GetFileContext(dbClient db.Executor, filePath string) (*GraphContext, error
 	WHERE path = $path;
 	`
 
-	res, err := dbClient.SmartQuery(ql, map[string]interface{}{
+	res, err := dbClient.SmartQuery(ctx, ql, map[string]interface{}{
 		"path": filePath,
 	})
 	if err != nil {

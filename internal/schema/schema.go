@@ -61,7 +61,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeParentOf, TableCommit, TableCommit),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgePointedTo, TableBranch, TableCommit),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeChanged, TableCommit, TableFile),
-	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeAuthored, TableAuthor, TableCommit),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT any SCHEMALESS;", EdgeAuthored, TableAuthor),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeImplements, TableCommit, TableIssue),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgePartOf, TableIssue, TableTracker),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasRepo, TableProject, TableRepo),

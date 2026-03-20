@@ -17,7 +17,7 @@ type MockDB struct {
 	ReturnData   map[string]interface{}
 }
 
-func (m *MockDB) Execute(sql string) (interface{}, error) {
+func (m *MockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.ExecuteCalls = append(m.ExecuteCalls, sql)
 	// Check prefix
 	for k, v := range m.ReturnData {
@@ -28,7 +28,7 @@ func (m *MockDB) Execute(sql string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *MockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.SmartCalls = append(m.SmartCalls, sql)
 	m.SmartVars = append(m.SmartVars, vars)
 	for k, v := range m.ReturnData {
@@ -166,7 +166,7 @@ func TestReinforcePath(t *testing.T) {
 	}
 
 	// Test Case 1: Implements Edge (Commit -> Issue) with Positive Score
-	err := svc.ReinforcePath("commit:1", "issue:1", 0.8)
+	err := svc.ReinforcePath(context.Background(), schema.TableCommit+":1", schema.TableIssue+":1", 0.8)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestReinforcePath(t *testing.T) {
 	mockDB.SmartCalls = nil
 
 	// Test Case 2: Changed Edge (Commit -> File) with Negative Score
-	err = svc.ReinforcePath("commit:1", "file:1", -0.5)
+	err = svc.ReinforcePath(context.Background(), schema.TableCommit+":1", schema.TableFile+":1", -0.5)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestReinforcePath(t *testing.T) {
 
 	// Test Case 3: Unknown Edge with Positive Score
 	// Access count should still be updated
-	err = svc.ReinforcePath("unknown:1", "issue:2", 0.8)
+	err = svc.ReinforcePath(context.Background(), "unknown:1", schema.TableIssue+":2", 0.8)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestReinforcePath_UnknownEdge(t *testing.T) {
 
 	// Test Case: Unknown Edge Type (e.g., Issue -> Tracker or unknown prefix)
 	// Should update access_count but NOT edge weight
-	err := svc.ReinforcePath("unknown:1", "tracker:1", 0.8)
+	err := svc.ReinforcePath(context.Background(), "unknown:1", "tracker:1", 0.8)
 	if err != nil {
 		t.Fatalf("ReinforcePath failed: %v", err)
 	}

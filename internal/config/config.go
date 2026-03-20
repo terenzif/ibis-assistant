@@ -56,8 +56,9 @@ type GeminiKeyConfig struct {
 	Key   string `json:"key"`
 	RPM   int    `json:"rpm"`
 	TPM   int    `json:"tpm"`
-	RPD   int    `json:"rpd"`
-	Owner string `json:"owner"`
+	RPD          int    `json:"rpd"`
+	Owner        string `json:"owner"`
+	AllowOverage bool   `json:"allow_overage"`
 }
 
 // Load returns the configuration loaded from Defaults + File + Env.
@@ -221,5 +222,25 @@ func Load(paths ...string) *Config {
 		cfg.DBAutoUpdate = v == "true"
 	}
 
+	// 5. Finalize paths (Service Mode Support)
+	// If running as a service, CWD might be System32.
+	// Resolve relative paths based on executable directory instead of CWD.
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		cfg.DBDataPath = resolvePath(exeDir, cfg.DBDataPath)
+		cfg.DiscoveryRoot = resolvePath(exeDir, cfg.DiscoveryRoot)
+		cfg.LogsRoot = resolvePath(exeDir, cfg.LogsRoot)
+		if cfg.LogFile != "" {
+			cfg.LogFile = resolvePath(exeDir, cfg.LogFile)
+		}
+	}
+
 	return cfg
+}
+
+func resolvePath(baseDir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(baseDir, path)
 }

@@ -35,7 +35,7 @@ type TestAgentMockDB struct {
 	ReturnError     error
 }
 
-func (m *TestAgentMockDB) Execute(sql string) (interface{}, error) {
+func (m *TestAgentMockDB) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	if m.ReturnError != nil {
 		return nil, m.ReturnError
@@ -48,7 +48,7 @@ func (m *TestAgentMockDB) Execute(sql string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *TestAgentMockDB) SmartQuery(sql string, vars interface{}) (interface{}, error) {
+func (m *TestAgentMockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (interface{}, error) {
 	m.CapturedQueries = append(m.CapturedQueries, sql)
 	if m.ReturnError != nil {
 		return nil, m.ReturnError

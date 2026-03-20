@@ -21,4 +21,5 @@ tmp/
 # Repositories (Indexed content)
 _repos/
 _logs/
-.vscode/launch.json
+
+.vscode/

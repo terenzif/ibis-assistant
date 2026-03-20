@@ -15,7 +15,7 @@ func TestSchemaConstants(t *testing.T) {
 		{"Repo Table", schema.TableRepo, "repo"},
 		{"Commit Table", schema.TableCommit, "commit"},
 		{"Author Table", schema.TableAuthor, "author"},
-		{"File Table", schema.TableFile, "file"},
+		{"File Table", schema.TableFile, "source_file"},
 		{"Issue Table", schema.TableIssue, "issue"},
 		{"Project Table", schema.TableProject, "project"},
 		{"LogFile Table", schema.TableLogFile, "log_file"},

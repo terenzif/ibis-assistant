@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
@@ -15,7 +16,7 @@ func NewCostTracker(dbClient db.Executor) *CostTracker {
 	return &CostTracker{DB: dbClient}
 }
 
-func (c *CostTracker) RecordUsage(relatedEntityID string, promptTokens, candidatesTokens int) {
+func (c *CostTracker) RecordUsage(ctx context.Context, relatedEntityID string, promptTokens, candidatesTokens int) {
 	if c.DB == nil {
 		return
 	}
@@ -28,7 +29,7 @@ func (c *CostTracker) RecordUsage(relatedEntityID string, promptTokens, candidat
 	// Update the tokens directly on the entity
 	// Use (tokens_used OR 0) to ensure we can increment even if it doesn't exist yet
 	ql := fmt.Sprintf("UPDATE %s SET tokens_used = (tokens_used OR 0) + %d;", relatedEntityID, total)
-	_, err := c.DB.Execute(ql)
+	_, err := c.DB.Execute(ctx, ql)
 	if err != nil {
 		logger.Error("Failed to record token usage on %s: %v", relatedEntityID, err)
 	}
@@ -42,7 +43,7 @@ func (c *CostTracker) RecordUsage(relatedEntityID string, promptTokens, candidat
 }
 
 // RecordEmbeddingUsage estimates tokens for an embedding request and records it
-func (c *CostTracker) RecordEmbeddingUsage(relatedEntityID string, text string) {
+func (c *CostTracker) RecordEmbeddingUsage(ctx context.Context, relatedEntityID string, text string) {
 	if c.DB == nil {
 		return
 	}
@@ -50,5 +51,5 @@ func (c *CostTracker) RecordEmbeddingUsage(relatedEntityID string, text string) 
 	if len(text) > 0 {
 		estimatedTokens++
 	}
-	c.RecordUsage(relatedEntityID, estimatedTokens, 0)
+	c.RecordUsage(ctx, relatedEntityID, estimatedTokens, 0)
 }
