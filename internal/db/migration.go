@@ -53,19 +53,19 @@ func MigrateLegacyFileTable(ctx context.Context, db Executor) error {
 		
 		-- 1. Copy records from 'file' to 'source_file'
 		-- We use string::replace to change the ID prefix from 'file:' to 'source_file:'
-		INSERT INTO source_file (SELECT *, id = string::replace(string(id), "file:", "source_file:") FROM ` + "`file`" + `);
+		INSERT INTO source_file (SELECT *, id = type::record(string::replace(string(id), "file:", "source_file:")) FROM ` + "`file`" + `);
 		
 		-- 2. Update file_chunk references
-		UPDATE file_chunk SET file = string::replace(string(file), "file:", "source_file:") WHERE string::starts_with(string(file), "file:");
+		UPDATE file_chunk SET file = type::record(string::replace(string(file), "file:", "source_file:")) WHERE string::starts_with(string(file), "file:");
 		
 		-- 3. Update 'contains' edge (Repo -> File)
-		UPDATE contains SET out = string::replace(string(out), "file:", "source_file:") WHERE string::starts_with(string(out), "file:");
+		UPDATE contains SET out = type::record(string::replace(string(out), "file:", "source_file:")) WHERE string::starts_with(string(out), "file:");
 		
 		-- 4. Update 'changed' edge (Commit -> File)
-		UPDATE changed SET out = string::replace(string(out), "file:", "source_file:") WHERE string::starts_with(string(out), "file:");
+		UPDATE changed SET out = type::record(string::replace(string(out), "file:", "source_file:")) WHERE string::starts_with(string(out), "file:");
 		
 		-- 5. Update 'related_to' edge (ErrorType -> File)
-		UPDATE related_to SET out = string::replace(string(out), "file:", "source_file:") WHERE string::starts_with(string(out), "file:");
+		UPDATE related_to SET out = type::record(string::replace(string(out), "file:", "source_file:")) WHERE string::starts_with(string(out), "file:");
 		
 		-- 6. Clean up (Remove legacy records)
 		DELETE ` + "`file`" + `;
@@ -116,7 +116,14 @@ func Migrate(ctx context.Context, dbClient Executor) error {
 		SQL string
 	}{
 		{ID: 1, SQL: "UPDATE commit SET hash = string::trim(hash) WHERE hash != string::trim(hash);"},
-		// Add more here
+		{ID: 2, SQL: `
+			BEGIN TRANSACTION;
+			UPDATE contains SET out = type::record(string(out));
+			UPDATE changed SET out = type::record(string(out));
+			UPDATE related_to SET out = type::record(string(out));
+			UPDATE file_chunk SET file = type::record(string(file));
+			COMMIT;
+		`},
 	}
 
 	for _, m := range migrations {

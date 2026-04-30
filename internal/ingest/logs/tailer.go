@@ -2,6 +2,7 @@ package logs
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 
@@ -60,6 +61,9 @@ func (t *Tailer) Tail(ctx context.Context) {
 
 	var batch []string
 	var totalErrors int
+	var discoveryDone bool
+	var chunkRegex *regexp.Regexp
+	
 	startTime := time.Now()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -82,11 +86,43 @@ func (t *Tailer) Tail(ctx context.Context) {
 			text := strings.TrimSpace(line.Text)
 			if text != "" {
 				batch = append(batch, text)
+				
+				if !discoveryDone && len(batch) >= 50 {
+					regexStr := t.Analyzer.DiscoverFormat(ctx, batch)
+					if regexStr != "" {
+						if r, err := regexp.Compile(regexStr); err == nil {
+							chunkRegex = r
+							logger.Info("Discovered log chunk delimiter: %s", regexStr)
+						}
+					}
+					discoveryDone = true
+				}
+
+				shouldProcess := false
 				if len(batch) >= 100 {
-					t.Analyzer.ProcessBatch(ctx, batch)
-					totalErrors += len(batch) // Rough estimate or count from analyzer
-					batch = nil
-					// Persist offset
+					if chunkRegex != nil {
+						if chunkRegex.MatchString(text) {
+							shouldProcess = true
+						} else if len(batch) >= 500 {
+							shouldProcess = true
+						}
+					} else {
+						shouldProcess = true
+					}
+				}
+
+				if shouldProcess {
+					var processBatch []string
+					if chunkRegex != nil && chunkRegex.MatchString(text) {
+						processBatch = batch[:len(batch)-1]
+						batch = []string{text}
+					} else {
+						processBatch = batch
+						batch = nil
+					}
+					
+					t.Analyzer.ProcessBatch(ctx, processBatch)
+					totalErrors += len(processBatch)
 					if pos, err := tailer.Tell(); err == nil {
 						t.Analyzer.UpdateOffset(ctx, pos)
 					}

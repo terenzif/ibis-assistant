@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,14 +18,20 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
+type Pattern struct {
+	Category string
+	Regex    *regexp.Regexp
+}
+
 type LogAnalyzer struct {
-	Path        string
-	Cfg         *config.Config
-	DB          db.Executor
-	AI          *ai.Client
-	Project     string
-	LogFileID   string
-	CostTracker *ai.CostTracker
+	Path          string
+	Cfg           *config.Config
+	DB            db.Executor
+	AI            *ai.Client
+	Project       string
+	LogFileID     string
+	CostTracker   *ai.CostTracker
+	knownPatterns []Pattern
 }
 
 func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *LogAnalyzer {
@@ -42,22 +49,41 @@ func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClie
 
 	if dbClient != nil {
 		dbClient.Execute(ctx, fmt.Sprintf("UPDATE %s SET name = '%s';", projectID, db.EscapeSQL(project)))
-		upsertQL := fmt.Sprintf("INSERT INTO %s (id, path, project, tokens_used, offset) VALUES ('%s', '%s', %s, 0, 0) "+
-			"ON DUPLICATE KEY UPDATE path = '%s', project = %s;",
-			schema.TableLogFile, logFileID, db.EscapeSQL(path), projectID, db.EscapeSQL(path), projectID)
+		upsertQL := fmt.Sprintf("UPDATE %s MERGE { path: '%s', project: %s };",
+			logFileID, db.EscapeSQL(path), projectID)
 		dbClient.Execute(ctx, upsertQL)
 		dbClient.Execute(ctx, fmt.Sprintf("RELATE %s->%s->%s;", projectID, schema.EdgeHasLog, logFileID))
 	}
 
-	return &LogAnalyzer{
-		Path:        path,
-		Cfg:         cfg,
-		DB:          dbClient,
-		AI:          aiClient,
-		Project:     project,
-		LogFileID:   logFileID,
-		CostTracker: ai.NewCostTracker(dbClient),
+	analyzer := &LogAnalyzer{
+		Path:          path,
+		Cfg:           cfg,
+		DB:            dbClient,
+		AI:            aiClient,
+		Project:       project,
+		LogFileID:     logFileID,
+		CostTracker:   ai.NewCostTracker(dbClient),
+		knownPatterns: make([]Pattern, 0),
 	}
+
+	if dbClient != nil {
+		res, err := dbClient.Execute(ctx, fmt.Sprintf("SELECT category, template, created_at FROM %s WHERE template != '' AND hidden != true ORDER BY created_at ASC;", schema.TableErrorType))
+		if err == nil {
+			if rows, ok := res.([]interface{}); ok {
+				for _, r := range rows {
+					if row, ok := r.(map[string]interface{}); ok {
+						cat, _ := row["category"].(string)
+						tmpl, _ := row["template"].(string)
+						if cat != "" && tmpl != "" {
+							analyzer.AddKnownPattern(cat, tmpl)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return analyzer
 }
 
 func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
@@ -65,17 +91,27 @@ func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
 		return
 	}
 	text := strings.Join(lines, "\n")
+	text = a.FilterKnownErrors(text)
+
+	var activeCategories []string
+	for _, p := range a.knownPatterns {
+		activeCategories = append(activeCategories, p.Category)
+	}
 
 	prompt := fmt.Sprintf(`Analyze the following log chunk from project %s. 
 Extract distinct errors or anomalies. 
+Currently known error categories for this project: [%s]. Use this context to build incremental knowledge.
 For each error, provide:
 1. "category": a normalized, general description of the error (ignore specific IDs/timestamps)
 2. "stack_trace": the relevant stack trace or context
 3. "file": the source code file mentioned in the stack trace (if any)
 4. "severity": a number from 1 to 10 (10 being critical)
+5. "template": The exact raw text of the entire error block (including cascade logs), but replace any dynamic/variable parts (like timestamps, specific IDs, memory addresses) with the literal string "<VAR>". Do not use regex.
+6. "supersedes": a string array of known categories that this new error incorporates or replaces (e.g., if this is a cascade that contains them).
+Note: Previously known errors have been replaced with markers like [KNOWN_ERROR: category]. If you see these markers, understand that the corresponding error occurred there.
 Format your response purely as a JSON array of objects with the above keys. No markdown blocks.
 Log text:
-%s`, a.Project, text)
+%s`, a.Project, strings.Join(activeCategories, ", "), text)
 
 	contents := []ai.Content{{Parts: []ai.Part{{Text: prompt}}}}
 	cfg := ai.GenerationConfig{Temperature: 0.1}
@@ -98,7 +134,9 @@ Log text:
 		Category   string `json:"category"`
 		StackTrace string `json:"stack_trace"`
 		File       string `json:"file"`
-		Severity   int    `json:"severity"`
+		Severity   int      `json:"severity"`
+		Template   string   `json:"template"`
+		Supersedes []string `json:"supersedes"`
 	}
 	var errors []SemanticError
 
@@ -114,11 +152,65 @@ Log text:
 	logger.Info("Detected %d semantic errors in %s", len(errors), a.Path)
 
 	for _, e := range errors {
-		a.ingestError(ctx, e.Category, e.StackTrace, e.File, e.Severity)
+		if e.Template != "" {
+			a.AddKnownPattern(e.Category, e.Template)
+		}
+		a.ingestError(ctx, e.Category, e.StackTrace, e.File, e.Severity, e.Template, e.Supersedes)
 	}
 }
 
-func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file string, severity int) {
+func (a *LogAnalyzer) FilterKnownErrors(text string) string {
+	for _, pattern := range a.knownPatterns {
+		marker := fmt.Sprintf("[KNOWN_ERROR: %s]", pattern.Category)
+		text = pattern.Regex.ReplaceAllString(text, marker)
+	}
+	return text
+}
+
+func (a *LogAnalyzer) AddKnownPattern(category, template string) error {
+	escaped := regexp.QuoteMeta(template)
+	patternStr := strings.ReplaceAll(escaped, "<VAR>", ".*?")
+	
+	regex, err := regexp.Compile("(?s)" + patternStr)
+	if err != nil {
+		logger.Error("Failed to compile regex from AI template for category %s: %v", category, err)
+		return err
+	}
+	
+	a.knownPatterns = append(a.knownPatterns, Pattern{Category: category, Regex: regex})
+	return nil
+}
+
+func (a *LogAnalyzer) DiscoverFormat(ctx context.Context, lines []string) string {
+	if a.AI == nil || !a.AI.IsFunctional() || len(lines) == 0 {
+		return ""
+	}
+	
+	sample := strings.Join(lines, "\n")
+	prompt := fmt.Sprintf(`Analyze the following log sample.
+What is the regular expression (RE2) that uniquely identifies the absolute BEGINNING of a new log entry (e.g. a timestamp or log level)?
+Return ONLY the raw regex string, nothing else. If there is no clear delimiter, return an empty string.
+Log sample:
+%s`, sample)
+
+	contents := []ai.Content{{Parts: []ai.Part{{Text: prompt}}}}
+	cfg := ai.GenerationConfig{Temperature: 0.0}
+	
+	candidate, err := a.AI.GenerateContent(ctx, contents, cfg)
+	if err != nil {
+		return ""
+	}
+	
+	regexStr := strings.TrimSpace(candidate.Content.Parts[0].Text)
+	regexStr = strings.TrimPrefix(regexStr, "`")
+	regexStr = strings.TrimSuffix(regexStr, "`")
+	regexStr = strings.TrimPrefix(regexStr, "\"")
+	regexStr = strings.TrimSuffix(regexStr, "\"")
+	
+	return regexStr
+}
+
+func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file string, severity int, template string, supersedes []string) {
 	if a.DB == nil {
 		return
 	}
@@ -135,11 +227,16 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 	logEntryID := db.FormatRecordID(schema.TableLogEntry, fmt.Sprintf("%s_%d", hash, time.Now().UnixNano()))
 
 
-	_, err := a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d;",
-		errorTypeID, hash, db.EscapeSQL(category), db.EscapeSQL(stack), severity))
+	timestamp := time.Now().Format(time.RFC3339)
+	_, err := a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d, template = '%s', created_at = '%s', hidden = false;",
+		errorTypeID, hash, db.EscapeSQL(category), db.EscapeSQL(stack), severity, db.EscapeSQL(template), timestamp))
 	if err != nil {
 		logger.Error("Failed to upsert ErrorType: %v", err)
 		return
+	}
+
+	for _, sup := range supersedes {
+		a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET hidden = true WHERE category = '%s';", schema.TableErrorType, db.EscapeSQL(sup)))
 	}
 
 	a.DB.Execute(ctx, fmt.Sprintf("RELATE %s->%s->%s;", logEntryID, schema.EdgeIsTypeOf, errorTypeID))
