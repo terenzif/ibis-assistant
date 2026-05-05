@@ -1,8 +1,10 @@
 package redmine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,6 +69,12 @@ func TestSearchIssues(t *testing.T) {
 		if q != "~login" {
 			t.Errorf("Expected query ~login, got %s", q)
 		}
+		if r.URL.Query().Get("limit") != "10" {
+			t.Errorf("Expected limit 10, got %s", r.URL.Query().Get("limit"))
+		}
+		if r.URL.Query().Get("offset") != "0" {
+			t.Errorf("Expected offset 0, got %s", r.URL.Query().Get("offset"))
+		}
 
 		resp := map[string]interface{}{
 			"issues": []map[string]interface{}{
@@ -89,6 +97,156 @@ func TestSearchIssues(t *testing.T) {
 	}
 	if issues[0].ID != 10 {
 		t.Errorf("Expected first issue ID 10, got %d", issues[0].ID)
+	}
+}
+
+func TestSearchIssuesAdvanced(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/issues.json" {
+			t.Errorf("Expected path /issues.json, got %s", r.URL.Path)
+		}
+
+		q := r.URL.Query()
+		if q.Get("subject") != "~timeout" {
+			t.Errorf("Expected subject ~timeout, got %s", q.Get("subject"))
+		}
+		if q.Get("project_id") != "core" {
+			t.Errorf("Expected project_id core, got %s", q.Get("project_id"))
+		}
+		if q.Get("status_id") != "open" {
+			t.Errorf("Expected status_id open, got %s", q.Get("status_id"))
+		}
+		if q.Get("assigned_to_id") != "me" {
+			t.Errorf("Expected assigned_to_id me, got %s", q.Get("assigned_to_id"))
+		}
+		if q.Get("limit") != "25" {
+			t.Errorf("Expected limit 25, got %s", q.Get("limit"))
+		}
+		if q.Get("offset") != "50" {
+			t.Errorf("Expected offset 50, got %s", q.Get("offset"))
+		}
+		if q.Get("sort") != "updated_on:desc" {
+			t.Errorf("Expected sort updated_on:desc, got %s", q.Get("sort"))
+		}
+
+		resp := map[string]interface{}{
+			"total_count": 101,
+			"offset":      50,
+			"limit":       25,
+			"issues": []map[string]interface{}{
+				{"id": 123, "subject": "DB timeout on startup", "status": map[string]interface{}{"name": "In Progress"}},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "key")
+	res, err := client.SearchIssuesAdvanced(context.Background(), SearchIssuesParams{
+		Query:        "timeout",
+		ProjectID:    "core",
+		StatusID:     "open",
+		AssignedToID: "me",
+		Limit:        25,
+		Offset:       50,
+		Sort:         "updated_on:desc",
+	})
+	if err != nil {
+		t.Fatalf("SearchIssuesAdvanced failed: %v", err)
+	}
+
+	if res.TotalCount != 101 {
+		t.Errorf("Expected total_count 101, got %d", res.TotalCount)
+	}
+	if len(res.Issues) != 1 {
+		t.Errorf("Expected 1 issue, got %d", len(res.Issues))
+	}
+}
+
+func TestSearchMyIssuesForcesAssignedToMe(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("assigned_to_id") != "me" {
+			t.Errorf("Expected assigned_to_id me, got %s", r.URL.Query().Get("assigned_to_id"))
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"issues": []map[string]interface{}{}})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "key")
+	_, err := client.SearchMyIssues(context.Background(), SearchIssuesParams{AssignedToID: "42"})
+	if err != nil {
+		t.Fatalf("SearchMyIssues failed: %v", err)
+	}
+}
+
+func TestValidateSearchParams(t *testing.T) {
+	if err := ValidateSearchParams(SearchIssuesParams{Limit: 101}); err == nil {
+		t.Fatalf("expected error for limit > 100")
+	}
+	if err := ValidateSearchParams(SearchIssuesParams{Offset: -1}); err == nil {
+		t.Fatalf("expected error for negative offset")
+	}
+	if err := ValidateSearchParams(SearchIssuesParams{Sort: "bad:desc"}); err == nil {
+		t.Fatalf("expected error for invalid sort")
+	}
+	if err := ValidateSearchParams(SearchIssuesParams{UpdatedFrom: "2026/01/01"}); err == nil {
+		t.Fatalf("expected error for invalid date")
+	}
+	if err := ValidateSearchParams(SearchIssuesParams{Sort: "updated_on:desc", UpdatedFrom: "2026-01-01"}); err != nil {
+		t.Fatalf("expected valid params, got error: %v", err)
+	}
+}
+
+func TestUpdateIssueWithExtendedFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("Expected PUT, got %s", r.Method)
+		}
+		if r.URL.Path != "/issues/77.json" {
+			t.Errorf("Expected /issues/77.json, got %s", r.URL.Path)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		if !bytes.Contains(body, []byte(`"notes":"working on fix"`)) {
+			t.Errorf("Expected notes in payload, got %s", string(body))
+		}
+		if !bytes.Contains(body, []byte(`"status_id":2`)) {
+			t.Errorf("Expected status_id in payload, got %s", string(body))
+		}
+		if !bytes.Contains(body, []byte(`"priority_id":3`)) {
+			t.Errorf("Expected priority_id in payload, got %s", string(body))
+		}
+		if !bytes.Contains(body, []byte(`"assigned_to_id":15`)) {
+			t.Errorf("Expected assigned_to_id in payload, got %s", string(body))
+		}
+		if !bytes.Contains(body, []byte(`"fixed_version_id":8`)) {
+			t.Errorf("Expected fixed_version_id in payload, got %s", string(body))
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "key")
+	err := client.UpdateIssue(context.Background(), "77", UpdateIssueParams{
+		Notes:          "working on fix",
+		StatusID:       2,
+		PriorityID:     3,
+		AssignedToID:   15,
+		FixedVersionID: 8,
+	})
+	if err != nil {
+		t.Fatalf("UpdateIssue failed: %v", err)
+	}
+}
+
+func TestUpdateIssueRequiresAtLeastOneField(t *testing.T) {
+	client := NewClient("http://example.com", "key")
+	err := client.UpdateIssue(context.Background(), "1", UpdateIssueParams{})
+	if err == nil {
+		t.Fatalf("expected error when no update fields are provided")
 	}
 }
 

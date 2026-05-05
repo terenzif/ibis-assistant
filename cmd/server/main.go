@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -110,6 +111,110 @@ func printHelp() {
 	fmt.Println("  4. Hardcoded Defaults (lowest)")
 	fmt.Println("\nExample:")
 	fmt.Printf("  %s run -port 9000 -mode sse\n", binName)
+}
+
+type redmineSearchToolResponse struct {
+	Summary    string                      `json:"summary"`
+	Issues     []redmine.Issue             `json:"issues"`
+	TotalCount int                         `json:"total_count"`
+	Offset     int                         `json:"offset"`
+	Limit      int                         `json:"limit"`
+	Compact    []string                    `json:"compact"`
+	Filters    redmine.SearchIssuesParams  `json:"filters"`
+}
+
+func getStringArg(args map[string]interface{}, key string) string {
+	v, ok := args[key]
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+func getIntArg(args map[string]interface{}, key string) (int, error) {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return 0, nil
+	}
+
+	switch val := v.(type) {
+	case float64:
+		return int(val), nil
+	case int:
+		return val, nil
+	case int32:
+		return int(val), nil
+	case int64:
+		return int(val), nil
+	case string:
+		if strings.TrimSpace(val) == "" {
+			return 0, nil
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil {
+			return 0, fmt.Errorf("%s must be a number", key)
+		}
+		return n, nil
+	default:
+		return 0, fmt.Errorf("%s must be a number", key)
+	}
+}
+
+func buildSearchParamsFromArgs(args map[string]interface{}) (redmine.SearchIssuesParams, error) {
+	limit, err := getIntArg(args, "limit")
+	if err != nil {
+		return redmine.SearchIssuesParams{}, err
+	}
+	offset, err := getIntArg(args, "offset")
+	if err != nil {
+		return redmine.SearchIssuesParams{}, err
+	}
+
+	params := redmine.SearchIssuesParams{
+		Query:        getStringArg(args, "query"),
+		ProjectID:    getStringArg(args, "project_id"),
+		StatusID:     getStringArg(args, "status_id"),
+		TrackerID:    getStringArg(args, "tracker_id"),
+		AssignedToID: getStringArg(args, "assigned_to_id"),
+		AuthorID:     getStringArg(args, "author_id"),
+		PriorityID:   getStringArg(args, "priority_id"),
+		UpdatedFrom:  getStringArg(args, "updated_from"),
+		UpdatedTo:    getStringArg(args, "updated_to"),
+		Limit:        limit,
+		Offset:       offset,
+		Sort:         getStringArg(args, "sort"),
+	}
+
+	if err := redmine.ValidateSearchParams(params); err != nil {
+		return redmine.SearchIssuesParams{}, err
+	}
+
+	return params, nil
+}
+
+func formatRedmineSearchResponse(result *redmine.SearchIssuesResult, params redmine.SearchIssuesParams, label string) (string, error) {
+	compact := make([]string, 0, len(result.Issues))
+	for _, idx := range result.Issues {
+		compact = append(compact, fmt.Sprintf("[%d] %s (%s) - %s", idx.ID, idx.Subject, idx.Status.Name, idx.Author.Name))
+	}
+
+	payload := redmineSearchToolResponse{
+		Summary:    label,
+		Issues:     result.Issues,
+		TotalCount: result.TotalCount,
+		Offset:     result.Offset,
+		Limit:      result.Limit,
+		Compact:    compact,
+		Filters:    params,
+	}
+
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
 }
 
 func runServer(ctx context.Context) {
@@ -501,25 +606,124 @@ func runServer(ctx context.Context) {
 	s.AddTool(mcp.NewTool("redmine_search_issues",
 		mcp.WithDescription("Search matching issues in Redmine by text/subject."),
 		mcp.WithString("query", mcp.Description("Text to search for")),
+		mcp.WithNumber("limit", mcp.Description("Optional max results (1..100), default 10")),
+		mcp.WithNumber("offset", mcp.Description("Optional pagination offset, default 0")),
+		mcp.WithString("sort", mcp.Description("Optional sort (e.g. updated_on:desc)")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: redmine_search_issues")
 		if cfg.RedmineURL == "" {
 			return mcp.NewToolResultError("Redmine not configured"), nil
 		}
-		args := request.Params.Arguments.(map[string]interface{})
-		query, _ := args["query"].(string)
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		params, err := buildSearchParamsFromArgs(args)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+		if params.Query == "" {
+			return mcp.NewToolResultError("Invalid arguments: query is required"), nil
+		}
+		if params.Limit == 0 {
+			params.Limit = 10
+		}
+		if params.Sort == "" {
+			params.Sort = "updated_on:desc"
+		}
 
 		// Pass context to use User Key if available
-		issues, err := redmineClient.SearchIssues(ctx, query)
+		result, err := redmineClient.SearchIssuesAdvanced(ctx, params)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
 		}
 
-		var out strings.Builder
-		for _, idx := range issues {
-			out.WriteString(fmt.Sprintf("[%d] %s (%s) - %s\n", idx.ID, idx.Subject, idx.Status.Name, idx.Author.Name))
+		out, err := formatRedmineSearchResponse(result, params, "Redmine search results")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
-		return mcp.NewToolResultText(out.String()), nil
+		return mcp.NewToolResultText(out), nil
+	})
+
+	s.AddTool(mcp.NewTool("redmine_search_issues_advanced",
+		mcp.WithDescription("Search Redmine issues with structured filters and pagination."),
+		mcp.WithString("query", mcp.Description("Optional subject text query")),
+		mcp.WithString("project_id", mcp.Description("Optional Redmine project id or identifier")),
+		mcp.WithString("status_id", mcp.Description("Optional status filter (e.g. open, closed, *)")),
+		mcp.WithString("tracker_id", mcp.Description("Optional tracker id")),
+		mcp.WithString("assigned_to_id", mcp.Description("Optional assignee id (e.g. me, 15)")),
+		mcp.WithString("author_id", mcp.Description("Optional author id")),
+		mcp.WithString("priority_id", mcp.Description("Optional priority id")),
+		mcp.WithString("updated_from", mcp.Description("Optional lower bound date (YYYY-MM-DD or RFC3339)")),
+		mcp.WithString("updated_to", mcp.Description("Optional upper bound date (YYYY-MM-DD or RFC3339)")),
+		mcp.WithNumber("limit", mcp.Description("Optional max results (1..100), default 20")),
+		mcp.WithNumber("offset", mcp.Description("Optional pagination offset, default 0")),
+		mcp.WithString("sort", mcp.Description("Optional sort, e.g. updated_on:desc")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: redmine_search_issues_advanced")
+		if cfg.RedmineURL == "" {
+			return mcp.NewToolResultError("Redmine not configured"), nil
+		}
+
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		params, err := buildSearchParamsFromArgs(args)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+
+		result, err := redmineClient.SearchIssuesAdvanced(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+		}
+
+		out, err := formatRedmineSearchResponse(result, params, "Redmine advanced search results")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(out), nil
+	})
+
+	s.AddTool(mcp.NewTool("redmine_search_my_issues",
+		mcp.WithDescription("Search Redmine issues assigned to the current user (assigned_to_id=me)."),
+		mcp.WithString("query", mcp.Description("Optional subject text query")),
+		mcp.WithString("status_id", mcp.Description("Optional status filter")),
+		mcp.WithString("project_id", mcp.Description("Optional project filter")),
+		mcp.WithString("tracker_id", mcp.Description("Optional tracker filter")),
+		mcp.WithString("priority_id", mcp.Description("Optional priority filter")),
+		mcp.WithString("updated_from", mcp.Description("Optional lower bound date (YYYY-MM-DD or RFC3339)")),
+		mcp.WithString("updated_to", mcp.Description("Optional upper bound date (YYYY-MM-DD or RFC3339)")),
+		mcp.WithNumber("limit", mcp.Description("Optional max results (1..100), default 20")),
+		mcp.WithNumber("offset", mcp.Description("Optional pagination offset, default 0")),
+		mcp.WithString("sort", mcp.Description("Optional sort, default updated_on:desc")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: redmine_search_my_issues")
+		if cfg.RedmineURL == "" {
+			return mcp.NewToolResultError("Redmine not configured"), nil
+		}
+
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		params, err := buildSearchParamsFromArgs(args)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+
+		result, err := redmineClient.SearchMyIssues(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+		}
+
+		params.AssignedToID = "me"
+		if params.Sort == "" {
+			params.Sort = "updated_on:desc"
+		}
+		if params.Limit == 0 {
+			params.Limit = 20
+		}
+
+		out, err := formatRedmineSearchResponse(result, params, "Redmine my-issues search results")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(out), nil
 	})
 
 	s.AddTool(mcp.NewTool("redmine_get_issue",
@@ -548,24 +752,55 @@ func runServer(ctx context.Context) {
 	})
 
 	s.AddTool(mcp.NewTool("redmine_update_issue",
-		mcp.WithDescription("Update a Redmine issue (e.g. add notes)."),
+		mcp.WithDescription("Update a Redmine issue (notes and selected fields)."),
 		mcp.WithString("id", mcp.Description("Issue ID")),
-		mcp.WithString("notes", mcp.Description("Notes/Comment to add")),
+		mcp.WithString("notes", mcp.Description("Optional notes/comment to add")),
+		mcp.WithNumber("status_id", mcp.Description("Optional status ID")),
+		mcp.WithNumber("priority_id", mcp.Description("Optional priority ID")),
+		mcp.WithNumber("assigned_to_id", mcp.Description("Optional assignee user ID")),
+		mcp.WithNumber("fixed_version_id", mcp.Description("Optional target version ID")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: redmine_update_issue")
 		if cfg.RedmineURL == "" {
 			return mcp.NewToolResultError("Redmine not configured"), nil
 		}
-		args := request.Params.Arguments.(map[string]interface{})
-		id, _ := args["id"].(string)
-		notes, _ := args["notes"].(string)
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		if id == "" {
+			return mcp.NewToolResultError("Invalid arguments: id is required"), nil
+		}
+
+		statusID, err := getIntArg(args, "status_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+		priorityID, err := getIntArg(args, "priority_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+		assignedToID, err := getIntArg(args, "assigned_to_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+		fixedVersionID, err := getIntArg(args, "fixed_version_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+
+		update := redmine.UpdateIssueParams{
+			Notes:          getStringArg(args, "notes"),
+			StatusID:       statusID,
+			PriorityID:     priorityID,
+			AssignedToID:   assignedToID,
+			FixedVersionID: fixedVersionID,
+		}
 
 		// ENFORCE: Update requires User Key
 		if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); !ok || k == "" {
 			return mcp.NewToolResultError("Permission denied: You must provide a valid X-Redmine-API-Key header to update issues."), nil
 		}
 
-		err := redmineClient.UpdateIssue(ctx, id, notes)
+		err = redmineClient.UpdateIssue(ctx, id, update)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
 		}

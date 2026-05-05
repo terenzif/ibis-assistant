@@ -153,7 +153,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
 			// Check for assignment in CREATE
-			if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+				if strings.Contains(sql, "CREATE file_chunk:⟨") && strings.Contains(sql, "batch_status='pending'") {
 				foundUpdate = true
 				break
 			}
@@ -342,7 +342,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Check for CREATE (Queueing)
 	foundInsert := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+		if strings.Contains(sql, "CREATE file_chunk:⟨") && strings.Contains(sql, "batch_status='pending'") {
 			foundInsert = true
 			break
 		}
@@ -359,7 +359,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 	// Check for CREATE (Queueing)
 	foundInsertV2 := false
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+		if strings.Contains(sql, "CREATE file_chunk:⟨") && strings.Contains(sql, "batch_status='pending'") {
 			foundInsertV2 = true
 			break
 		}
@@ -388,7 +388,7 @@ func TestIngestCodebase_Versioning(t *testing.T) {
 
 	// Verify NO queuing happened
 	for _, sql := range mockDB.ExecuteCalls {
-		if strings.Contains(sql, "CREATE ⟨file_chunk") && strings.Contains(sql, "batch_status='pending'") {
+		if strings.Contains(sql, "CREATE file_chunk:⟨") && strings.Contains(sql, "batch_status='pending'") {
 			t.Errorf("Expected 0 queuing calls for returning to V1 (Cache Hit), got call: %s", sql)
 		}
 	}

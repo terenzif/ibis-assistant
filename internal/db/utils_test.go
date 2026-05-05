@@ -57,9 +57,9 @@ func TestFormatRecordID(t *testing.T) {
 		id       string
 		expected string
 	}{
-		{"source_file", "extensionmethods_cs", "⟨source_file:extensionmethods_cs⟩"},
-		{"error_type", "abc", "⟨error_type:abc⟩"},
-		{"", "table:id", "⟨table:id⟩"},
+		{"source_file", "extensionmethods_cs", "source_file:⟨extensionmethods_cs⟩"},
+		{"error_type", "abc", "error_type:⟨abc⟩"},
+		{"", "table:id", "table:⟨id⟩"},
 	}
 
 	for _, tt := range tests {

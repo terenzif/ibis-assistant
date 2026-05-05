@@ -22,3 +22,8 @@
 - [x] Implement graceful shutdown and resolve TCP connection reset errors <!-- id: 27 -->
 - [x] Support executable-relative paths for Windows Service deployment <!-- id: 28 -->
 - [x] Stabilize and synchronize the full test suite (config, batch, schema) <!-- id: 29 -->
+- [x] Add MCP tool `redmine_search_issues_advanced` with structured filters and pagination <!-- id: 30 -->
+- [x] Add MCP tool `redmine_search_my_issues` (`assigned_to_id=me`) for personal triage workflows <!-- id: 31 -->
+- [x] Extend MCP tool `redmine_update_issue` to support safe field updates (status/priority/assignee/version) <!-- id: 32 -->
+- [x] Return structured JSON payloads for Redmine search tools with optional compact text rendering <!-- id: 33 -->
+- [x] Add tests for advanced Redmine query filters, sorting, pagination, and MCP argument validation <!-- id: 34 -->

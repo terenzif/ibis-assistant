@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,6 +28,36 @@ type Client struct {
 	HTTP    *http.Client
 }
 
+type SearchIssuesParams struct {
+	Query        string
+	ProjectID    string
+	StatusID     string
+	TrackerID    string
+	AssignedToID string
+	AuthorID     string
+	PriorityID   string
+	UpdatedFrom  string
+	UpdatedTo    string
+	Limit        int
+	Offset       int
+	Sort         string
+}
+
+type SearchIssuesResult struct {
+	Issues     []Issue `json:"issues"`
+	TotalCount int     `json:"total_count"`
+	Offset     int     `json:"offset"`
+	Limit      int     `json:"limit"`
+}
+
+type UpdateIssueParams struct {
+	Notes          string
+	StatusID       int
+	PriorityID     int
+	AssignedToID   int
+	FixedVersionID int
+}
+
 // Ensure Client implements Ingester
 var _ Ingester = (*Client)(nil)
 
@@ -39,7 +71,10 @@ func NewClient(url, key string) *Client {
 
 // Redmine Structs (Simplified)
 type IssuesResponse struct {
-	Issues []Issue `json:"issues"`
+	Issues     []Issue `json:"issues"`
+	TotalCount int     `json:"total_count"`
+	Offset     int     `json:"offset"`
+	Limit      int     `json:"limit"`
 }
 type Issue struct {
 	ID          int       `json:"id"`
@@ -157,21 +192,129 @@ func (c *Client) GetIssue(ctx context.Context, id string) (*Issue, error) {
 	return &result.Issue, nil
 }
 
+func ValidateSearchParams(params SearchIssuesParams) error {
+	if params.Limit < 0 {
+		return errors.New("limit must be >= 0")
+	}
+	if params.Limit > 100 {
+		return errors.New("limit must be <= 100")
+	}
+	if params.Offset < 0 {
+		return errors.New("offset must be >= 0")
+	}
+
+	allowedSort := map[string]bool{
+		"":                true,
+		"updated_on:desc": true,
+		"updated_on:asc":  true,
+		"priority:desc":   true,
+		"priority:asc":    true,
+		"id:desc":         true,
+		"id:asc":          true,
+		"created_on:desc": true,
+		"created_on:asc":  true,
+	}
+	if !allowedSort[params.Sort] {
+		return fmt.Errorf("invalid sort '%s'", params.Sort)
+	}
+
+	if params.UpdatedFrom != "" {
+		if err := validateDate(params.UpdatedFrom); err != nil {
+			return fmt.Errorf("updated_from: %w", err)
+		}
+	}
+	if params.UpdatedTo != "" {
+		if err := validateDate(params.UpdatedTo); err != nil {
+			return fmt.Errorf("updated_to: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func validateDate(value string) error {
+	if _, err := time.Parse("2006-01-02", value); err == nil {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339, value); err == nil {
+		return nil
+	}
+	return errors.New("must be YYYY-MM-DD or RFC3339")
+}
+
 // SearchIssues finds issues matching a query (subject contains)
 func (c *Client) SearchIssues(ctx context.Context, query string) ([]Issue, error) {
-	// Redmine API filtering: https://www.redmine.org/projects/redmine/wiki/Rest_Issues
-	// Filtering by subject is not directly "search query" but we use `subject` filter if available or generic text search
-	// Usually `f[]=subject&op[subject]=~&v[subject]=<query>` logic.
-	// For simplicity, we just use standard listing.
-	// Note: Generic search is often just `issues.json`.
-	
-	endpoint := fmt.Sprintf("%s/issues.json?subject=~%s&limit=10", c.BaseURL, query)
-	
+	res, err := c.SearchIssuesAdvanced(ctx, SearchIssuesParams{
+		Query: query,
+		Limit: 10,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res.Issues, nil
+}
+
+func (c *Client) SearchMyIssues(ctx context.Context, params SearchIssuesParams) (*SearchIssuesResult, error) {
+	params.AssignedToID = "me"
+	if params.Sort == "" {
+		params.Sort = "updated_on:desc"
+	}
+	if params.Limit == 0 {
+		params.Limit = 20
+	}
+	return c.SearchIssuesAdvanced(ctx, params)
+}
+
+func (c *Client) SearchIssuesAdvanced(ctx context.Context, params SearchIssuesParams) (*SearchIssuesResult, error) {
+	if err := ValidateSearchParams(params); err != nil {
+		return nil, err
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 20
+	}
+
+	v := url.Values{}
+	if params.Query != "" {
+		v.Set("subject", "~"+params.Query)
+	}
+	if params.ProjectID != "" {
+		v.Set("project_id", params.ProjectID)
+	}
+	if params.StatusID != "" {
+		v.Set("status_id", params.StatusID)
+	}
+	if params.TrackerID != "" {
+		v.Set("tracker_id", params.TrackerID)
+	}
+	if params.AssignedToID != "" {
+		v.Set("assigned_to_id", params.AssignedToID)
+	}
+	if params.AuthorID != "" {
+		v.Set("author_id", params.AuthorID)
+	}
+	if params.PriorityID != "" {
+		v.Set("priority_id", params.PriorityID)
+	}
+	if params.UpdatedFrom != "" {
+		v.Set("updated_on", ">="+params.UpdatedFrom)
+	}
+	if params.UpdatedTo != "" {
+		v.Set("updated_on_to", params.UpdatedTo)
+	}
+	v.Set("limit", fmt.Sprintf("%d", params.Limit))
+	v.Set("offset", fmt.Sprintf("%d", params.Offset))
+	if params.Sort != "" {
+		v.Set("sort", params.Sort)
+	}
+
+	endpoint := fmt.Sprintf("%s/issues.json?%s", c.BaseURL, v.Encode())
+
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Determine Key: Context > Client Config
 	apiKey := c.APIKey
 	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
@@ -187,33 +330,58 @@ func (c *Client) SearchIssues(ctx context.Context, query string) ([]Issue, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("redmine search error %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("redmine search error %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result IssuesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	
-	return result.Issues, nil
+
+	return &SearchIssuesResult{
+		Issues:     result.Issues,
+		TotalCount: result.TotalCount,
+		Offset:     result.Offset,
+		Limit:      result.Limit,
+	}, nil
 }
 
 // UpdateIssue updates an issue (e.g. adding notes)
-func (c *Client) UpdateIssue(ctx context.Context, id string, notes string) error {
+func (c *Client) UpdateIssue(ctx context.Context, id string, params UpdateIssueParams) error {
 	endpoint := fmt.Sprintf("%s/issues/%s.json", c.BaseURL, id)
-	
-	payload := map[string]interface{}{
-		"issue": map[string]string{
-			"notes": notes,
-		},
+
+	issuePayload := map[string]interface{}{}
+	if params.Notes != "" {
+		issuePayload["notes"] = params.Notes
 	}
-	
+	if params.StatusID > 0 {
+		issuePayload["status_id"] = params.StatusID
+	}
+	if params.PriorityID > 0 {
+		issuePayload["priority_id"] = params.PriorityID
+	}
+	if params.AssignedToID > 0 {
+		issuePayload["assigned_to_id"] = params.AssignedToID
+	}
+	if params.FixedVersionID > 0 {
+		issuePayload["fixed_version_id"] = params.FixedVersionID
+	}
+
+	if len(issuePayload) == 0 {
+		return errors.New("no update fields provided")
+	}
+
+	payload := map[string]interface{}{
+		"issue": issuePayload,
+	}
+
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "PUT", endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
-	
+
 	// Determine Key: Context > Client Config
 	apiKey := c.APIKey
 	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
@@ -233,7 +401,7 @@ func (c *Client) UpdateIssue(ctx context.Context, id string, notes string) error
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("redmine update error %d: %s", resp.StatusCode, string(respBody))
 	}
-	
+
 	return nil
 }
 
