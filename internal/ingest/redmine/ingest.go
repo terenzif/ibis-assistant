@@ -90,6 +90,19 @@ type NamedObj struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
+type User struct {
+	ID        int    `json:"id"`
+	Login     string `json:"login"`
+	Firstname string `json:"firstname"`
+	Lastname  string `json:"lastname"`
+	Mail      string `json:"mail"`
+}
+type UsersResponse struct {
+	Users      []User `json:"users"`
+	TotalCount int    `json:"total_count"`
+	Offset     int    `json:"offset"`
+	Limit      int    `json:"limit"`
+}
 
 // IngestIssue fetches a single issue by ID and updates the graph
 // This is called "On-Demand" when a commit references an issue.
@@ -190,6 +203,52 @@ func (c *Client) GetIssue(ctx context.Context, id string) (*Issue, error) {
 	}
 	
 	return &result.Issue, nil
+}
+
+// GetUsers searches for users by name
+func (c *Client) GetUsers(ctx context.Context, name string, limit int) (*UsersResponse, error) {
+	if limit == 0 {
+		limit = 100
+	}
+	v := url.Values{}
+	if name != "" {
+		v.Set("name", name)
+	}
+	v.Set("limit", fmt.Sprintf("%d", limit))
+	
+	endpoint := fmt.Sprintf("%s/users.json?%s", c.BaseURL, v.Encode())
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	
+	apiKey := c.APIKey
+	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
+		apiKey = k
+	}
+
+	req.Header.Set("X-Redmine-API-Key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	logger.Debug("Redmine: GET %s", endpoint)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("redmine request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("redmine error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result UsersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	
+	return &result, nil
 }
 
 func ValidateSearchParams(params SearchIssuesParams) error {
