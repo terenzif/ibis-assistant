@@ -809,13 +809,20 @@ func runServer(ctx context.Context) {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	if cfg.Mode == "sse" {
-		logger.Info("Starting SSE server on port %d...", cfg.Port)
+		logger.Info("Starting SSE/Streamable HTTP server on port %d...", cfg.Port)
 		sseServer := server.NewSSEServer(s)
+		streamableServer := server.NewStreamableHTTPServer(s)
 
-		// SSE Mode: Standard HTTP server with graceful shutdown
+		// Standard HTTP server with graceful shutdown
 		mux := http.NewServeMux()
+		
+		// Legacy SSE endpoints
 		mux.Handle("/sse", sseServer.SSEHandler())
 		mux.Handle("/message", sseServer.MessageHandler())
+
+		// Streamable HTTP endpoints (MCP standard)
+		mux.Handle("/mcp/", streamableServer)
+		mux.Handle("/mcp", streamableServer)
 
 		// Wrap the entire mux with AuthMiddleware
 		handler := AuthMiddleware(mux)
