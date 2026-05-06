@@ -239,7 +239,7 @@ func Load(paths ...string) *Config {
 }
 
 func resolvePath(baseDir, path string) string {
-	if path == "" || filepath.IsAbs(path) {
+	if path == "" || filepath.IsAbs(path) || (len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
 		return path
 	}
 	return filepath.Join(baseDir, path)
