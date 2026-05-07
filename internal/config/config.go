@@ -39,6 +39,7 @@ type Config struct {
 	IgnoredFiles        []string          `json:"ignored_files"`
 	SupportedExtensions []string          `json:"supported_extensions"`
 	LogsRoot            string            `json:"logs_root"`
+	GitTokens           map[string]string `json:"git_tokens"`
 	SMTP                SMTPConfig        `json:"smtp"`
 	ConfigLoaded        bool              `json:"-"` // True if a config file was successfully loaded
 	ConfigPath          string            `json:"-"` // Path to the file that was loaded
@@ -61,6 +62,29 @@ type GeminiKeyConfig struct {
 	RPD          int    `json:"rpd"`
 	Owner        string `json:"owner"`
 	AllowOverage bool   `json:"allow_overage"`
+}
+
+func (c *Config) GetGitToken(originUrl string) string {
+	if c.GitTokens == nil {
+		return ""
+	}
+
+	// Try specific matches first
+	for prefix, token := range c.GitTokens {
+		if prefix != "*" && prefix != "default" && strings.Contains(originUrl, prefix) {
+			return token
+		}
+	}
+
+	// Fallback to default
+	if token, ok := c.GitTokens["*"]; ok {
+		return token
+	}
+	if token, ok := c.GitTokens["default"]; ok {
+		return token
+	}
+
+	return ""
 }
 
 // Load returns the configuration loaded from Defaults + File + Env.
@@ -215,6 +239,12 @@ func Load(paths ...string) *Config {
 	}
 	if v := os.Getenv("AUTO_SCAN"); v == "true" {
 		cfg.AutoScan = true
+	}
+	if v := os.Getenv("GIT_TOKEN"); v != "" {
+		if cfg.GitTokens == nil {
+			cfg.GitTokens = make(map[string]string)
+		}
+		cfg.GitTokens["*"] = v
 	}
 	if v := os.Getenv("LOG_FILE"); v != "" {
 		cfg.LogFile = v

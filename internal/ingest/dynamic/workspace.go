@@ -30,10 +30,16 @@ func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, bran
 		
 		// Note: We can't always clone a specific commit directly if the server doesn't support it,
 		// so we clone the branch first, then checkout the commit if provided.
-		cloneArgs := []string{"clone", originUrl, repoPath}
-		if branch != "" {
-			cloneArgs = []string{"clone", "-b", branch, originUrl, repoPath}
+		var cloneArgs []string
+		token := w.Config.GetGitToken(originUrl)
+		if token != "" {
+			cloneArgs = append(cloneArgs, "-c", fmt.Sprintf("http.extraHeader=AUTHORIZATION: bearer %s", token))
 		}
+		cloneArgs = append(cloneArgs, "clone")
+		if branch != "" {
+			cloneArgs = append(cloneArgs, "-b", branch)
+		}
+		cloneArgs = append(cloneArgs, originUrl, repoPath)
 		
 		cmd := exec.CommandContext(ctx, "git", cloneArgs...)
 		out, err := cmd.CombinedOutput()
@@ -44,12 +50,19 @@ func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, bran
 		// Repository exists, clean and fetch
 		logger.Info("Repository %s already exists. Resetting and fetching from %s", repoName, originUrl)
 		
+		var fetchArgs []string
+		token := w.Config.GetGitToken(originUrl)
+		if token != "" {
+			fetchArgs = append(fetchArgs, "-c", fmt.Sprintf("http.extraHeader=AUTHORIZATION: bearer %s", token))
+		}
+		fetchArgs = append(fetchArgs, "fetch", "origin")
+
 		cmds := [][]string{
 			{"clean", "-fd"},
 			{"reset", "--hard"},
 			// Ensure remote exists and is correct
 			{"remote", "set-url", "origin", originUrl},
-			{"fetch", "origin"},
+			fetchArgs,
 		}
 
 		for _, args := range cmds {

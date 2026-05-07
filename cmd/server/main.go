@@ -302,7 +302,11 @@ func runServer(ctx context.Context) {
 		server.WithLogging(),
 	)
 
-	// --- [NEW] Start Embedded DB ---
+	// --- [NEW] Start Embedded DB and Sidecars ---
+	if err := code.EnsureAstGrep(cfg.DBAutoUpdate); err != nil {
+		logger.Warn("Could not ensure ast-grep binary: %v", err)
+	}
+
 	var dbProcess *db.ProcessManager
 	// Extract port from DBUrl
 	dbPort := 8000

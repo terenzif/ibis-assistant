@@ -130,6 +130,15 @@ O via variabile d'ambiente: `DB_AUTO_UPDATE=false`.
 
 Il file `config.json` viene cercato automaticamente nella directory corrente e nella directory in cui si trova l'eseguibile (utile quando eseguito come servizio). È possibile specificare un file diverso con il flag `-config <path>`.
 
+#### 🔑 Credenziali Git e PAT (Personal Access Tokens)
+Poiché il server spesso gira come Servizio (es. LocalSystem), le interazioni Git per la clonazione non possono basarsi su prompt interattivi. Per questo motivo, puoi mappare i tuoi token d'accesso (PAT) nel `config.json` e il server li inietterà automaticamente e in totale sicurezza nelle chiamate HTTP di Git:
+
+```json
+  "git_tokens": {"default": ""}
+```
+
+Se preferisci usare le variabili d'ambiente di sistema (es. su container), puoi impostare `GIT_TOKEN=il_tuo_pat`, che fungerà da wildcard globale per *tutti* gli URL clonati.
+
 ### 🔌 Integrazione Client (Centralizzata)
 
 Il Knowledge Server è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.

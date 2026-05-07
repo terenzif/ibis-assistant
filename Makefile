@@ -6,6 +6,7 @@ ifeq ($(OS),Windows_NT)
 	MKDIR_CMD := cmd /C mkdir
 	COPY_CMD := cmd /C copy /Y
 	COPY_DIR_CMD := cmd /C xcopy /E /I /Y
+	CLEAN_DIR_CMD := cmd /C rmdir /S /Q
 	NULL_DEV := nul
 else
 	BINARY_NAME := knowledge_server
@@ -14,10 +15,13 @@ else
 	MKDIR_CMD := mkdir -p
 	COPY_CMD := cp
 	COPY_DIR_CMD := cp -r
+	CLEAN_DIR_CMD := rm -rf
 	NULL_DEV := /dev/null
 endif
 
-.PHONY: build build-mcp all run clean
+.PHONY: all build build-mcp run clean dist
+
+all: dist
 
 build:
 	go build -o $(BINARY_NAME) ./cmd/server
@@ -25,9 +29,7 @@ build:
 build-mcp:
 	go build -o $(MCP_BRIDGE_NAME) ./tools/mcp-bridge
 
-all: build build-mcp
-
-dist: all
+dist: build build-mcp
 	-$(MKDIR_CMD) dist 2>$(NULL_DEV)
 	$(COPY_CMD) $(BINARY_NAME) dist\ 2>$(NULL_DEV) || $(COPY_CMD) $(BINARY_NAME) dist/
 	$(COPY_CMD) $(MCP_BRIDGE_NAME) dist\ 2>$(NULL_DEV) || $(COPY_CMD) $(MCP_BRIDGE_NAME) dist/
@@ -41,4 +43,6 @@ run:
 clean:
 	go clean
 	-$(CLEAN_CMD) "$(BINARY_NAME)" "$(MCP_BRIDGE_NAME)" 2>$(NULL_DEV)
+	-$(CLEAN_CMD) dist\$(BINARY_NAME) dist\$(MCP_BRIDGE_NAME) dist\config.json dist\sg.exe dist\surreal.exe 2>$(NULL_DEV) || $(CLEAN_CMD) dist/$(BINARY_NAME) dist/$(MCP_BRIDGE_NAME) dist/config.json dist/sg dist/surreal
+	-$(CLEAN_DIR_CMD) dist\rules 2>$(NULL_DEV) || $(CLEAN_DIR_CMD) dist/rules
 
