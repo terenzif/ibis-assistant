@@ -78,7 +78,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 	}
 
 	// We also need to handle the graph context enrichment if AskProject does it.
-	// AskProject queries "FROM file_chunk".
+	// AskProject queries "FROM [".
 	// It basically does:
 	// 1. Embed (Mocked)
 	// 2. Vector Search (Mocked DB returns chunks)
@@ -88,7 +88,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM file_chunk": chunks,
+			"FROM [": chunks,
 		},
 	}
 
@@ -147,7 +147,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 	}
 
 	// 3. Execute
-	result, err := svc.AskProjectAgentic(context.Background(), "How does auth work?")
+	result, err := svc.AskProjectAgentic(context.Background(), "How does auth work?", "")
 	if err != nil {
 		t.Fatalf("AskProjectAgentic failed: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 	// Verify Search was actually called on DB
 	foundSearch := false
 	for _, sql := range mockDB.CapturedQueries {
-		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM file_chunk") {
+		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM [") {
 			foundSearch = true
 			break
 		}
@@ -188,7 +188,7 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM file_chunk": []map[string]interface{}{}, // Return empty, doesn't matter, we want to see if Search is called
+			"FROM [": []map[string]interface{}{}, // Return empty, doesn't matter, we want to see if Search is called
 		},
 	}
 
@@ -226,7 +226,7 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 		AI: mockAI,
 	}
 
-	result, err := svc.AskProjectAgentic(context.Background(), "test")
+	result, err := svc.AskProjectAgentic(context.Background(), "test", "")
 	if err != nil {
 		t.Fatalf("AskProjectAgentic failed: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 
 	foundSearch := false
 	for _, sql := range mockDB.CapturedQueries {
-		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM file_chunk") {
+		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM [") {
 			foundSearch = true
 			break
 		}
@@ -306,7 +306,7 @@ func TestAskProjectAgentic_SearchError(t *testing.T) {
 		AI: mockAI,
 	}
 
-	result, err := svc.AskProjectAgentic(context.Background(), "test")
+	result, err := svc.AskProjectAgentic(context.Background(), "test", "")
 	if err != nil {
 		t.Fatalf("AskProjectAgentic failed: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestAskProjectAgentic_GraphContext(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM file_chunk": chunks,        // Triggered by AskProject Vector Search
+			"FROM [": chunks,        // Triggered by AskProject Vector Search
 			"<-changed":       graphResponse, // Triggered by AskProject -> GetFileContext
 		},
 	}
@@ -410,7 +410,7 @@ func TestAskProjectAgentic_GraphContext(t *testing.T) {
 	}
 
 	// 3. Execute
-	_, err := svc.AskProjectAgentic(context.Background(), "test")
+	_, err := svc.AskProjectAgentic(context.Background(), "test", "")
 	if err != nil {
 		// If the mock AI returns an error (due to missing context), AskProjectAgentic wraps it.
 		// We expect this to happen if the bug exists.
@@ -422,3 +422,4 @@ func TestAskProjectAgentic_GraphContext(t *testing.T) {
 		t.Fatalf("AskProjectAgentic failed unexpectedly: %v", err)
 	}
 }
+

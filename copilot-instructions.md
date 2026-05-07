@@ -1,27 +1,8 @@
-﻿# Copilot Instructions — `knowledge_server` (repo server MCP)
-
-## Scopo di questo file
-
-Queste istruzioni sono per lavorare **sul server MCP** in questo repository (`knowledge_server`), non per i progetti client.
-
-Quando devo fare modifiche qui dentro:
-
-- tratto `cmd/server/main.go` e `internal/ingest/redmine/ingest.go` come source of truth dei tool MCP;
-- mantengo retrocompatibilità dei nomi tool già pubblici;
-- aggiungo sempre test quando estendo parametri, validazioni o payload Redmine;
-- aggiorno documentazione (`README.md`, `docs/*`) e backlog (`docs/project_tasks.md`) insieme al codice.
-
-## Convenzioni operative Redmine in questo repo
-
-- Le chiamate in scrittura richiedono `X-Redmine-API-Key` utente valido nel contesto.
-- I filtri di ricerca devono essere validati lato server (range, sort whitelist, date).
-- Output tool di ricerca: preferire JSON strutturato + campo compatto leggibile in chat.
-
----
-
-## Template da copiare nel `copilot-instructions.md` di un CLIENTE MCP
+# Copilot Instructions — Template per Client MCP
 
 > Copia/incolla questa sezione nel progetto client che consuma il Knowledge Server.
+
+
 
 ### Configurazione MCP client
 
@@ -31,10 +12,22 @@ Quando devo fare modifiche qui dentro:
 
 ### Tool disponibili (client-side usage)
 
-1. `ask_project(query)`
-   - Usa questo tool come entrypoint principale per capire codice, storia e impatti.
+3. `init_project(project_name, origin_url, branch, commit?)`
+   - Entrypoint iniziale obbligatorio all'avvio della sessione per allineare il Knowledge Server al branch e al commit attuale del client.
 
-2. `redmine_search_issues(query, limit?, offset?, sort?)`
+4. `update_project_status(project_name, origin_url, branch, commit)`
+   - Da richiamare dopo commit o push locali per aggiornare l'ingestione vettoriale incrementale in background.
+
+5. `ask_project(query, branch_or_commit?)`
+   - Usa questo tool come entrypoint principale per la comprensione del codice e la ricerca di impatti. Fornire sempre il contesto del branch/commit corrente se disponibile.
+
+6. `provide_collaborative_memory(project_name, memory_text, embedding?)`
+   - Usa per iniettare contesto di business o regole di progetto che ritieni utili per l'intero team. Se calcoli l'embedding localmente, passalo per ottimizzare i costi server.
+
+7. `save_reasoning_outcome(project_name, question, outcome_text, useful_sources)`
+   - Usa per storicizzare una tua deduzione semantica utile (outcome) e rinforzare automaticamente i pesi degli issue o commit (sources) che ti hanno aiutato a rispondere. Questo arricchisce in modalità "Dual-Loop" il grafo aziendale.
+
+8. `redmine_search_issues(query, limit?, offset?, sort?)`
    - Ricerca rapida per subject.
    - Default: `limit=10`, `offset=0`, `sort=updated_on:desc`.
 

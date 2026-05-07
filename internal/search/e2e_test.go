@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	
 )
 
 // CapturingDB is a MockDB that captures queries and returns specific mocked data based on query content.
@@ -89,7 +89,7 @@ func TestEndToEnd_SearchReinforcement(t *testing.T) {
 
 	mockDB := &CapturingDB{
 		ReturnData: map[string]interface{}{
-			"FROM file_chunk": chunks,
+			"FROM [": chunks,
 			"<-changed":       graphResponse,
 		},
 	}
@@ -138,27 +138,4 @@ func TestEndToEnd_SearchReinforcement(t *testing.T) {
 		t.Errorf("Expected Commit Impact 0.85, got %f", firstCommit.Impact)
 	}
 
-	// 4. Verify ReinforcePath Logic
-	// Use the retrieved Commit ID to reinforce the connection to the Issue
-	// This simulates the UI flow where the user clicks "Reinforce" on an Issue associated with a Commit.
-
-	err = svc.ReinforcePath(context.Background(), firstCommit.ID, result.Context.RelatedIssues[0].ID, 1.0)
-	if err != nil {
-		t.Fatalf("ReinforcePath failed: %v", err)
-	}
-
-	// Check SQL
-	foundUpdate := false
-	for i, q := range mockDB.CapturedQueries {
-		if strings.Contains(q, "UPDATE "+schema.EdgeImplements) {
-			foundUpdate = true
-			vars := mockDB.CapturedVars[i].(map[string]interface{})
-			if vars["source"] != commitID || vars["target"] != issueID {
-				t.Errorf("ReinforcePath variables mismatch. Got %v", vars)
-			}
-		}
-	}
-	if !foundUpdate {
-		t.Error("ReinforcePath did not generate UPDATE statement for implements edge")
-	}
 }

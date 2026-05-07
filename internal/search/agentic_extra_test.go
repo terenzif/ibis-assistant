@@ -75,7 +75,7 @@ func TestAskProjectAgentic_QueryParsing(t *testing.T) {
 				AI: mockAI,
 			}
 
-			res, err := svc.AskProjectAgentic(context.Background(), "query")
+			res, err := svc.AskProjectAgentic(context.Background(), "query", "")
 			if err != nil {
 				t.Fatalf("AskProjectAgentic failed: %v", err)
 			}
@@ -168,7 +168,7 @@ func TestAskProjectAgentic_EmptyQuery(t *testing.T) {
 				AI: mockAI,
 			}
 
-			_, err := svc.AskProjectAgentic(context.Background(), "query")
+			_, err := svc.AskProjectAgentic(context.Background(), "query", "")
 			if err != nil {
 				t.Fatalf("AskProjectAgentic failed: %v", err)
 			}
@@ -221,7 +221,7 @@ func TestAskProjectAgentic_AISearchError(t *testing.T) {
 		AI: mockAI,
 	}
 
-	res, err := svc.AskProjectAgentic(context.Background(), "query")
+	res, err := svc.AskProjectAgentic(context.Background(), "query", "")
 	if err != nil {
 		t.Fatalf("AskProjectAgentic failed: %v", err)
 	}
@@ -230,3 +230,4 @@ func TestAskProjectAgentic_AISearchError(t *testing.T) {
 		t.Errorf("Expected answer to contain failure observation, got: %s", res.Answer)
 	}
 }
+

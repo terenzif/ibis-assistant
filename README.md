@@ -264,6 +264,22 @@ go test ./...
 Per dettagli tecnici sulle recenti evoluzioni del sistema, consulta:
 * **[Stability Refactor 2026](docs/STABILITY_REFACTOR_2026.md)**: Dettagli su Context propagation, Shutdown management e Windows Service optimization.
 
+## 🤖 Istruzioni per AI/Copilot (Sviluppo Server)
+
+Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo sviluppo del Knowledge Server stesso**.
+
+### Convenzioni Operative
+- Trattare `cmd/server/main.go` e `internal/ingest/redmine/ingest.go` come source of truth dei tool MCP.
+- Mantenere la retrocompatibilità dei nomi dei tool già pubblici.
+- Le chiamate in scrittura a Redmine richiedono sempre l'header `X-Redmine-API-Key`.
+- I filtri di ricerca (es. date, sort) devono essere validati rigidamente lato server.
+
+### Convenzioni Architetturali (Maggio 2026)
+- **Configurazione**: L'unico file di configurazione tracciato su Git è `config_master.json`. Il file `config.json` locale non deve mai essere committato per evitare leak di chiavi e viene generato dalla build.
+- **Parsing AST**: L'estrazione dei chunk e dei log è interamente delegata al Sidecar esterno **ast-grep** (`sg.exe`), garantendo una compilazione 100% pure-Go senza CGO.
+- **Regole YAML**: I pattern di estrazione (C#, Go, TS, ecc.) risiedono nella directory `rules/` in formato YAML (gestito da `sgconfig.yml`).
+- **Deploy**: Tutto l'ambiente di produzione viene generato in modo automatizzato nella directory `dist/` usando il target `make dist`.
+
 ## 📝 Registro del Lavoro
 Il file `work_log.md` nella root del progetto contiene il log storico di tutte le modifiche strutturali, fix e miglioramenti apportati durante lo sviluppo continuo.
 

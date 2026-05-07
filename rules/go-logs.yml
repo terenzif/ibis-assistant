@@ -1,0 +1,10 @@
+id: go-logs
+language: go
+rule:
+  any:
+    - pattern: $LOGGER.Info($FORMAT)
+    - pattern: $LOGGER.Debug($FORMAT)
+    - pattern: $LOGGER.Warn($FORMAT)
+    - pattern: $LOGGER.Error($FORMAT)
+    - pattern: $LOGGER.Fatal($FORMAT)
+    - pattern: $LOGGER.Print($FORMAT)

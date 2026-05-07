@@ -67,7 +67,7 @@ func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := &MockDBBatch{Rows: tc.rows}
 			// Use context.Background() for the manager
-			bm := NewBatchManager(db, &Client{})
+			bm := NewBatchManager(db, &Client{}, ".", 8000)
 			
 			// We can't easily check the internal state of chunkIDs without exposing it or using a hook.
 			// But we can check if it attempted to call Execute for the selecting pending chunks.
@@ -90,7 +90,7 @@ func TestBatchManager_SQLQuoting(t *testing.T) {
 		},
 	}
 	
-	bm := NewBatchManager(db, &Client{})
+	bm := NewBatchManager(db, &Client{}, ".", 8000)
 	// This test is mostly a place holder for now since mocking AI.CreateBatchEmbedJob is hard without an interface.
 	// But we've ensured the MockDB supports context.
 	bm.processPendingChunks()

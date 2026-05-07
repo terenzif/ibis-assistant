@@ -31,7 +31,7 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 	}
 
 	// Construct command
-	// surreal start --user root --pass root --bind 127.0.0.1:8000 surrealkv:C:\path\to\project.db
+	// surreal start --user root --pass root --bind 127.0.0.1:8000 surrealkv:C:\path\to\db
 	bindAddr := fmt.Sprintf("127.0.0.1:%d", port)
 
 	absDataPath, err := filepath.Abs(dataPath)

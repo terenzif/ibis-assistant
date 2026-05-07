@@ -316,8 +316,8 @@ func TestIngestCodebase_Pruning(t *testing.T) {
 	if !deletedIDs[ignoredID] {
 		t.Errorf("Ignored file was not deleted. Calls: %v", mockDB.ExecuteCalls)
 	}
-	if deletedIDs[deletedID] {
-		t.Errorf("Deleted file (physically missing) WAS deleted from DB! It should be preserved.")
+	if !deletedIDs[deletedID] {
+		t.Errorf("Deleted file (physically missing) was NOT deleted from DB! It should be removed as it's not in HEAD.")
 	}
 }
 

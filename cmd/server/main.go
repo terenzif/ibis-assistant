@@ -21,6 +21,7 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/discovery"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/code"
+	"github.com/deckonline/knowledge_mcp/internal/ingest/dynamic"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/git"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/logs"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
@@ -362,8 +363,9 @@ func runServer(ctx context.Context) {
 	// Start Batch Manager
 	var batchManager *ai.BatchManager
 	if dbClient != nil {
-		batchManager = ai.NewBatchManager(dbClient, aiClient)
+		batchManager = ai.NewBatchManager(dbClient, aiClient, cfg.DiscoveryRoot, cfg.MaxDeltaSize)
 		batchManager.Start()
+		defer batchManager.Stop()
 	}
 
 	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
@@ -468,34 +470,156 @@ func runServer(ctx context.Context) {
 		}()
 	}
 
+	// Start Dynamic Ingestion Manager
+	ingestionManager := dynamic.NewProjectIngestionManager(cfg.DiscoveryRoot)
+	if dbClient != nil {
+		ingestionManager.ProcessJob = func(jobCtx context.Context, job dynamic.IngestionJob, repoPath string) error {
+			repoName := job.ProjectName
+			logger.Info("Background: Indexing Git history for %s...", repoName)
+			if err := git.IngestRepo(jobCtx, dbClient, redmineClient, repoPath, repoName, cfg.RedmineConcurrency); err != nil {
+				return fmt.Errorf("git ingestion error for %s: %w", repoName, err)
+			}
+			logger.Info("Background: Vectorizing codebase for %s...", repoName)
+			if err := code.IngestCodebase(jobCtx, dbClient, aiClient, repoPath, repoName, cfg); err != nil {
+				return fmt.Errorf("code ingestion error for %s: %w", repoName, err)
+			}
+			return nil
+		}
+	}
+
 	// 7. Register Tools
-	s.AddTool(mcp.NewTool("ingest_git",
-		mcp.WithDescription("Trigger git ingestion for repositories. If no path is provided, ingest all discovered/configured repos."),
-		mcp.WithString("path", mcp.Description("Optional specific repo path to ingest")),
+	s.AddTool(mcp.NewTool("init_project",
+		mcp.WithDescription("Initialize a repository session. Checks out the specific branch/commit and triggers ingestion if necessary."),
+		mcp.WithString("project_name", mcp.Description("Name of the project (e.g. DeckOnLine)")),
+		mcp.WithString("origin_url", mcp.Description("Git origin URL")),
+		mcp.WithString("branch", mcp.Description("Target branch")),
+		mcp.WithString("commit", mcp.Description("Target commit hash (optional, takes precedence)")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: ingest_git")
-		if dbClient == nil {
-			return mcp.NewToolResultError("Database not connected"), nil
-		}
-
-		targets := activeRepos
+		logger.Info("MCP Tool Call: init_project")
 		args, ok := request.Params.Arguments.(map[string]interface{})
-		if ok {
-			if p, ok := args["path"].(string); ok && p != "" {
-				targets = []string{p}
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+		
+		syncDone := make(chan dynamic.IngestionResult, 1)
+		job := dynamic.IngestionJob{
+			ProjectName: getStringArg(args, "project_name"),
+			OriginURL:   getStringArg(args, "origin_url"),
+			Branch:      getStringArg(args, "branch"),
+			Commit:      getStringArg(args, "commit"),
+			OnSyncDone: func(res dynamic.IngestionResult) {
+				syncDone <- res
+			},
+			OnComplete: func(err error) {
+				msg := fmt.Sprintf("Ingestion completed for %s", args["project_name"])
+				if err != nil {
+					msg = fmt.Sprintf("Ingestion failed for %s: %v", args["project_name"], err)
+				}
+				logger.Info(msg)
+			},
+		}
+
+		ingestionManager.Enqueue(job)
+
+		select {
+		case res := <-syncDone:
+			if res.Error != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to sync: %v", res.Error)), nil
+			}
+			if !res.IsAligned {
+				return mcp.NewToolResultText(fmt.Sprintf(`{"status": "requires_patch", "closest_known_commit": "%s", "message": "Commit not found on remote. Please use sync_local_patch for perfect alignment or continue with the closest commit."}`, res.ActualCommit)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf(`{"status": "aligned", "actual_commit": "%s", "message": "Ingestion started in background"}`, res.ActualCommit)), nil
+		case <-time.After(3 * time.Minute):
+			return mcp.NewToolResultError("Timeout waiting for git sync"), nil
+		}
+	})
+
+	s.AddTool(mcp.NewTool("update_project_status",
+		mcp.WithDescription("Update project status after local commits/pushes to trigger incremental ingestion."),
+		mcp.WithString("project_name", mcp.Description("Name of the project")),
+		mcp.WithString("origin_url", mcp.Description("Git origin URL")),
+		mcp.WithString("branch", mcp.Description("Current branch")),
+		mcp.WithString("commit", mcp.Description("Current commit hash")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: update_project_status")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+		job := dynamic.IngestionJob{
+			ProjectName: getStringArg(args, "project_name"),
+			OriginURL:   getStringArg(args, "origin_url"),
+			Branch:      getStringArg(args, "branch"),
+			Commit:      getStringArg(args, "commit"),
+		}
+		ingestionManager.Enqueue(job)
+		return mcp.NewToolResultText("Aggiornamento accodato con successo."), nil
+	})
+
+	s.AddTool(mcp.NewTool("provide_collaborative_memory",
+		mcp.WithDescription("Inject collaborative memory/context for the project. Optional embeddings array can be provided to skip server-side AI embedding generation."),
+		mcp.WithString("project_name", mcp.Description("Name of the project")),
+		mcp.WithString("memory_text", mcp.Description("The textual content of the memory/insight")),
+		mcp.WithString("embedding", mcp.Description("Optional pre-computed vector embedding (JSON array of floats)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: provide_collaborative_memory")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+		
+		projectName := getStringArg(args, "project_name")
+		memoryText := getStringArg(args, "memory_text")
+		var embedding []float64
+		if embStr, ok := args["embedding"].(string); ok && embStr != "" {
+			if err := json.Unmarshal([]byte(embStr), &embedding); err != nil {
+				logger.Warn("Failed to unmarshal embedding JSON: %v", err)
 			}
 		}
 
-		var output strings.Builder
-		for _, r := range targets {
-			repoName, _ := filepath.Rel(cfg.DiscoveryRoot, r)
-			if err := git.IngestRepo(ctx, dbClient, redmineClient, r, repoName, cfg.RedmineConcurrency); err != nil {
-				output.WriteString(fmt.Sprintf("Error ingesting %s: %v\n", r, err))
-			} else {
-				output.WriteString(fmt.Sprintf("Successfully ingested %s\n", r))
+		err := searchService.AddCollaborativeMemory(ctx, projectName, memoryText, embedding)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to add memory: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText("Collaborative memory successfully integrated into the knowledge graph."), nil
+	})
+
+	s.AddTool(mcp.NewTool("save_reasoning_outcome",
+		mcp.WithDescription("Save a semantic deduction/outcome for the project and reinforce the paths that led to it. Replaces reinforce_path."),
+		mcp.WithString("project_name", mcp.Description("Name of the project")),
+		mcp.WithString("question", mcp.Description("The original question or problem statement")),
+		mcp.WithString("outcome_text", mcp.Description("The deduced reasoning outcome or solution")),
+		mcp.WithString("useful_sources", mcp.Description("Comma-separated list of source IDs (commits, issues, files) that were helpful in reaching the outcome")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: save_reasoning_outcome")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+
+		projectName := getStringArg(args, "project_name")
+		question := getStringArg(args, "question")
+		outcomeText := getStringArg(args, "outcome_text")
+		
+		var sources []string
+		if srcStr, ok := args["useful_sources"].(string); ok && srcStr != "" {
+			parts := strings.Split(srcStr, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					sources = append(sources, p)
+				}
 			}
 		}
-		return mcp.NewToolResultText(output.String()), nil
+
+		err := searchService.SaveReasoningOutcome(ctx, projectName, question, outcomeText, sources)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to save reasoning outcome: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText("Reasoning outcome saved and structural reinforcement applied."), nil
 	})
 
 	s.AddTool(mcp.NewTool("ingest_code",
@@ -533,6 +657,7 @@ func runServer(ctx context.Context) {
 	s.AddTool(mcp.NewTool("ask_project",
 		mcp.WithDescription("Ask a natural language question about the project history and code. Uses Agentic reasoning."),
 		mcp.WithString("query", mcp.Description("The question (e.g., 'Why was login changed?')")),
+		mcp.WithString("branch_or_commit", mcp.Description("Optional current branch or commit to provide topological context to the AI")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: ask_project")
 		args, ok := request.Params.Arguments.(map[string]interface{})
@@ -540,8 +665,9 @@ func runServer(ctx context.Context) {
 			return mcp.NewToolResultError("Invalid arguments"), nil
 		}
 		query, _ := args["query"].(string)
+		branchContext, _ := args["branch_or_commit"].(string)
 
-		result, err := searchService.AskProjectAgentic(ctx, query)
+		result, err := searchService.AskProjectAgentic(ctx, query, branchContext)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 		}
@@ -577,29 +703,7 @@ func runServer(ctx context.Context) {
 		return mcp.NewToolResultText(fmt.Sprintf("Optimization started for %d iterations.", iter)), nil
 	})
 
-	s.AddTool(mcp.NewTool("reinforce_path",
-		mcp.WithDescription("Reinforce a specific connection in the knowledge graph based on user feedback."),
-		mcp.WithString("source", mcp.Description("ID of the source node (e.g., commit:xyz)")),
-		mcp.WithString("target", mcp.Description("ID of the target node (e.g., issue:123)")),
-		mcp.WithNumber("score", mcp.Description("Feedback score (positive to reinforce, negative to decay)")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: reinforce_path")
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Invalid arguments"), nil
-		}
-
-		source, _ := args["source"].(string)
-		target, _ := args["target"].(string)
-		score, _ := args["score"].(float64)
-
-		err := searchService.ReinforcePath(ctx, source, target, score)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Reinforcement failed: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully reinforced path %s -> %s (Delta: %.2f)", source, target, score)), nil
-	})
+	// reinforce_path tool has been removed as it is now integrated into save_reasoning_outcome.
 
 	// --- Redmine Direct Tools ---
 
@@ -894,6 +998,9 @@ func runServer(ctx context.Context) {
 		logger.Info("Stopping Batch Manager...")
 		batchManager.Stop()
 	}
+
+	// Stop Ingestion Manager
+	ingestionManager.Stop()
 
 	// 3. Close DB Connection (now safe as no workers are using it)
 	if dbClient != nil {

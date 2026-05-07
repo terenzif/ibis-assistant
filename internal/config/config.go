@@ -28,11 +28,13 @@ type Config struct {
 	DBDataPath          string            `json:"db_data_path"`
 	DBAutoUpdate        bool              `json:"db_auto_update"`
 	DiscoveryRoot       string            `json:"discovery_root"`
+	PollInterval        int               `json:"poll_interval"` // seconds
 	AutoScan            bool              `json:"auto_scan"`
 	GitRepos            []string          `json:"git_repos"` // Manual list override
 	LogFile             string            `json:"log_file"`
 	LogLevel            string            `json:"log_level"` // DEBUG, INFO, WARN, ERROR
-	MaxFileSize         int64             `json:"max_file_size"`
+	MaxFileSize         int64             `json:"max_file_size"` // bytes
+	MaxDeltaSize        int               `json:"max_delta_size"` // bytes/characters for commit diff chunking
 	IgnoredDirs         []string          `json:"ignored_dirs"`
 	IgnoredFiles        []string          `json:"ignored_files"`
 	SupportedExtensions []string          `json:"supported_extensions"`
@@ -77,13 +79,15 @@ func Load(paths ...string) *Config {
 		RedmineConcurrency: 10,
 		CodeConcurrency:    5,
 		DBTimeout:          300,
-		DBDataPath:         "project.db",
+		DBDataPath:         "db",
 		DiscoveryRoot:      ".",
-		LogsRoot:           "./_logs",
+		PollInterval:       300,
+		LogsRoot:           "./logs",
 		AutoScan:           true,
 		LogLevel:           "INFO",
 		DBAutoUpdate:       true,
 		MaxFileSize:        10 * 1024 * 1024, // 10MB
+		MaxDeltaSize:       8000,
 		IgnoredDirs: []string{
 			".git", "node_modules", "bin", "obj", "vendor",
 			".idea", ".vscode", "dist", "build", "coverage", "target",
