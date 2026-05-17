@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/deckonline/knowledge_mcp/internal/auth"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 )
 
@@ -31,7 +32,11 @@ func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, bran
 		// Note: We can't always clone a specific commit directly if the server doesn't support it,
 		// so we clone the branch first, then checkout the commit if provided.
 		var cloneArgs []string
-		token := w.Config.GetGitToken(originUrl)
+		var token string
+		provider, ok := ctx.Value(auth.TokenProviderKey).(auth.TokenProvider)
+		if ok && provider != nil {
+			token = provider.GetGitToken(originUrl)
+		}
 		if token != "" {
 			cloneArgs = append(cloneArgs, "-c", fmt.Sprintf("http.extraHeader=AUTHORIZATION: bearer %s", token))
 		}
@@ -51,7 +56,11 @@ func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, bran
 		logger.Info("Repository %s already exists. Resetting and fetching from %s", repoName, originUrl)
 		
 		var fetchArgs []string
-		token := w.Config.GetGitToken(originUrl)
+		var token string
+		provider, ok := ctx.Value(auth.TokenProviderKey).(auth.TokenProvider)
+		if ok && provider != nil {
+			token = provider.GetGitToken(originUrl)
+		}
 		if token != "" {
 			fetchArgs = append(fetchArgs, "-c", fmt.Sprintf("http.extraHeader=AUTHORIZATION: bearer %s", token))
 		}

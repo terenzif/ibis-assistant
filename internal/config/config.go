@@ -273,7 +273,9 @@ func Load(paths ...string) *Config {
 }
 
 func resolvePath(baseDir, path string) string {
-	if path == "" || filepath.IsAbs(path) {
+	// Custom absolute path check for cross-platform robustness (e.g. D:\path on non-Windows)
+	isWinAbs := len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
+	if path == "" || filepath.IsAbs(path) || isWinAbs {
 		return path
 	}
 	return filepath.Join(baseDir, path)

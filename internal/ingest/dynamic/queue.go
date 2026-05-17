@@ -39,8 +39,8 @@ type ProjectIngestionManager struct {
 }
 
 // NewProjectIngestionManager creates a new queue manager.
-func NewProjectIngestionManager(discoveryRoot string) *ProjectIngestionManager {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewProjectIngestionManager(parentCtx context.Context, discoveryRoot string) *ProjectIngestionManager {
+	ctx, cancel := context.WithCancel(parentCtx)
 	return &ProjectIngestionManager{
 		queues:        make(map[string]chan IngestionJob),
 		ctx:           ctx,
