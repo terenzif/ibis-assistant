@@ -3,20 +3,20 @@ package dynamic
 import (
 	"context"
 	"fmt"
-	"strings"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
+	"github.com/deckonline/knowledge_mcp/internal/config"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 )
 
-// SyncWorkspace assicura che il repo sia aggiornato. 
+// SyncWorkspace assicura che il repo sia aggiornato.
 // Ritorna (repoPath, actualCommit, isAligned, error).
 // isAligned è true se il commit richiesto è stato fatto checkout con successo.
-func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, branch, commit string) (string, string, bool, error) {
-	repoPath := filepath.Join(discoveryRoot, "dynamic", repoName)
+func SyncWorkspace(ctx context.Context, cfg *config.Config, repoName, originUrl, branch, commit string) (string, string, bool, error) {
+	repoPath := filepath.Join(cfg.DiscoveryRoot, "dynamic", repoName)
 	logger.Info("Syncing workspace for %s at %s (Branch: %s, Commit: %s)", repoName, repoPath, branch, commit)
 
 	err := os.MkdirAll(filepath.Dir(repoPath), 0755)
@@ -32,11 +32,7 @@ func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, bran
 		// Note: We can't always clone a specific commit directly if the server doesn't support it,
 		// so we clone the branch first, then checkout the commit if provided.
 		var cloneArgs []string
-		var token string
-		provider, ok := ctx.Value(auth.TokenProviderKey).(auth.TokenProvider)
-		if ok && provider != nil {
-			token = provider.GetGitToken(originUrl)
-		}
+		token := cfg.GetGitToken(originUrl)
 		if token != "" {
 			cloneArgs = append(cloneArgs, "-c", fmt.Sprintf("http.extraHeader=AUTHORIZATION: bearer %s", token))
 		}
@@ -56,11 +52,7 @@ func SyncWorkspace(ctx context.Context, discoveryRoot, repoName, originUrl, bran
 		logger.Info("Repository %s already exists. Resetting and fetching from %s", repoName, originUrl)
 		
 		var fetchArgs []string
-		var token string
-		provider, ok := ctx.Value(auth.TokenProviderKey).(auth.TokenProvider)
-		if ok && provider != nil {
-			token = provider.GetGitToken(originUrl)
-		}
+		token := cfg.GetGitToken(originUrl)
 		if token != "" {
 			fetchArgs = append(fetchArgs, "-c", fmt.Sprintf("http.extraHeader=AUTHORIZATION: bearer %s", token))
 		}

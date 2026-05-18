@@ -29,12 +29,20 @@ type GitHubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// EnsureAstGrep checks if the ast-grep (sg) binary is present and up-to-date.
-func EnsureAstGrep(autoUpdate bool) error {
+func getAstGrepBinPath() string {
 	binName := "sg"
 	if runtime.GOOS == "windows" {
 		binName = "sg.exe"
 	}
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Join(filepath.Dir(exe), binName)
+	}
+	return binName
+}
+
+// EnsureAstGrep checks if the ast-grep (sg) binary is present and up-to-date.
+func EnsureAstGrep(autoUpdate bool) error {
+	binName := getAstGrepBinPath()
 
 	logger.Info("Checking ast-grep (sg) installation (%s)...", binName)
 

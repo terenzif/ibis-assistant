@@ -20,10 +20,7 @@ type ProcessManager struct {
 // StartEmbedded launches the surreal process in the background.
 // It expects the binary to be named 'surreal.exe' (Windows) or 'surreal' (Unix) in the current directory.
 func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (*ProcessManager, error) {
-	binName := "surreal"
-	if runtime.GOOS == "windows" {
-		binName = "surreal.exe"
-	}
+	binName := getSurrealBinPath()
 
 	// Ensure binary exists and is up to date
 	if err := EnsureSurrealDB(autoUpdate); err != nil {
@@ -57,7 +54,11 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 	cmd := exec.Command(absBinPath, args...)
 
 	// Check if log file exists/create it
-	logFile, err := os.OpenFile("surreal.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logPath := "surreal.log"
+	if exe, err := os.Executable(); err == nil {
+		logPath = filepath.Join(filepath.Dir(exe), "surreal.log")
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err == nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile

@@ -31,13 +31,21 @@ type GitHubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// EnsureSurrealDB checks if the SurrealDB binary is present and up-to-date.
-// If autoUpdate is true, it downloads the latest version from GitHub if needed.
-func EnsureSurrealDB(autoUpdate bool) error {
+func getSurrealBinPath() string {
 	binName := "surreal"
 	if runtime.GOOS == "windows" {
 		binName = "surreal.exe"
 	}
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Join(filepath.Dir(exe), binName)
+	}
+	return binName
+}
+
+// EnsureSurrealDB checks if the SurrealDB binary is present and up-to-date.
+// If autoUpdate is true, it downloads the latest version from GitHub if needed.
+func EnsureSurrealDB(autoUpdate bool) error {
+	binName := getSurrealBinPath()
 
 	logger.Info("Checking SurrealDB installation (%s)...", binName)
 

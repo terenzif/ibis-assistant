@@ -475,7 +475,7 @@ func runServer(ctx context.Context) {
 	}
 
 	// Start Dynamic Ingestion Manager
-	ingestionManager := dynamic.NewProjectIngestionManager(context.WithValue(ctx, auth.TokenProviderKey, cfg), cfg.DiscoveryRoot)
+	ingestionManager := dynamic.NewProjectIngestionManager(cfg)
 	if dbClient != nil {
 		ingestionManager.ProcessJob = func(jobCtx context.Context, job dynamic.IngestionJob, repoPath string) error {
 			repoName := job.ProjectName
