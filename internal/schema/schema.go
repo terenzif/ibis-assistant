@@ -13,6 +13,7 @@ const (
 	TableAuthor     = "author"
 	TableFile       = "source_file"
 	TableFileChunk  = "file_chunk"
+	TableCommitChunk = "commit_chunk"
 	TableIssue      = "issue"       // Redmine Issue
 	TableTracker    = "tracker"     // Redmine Tracker/Epic
 	TableBatchJob   = "batch_job"   // Gemini Async Batch Job
@@ -22,6 +23,11 @@ const (
 	TableErrorType  = "error_type"  // Signature log errore
 	TableErrorState = "error_state" // Stato e temporalità dell'errore
 	TableKeyUsage   = "key_usage"   // Traccia costi Gemini
+	TableMemory     = "memory"      // Memoria collaborativa fornita dal client
+	TableReasoning  = "reasoning"   // Esiti di ragionamento semantico
+	TableLogTemplate = "log_template" // Estratti statici dei log dal codice sorgente
+	TableSystem      = "system"       // Metadata di sistema e usage tracking
+
 
 	// Edges
 	EdgeContains   = "contains"   // Repo -> Branch, Repo -> File
@@ -36,9 +42,14 @@ const (
 	EdgeHasEntry   = "has_entry"  // LogFile -> LogEntry
 	EdgeIsTypeOf   = "is_type_of" // LogEntry -> ErrorType
 	EdgeRelatedTo  = "related_to" // ErrorType -> File / FileChunk / Issue
+	EdgeHasMemory    = "has_memory"    // Repo -> Memory
+	EdgeHasReasoning = "has_reasoning" // Repo -> Reasoning
+	EdgeHasCommitChunk = "has_commit_chunk" // Commit -> CommitChunk
+	EdgeEmitsLog     = "emits_log"     // File -> LogTemplate
 )
 
 var Definition = []string{
+	fmt.Sprintf("REMOVE INDEX file_path ON TABLE %s;", TableFile),
 	// Define Tables (Required for SurrealDB v3 strictness)
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableRepo),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableBranch),
@@ -46,6 +57,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableAuthor),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableFile),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableFileChunk),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableCommitChunk),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableIssue),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableTracker),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableBatchJob),
@@ -55,6 +67,10 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableErrorType),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableErrorState),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableKeyUsage),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableMemory),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableReasoning),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableLogTemplate),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableSystem),
 
 	// Define Edges (Tables for Relations)
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION SCHEMALESS;", EdgeContains),
@@ -81,10 +97,15 @@ var Definition = []string{
 	fmt.Sprintf("REMOVE FIELD out ON TABLE %s;", EdgeRelatedTo),
 	fmt.Sprintf("DEFINE FIELD in ON TABLE %s TYPE record<%s>;", EdgeRelatedTo, TableErrorType),
 	fmt.Sprintf("DEFINE FIELD out ON TABLE %s TYPE record<%s | %s | %s>;", EdgeRelatedTo, TableFile, TableFileChunk, TableIssue),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasMemory, TableRepo, TableMemory),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasReasoning, TableRepo, TableReasoning),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasCommitChunk, TableCommit, TableCommitChunk),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeEmitsLog, TableFile, TableLogTemplate),
 
 	// Define Indexes
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),
-	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path UNIQUE;", TableFile),
+	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path;", TableFile),
+	fmt.Sprintf("DEFINE INDEX file_version ON TABLE %s COLUMNS path, hash UNIQUE;", TableFile),
 	fmt.Sprintf("DEFINE INDEX issue_id ON TABLE %s COLUMNS id UNIQUE;", TableIssue),
 
 	// Log & Project Indexes
@@ -102,6 +123,9 @@ var Definition = []string{
 	// Vector Index
 	fmt.Sprintf("DEFINE INDEX vector_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableFileChunk),
 	fmt.Sprintf("DEFINE INDEX error_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableErrorType),
+	fmt.Sprintf("DEFINE INDEX memory_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableMemory),
+	fmt.Sprintf("DEFINE INDEX reasoning_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableReasoning),
+	fmt.Sprintf("DEFINE INDEX commit_chunk_embedding ON TABLE %s COLUMNS embedding HNSW DIMENSION 768 DIST COSINE;", TableCommitChunk),
 }
 
 // GenerateInitSQL returns the full SQL script to initialize the DB

@@ -23,6 +23,14 @@ type Pattern struct {
 	Regex    *regexp.Regexp
 }
 
+type LogTemplatePattern struct {
+	ID         string
+	Regex      *regexp.Regexp
+	FormatStr  string
+	SourceFile string
+	SourceLine int
+}
+
 type LogAnalyzer struct {
 	Path          string
 	Cfg           *config.Config
@@ -30,8 +38,9 @@ type LogAnalyzer struct {
 	AI            *ai.Client
 	Project       string
 	LogFileID     string
-	CostTracker   *ai.CostTracker
-	knownPatterns []Pattern
+	CostTracker    *ai.CostTracker
+	knownPatterns  []Pattern
+	staticPatterns []LogTemplatePattern
 }
 
 func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *LogAnalyzer {
@@ -81,6 +90,36 @@ func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClie
 				}
 			}
 		}
+
+		// Load Static Log Templates
+		tmplRes, tmplErr := dbClient.Execute(ctx, fmt.Sprintf("SELECT id, format_string, regex, source_file, source_line FROM %s;", schema.TableLogTemplate))
+		if tmplErr == nil {
+			if rows, ok := tmplRes.([]interface{}); ok {
+				for _, r := range rows {
+					if row, ok := r.(map[string]interface{}); ok {
+						id, _ := row["id"].(string)
+						formatStr, _ := row["format_string"].(string)
+						regexStr, _ := row["regex"].(string)
+						srcFile, _ := row["source_file"].(string)
+						var srcLine int
+						if val, ok := row["source_line"].(float64); ok { srcLine = int(val) }
+
+						if regexStr != "" {
+							re, err := regexp.Compile("(?s)" + regexStr)
+							if err == nil {
+								analyzer.staticPatterns = append(analyzer.staticPatterns, LogTemplatePattern{
+									ID:         id,
+									Regex:      re,
+									FormatStr:  formatStr,
+									SourceFile: srcFile,
+									SourceLine: srcLine,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return analyzer
@@ -90,7 +129,30 @@ func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
 	if len(lines) == 0 {
 		return
 	}
-	text := strings.Join(lines, "\n")
+
+	// Phase 1: Deterministic LogAlign Matching
+	var unmatchedLines []string
+	for _, line := range lines {
+		matched := false
+		for _, sp := range a.staticPatterns {
+			if sp.Regex.MatchString(line) {
+				// Deterministic match found! No AI needed.
+				a.ingestError(ctx, "Static Log: "+sp.FormatStr, line, sp.SourceFile, 5, sp.FormatStr, nil)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			unmatchedLines = append(unmatchedLines, line)
+		}
+	}
+
+	if len(unmatchedLines) == 0 {
+		return // Everything was deterministically matched
+	}
+
+	// Phase 2: AI Processing for unmatched lines
+	text := strings.Join(unmatchedLines, "\n")
 	text = a.FilterKnownErrors(text)
 
 	var activeCategories []string

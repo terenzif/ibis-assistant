@@ -59,7 +59,7 @@ func TestAskProjectAgentic_Parsing(t *testing.T) {
 				AI: mockAI,
 			}
 
-			_, _ = svc.AskProjectAgentic(context.Background(), "query")
+			_, _ = svc.AskProjectAgentic(context.Background(), "query", "")
 
 			if len(mockAI.EmbedCalls) == 0 {
 				t.Errorf("Expected search to be triggered, but it wasn't")
@@ -72,3 +72,4 @@ func TestAskProjectAgentic_Parsing(t *testing.T) {
 		})
 	}
 }
+

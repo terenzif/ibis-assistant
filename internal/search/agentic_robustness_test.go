@@ -79,7 +79,7 @@ func TestAskProjectAgentic_Robustness(t *testing.T) {
 				AI: mockAI,
 			}
 
-			_, err := svc.AskProjectAgentic(context.Background(), "query")
+			_, err := svc.AskProjectAgentic(context.Background(), "query", "")
 			if err != nil {
 				t.Fatalf("AskProjectAgentic failed: %v", err)
 			}
@@ -102,3 +102,4 @@ func TestAskProjectAgentic_Robustness(t *testing.T) {
 		})
 	}
 }
+

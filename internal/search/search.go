@@ -58,8 +58,8 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 
 	vecJson, _ := json.Marshal(vec)
 
-	// 2. Vector Search (Time-Decayed)
-	// We select `hash` from chunk and `file.hash` to compare for currency.
+	// 2. Vector Search (Time-Decayed) on file_chunk, memory, and reasoning
+	// We combine results from multiple tables.
 	ql := fmt.Sprintf(`
 		SELECT 
 			id,
@@ -70,10 +70,10 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 			(vector::similarity::cosine(embedding, %s) * 0.7) +
 			(math::max(0, 1 - (time::now() - (created_at OR time::now())).days / 365) * 0.3)
 			as score
-		FROM %s 
+		FROM [%s, %s, %s]
 		WHERE embedding != NONE
 		ORDER BY score DESC 
-		LIMIT 10;`, string(vecJson), schema.TableFileChunk)
+		LIMIT 15;`, string(vecJson), schema.TableFileChunk, schema.TableMemory, schema.TableReasoning)
 
 	resRaw, err := s.DB.Execute(ctx, ql)
 	if err != nil {
@@ -171,73 +171,76 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 	return finalResults, nil
 }
 
-// ReinforcePath updates the usage weight of a path in the graph
-func (s *Service) ReinforcePath(ctx context.Context, sourceID, targetID string, score float64) error {
+// AddCollaborativeMemory inserts a collaborative memory.
+func (s *Service) AddCollaborativeMemory(ctx context.Context, repoName, memoryText string, precomputedEmbedding []float64) error {
 	if s.DB == nil {
 		return fmt.Errorf("database not connected")
 	}
-	// Logic:
-	// 1. Find edge between source and target.
-	//    We assume a specific edge type or just any edge?
-	//    The spec says `implements` edge mostly.
-	//    Let's try to update `implements` first.
-	//    If score > 0: weight += 0.1
-	//    If score < 0: weight -= 0.1
 
-	delta := 0.1
-	if score < 0 {
-		delta = -0.1
-	}
-
-	// Helper to run update for a table
-	runUpdate := func(table string) error {
-		ql := fmt.Sprintf("UPDATE %s SET usage_weight = (usage_weight OR 1.0) + %f WHERE in = $source AND out = $target;", table, delta)
-		_, err := s.DB.SmartQuery(ctx, ql, map[string]interface{}{
-			"source": sourceID,
-			"target": targetID,
-		})
-		return err
-	}
-
-	// Helper to get table from ID (format table:id)
-	getTable := func(id string) string {
-		parts := strings.Split(id, ":")
-		if len(parts) > 0 {
-			return parts[0]
+	var vec []float32
+	if len(precomputedEmbedding) > 0 {
+		vec = make([]float32, len(precomputedEmbedding))
+		for i, v := range precomputedEmbedding {
+			vec[i] = float32(v)
 		}
-		return ""
-	}
-
-	sourceTable := getTable(sourceID)
-	targetTable := getTable(targetID)
-
-	// Try 'implements' (Commit -> Issue)
-	var err error
-	if sourceTable == schema.TableCommit && targetTable == schema.TableIssue {
-		err = runUpdate(schema.EdgeImplements)
-	} else if sourceTable == schema.TableCommit && (targetTable == schema.TableFile || targetTable == schema.TableFileChunk) {
-		// Try 'changed' (Commit -> File)
-		err = runUpdate(schema.EdgeChanged)
-	} else if sourceTable == schema.TableAuthor && targetTable == schema.TableCommit {
-		// Try 'authored' (Author -> Commit)
-		err = runUpdate(schema.EdgeAuthored)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	// Also update target node access_count
-	// UPDATE target SET access_count += 1
-	if score > 0 {
-		ql := "UPDATE $target SET access_count = (access_count OR 0) + 1, last_accessed = time::now();"
-		_, err = s.DB.SmartQuery(ctx, ql, map[string]interface{}{"target": targetID})
+	} else {
+		var err error
+		vec, err = s.AI.EmbedText(ctx, memoryText)
 		if err != nil {
-			return err
+			return fmt.Errorf("embedding failed: %w", err)
 		}
 	}
 
-	return nil
+	repoID := db.FormatRecordID(schema.TableRepo, db.SanitizeID(repoName))
+	
+	vecJson, _ := json.Marshal(vec)
+	ql := fmt.Sprintf(`
+		BEGIN TRANSACTION;
+		LET $mem = CREATE %s SET content = '%s', embedding = %s;
+		RELATE %s->%s->$mem;
+		COMMIT TRANSACTION;
+	`, schema.TableMemory, db.EscapeSQL(memoryText), string(vecJson), repoID, schema.EdgeHasMemory)
+
+	_, err := s.DB.Execute(ctx, ql)
+	return err
+}
+
+// SaveReasoningOutcome saves a semantic deduction and reinforces paths.
+func (s *Service) SaveReasoningOutcome(ctx context.Context, repoName, question, outcomeText string, usefulSources []string) error {
+	if s.DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	// 1. Semantic Loop: Embed and save reasoning
+	fullText := "Question: " + question + "\nOutcome: " + outcomeText
+	vec, err := s.AI.EmbedText(ctx, fullText)
+	if err != nil {
+		return fmt.Errorf("embedding failed: %w", err)
+	}
+
+	repoID := db.FormatRecordID(schema.TableRepo, db.SanitizeID(repoName))
+	vecJson, _ := json.Marshal(vec)
+	
+	// Prepare structural loop commands
+	var sb strings.Builder
+	sb.WriteString("BEGIN TRANSACTION;\n")
+	sb.WriteString(fmt.Sprintf("LET $reas = CREATE %s SET question = '%s', outcome = '%s', embedding = %s;\n", 
+		schema.TableReasoning, db.EscapeSQL(question), db.EscapeSQL(outcomeText), string(vecJson)))
+	sb.WriteString(fmt.Sprintf("RELATE %s->%s->$reas;\n", repoID, schema.EdgeHasReasoning))
+
+	// 2. Structural Loop: Reinforce useful sources
+	delta := 0.2 // Positive reinforcement delta
+	for _, sourceID := range usefulSources {
+		// Increment usage_weight for related edges pointing to this source
+		// And increment access_count on the source itself
+		sb.WriteString(fmt.Sprintf("UPDATE %s SET usage_weight = (usage_weight OR 1.0) + %f WHERE out = %s;\n", schema.EdgeChanged, delta, sourceID))
+		sb.WriteString(fmt.Sprintf("UPDATE %s SET usage_weight = (usage_weight OR 1.0) + %f WHERE out = %s;\n", schema.EdgeImplements, delta, sourceID))
+		sb.WriteString(fmt.Sprintf("UPDATE %s SET access_count = (access_count OR 0) + 1, last_accessed = time::now();\n", sourceID))
+	}
+	sb.WriteString("COMMIT TRANSACTION;\n")
+
+	_, err = s.DB.Execute(ctx, sb.String())
+	return err
 }
 
 // RawQuery executes a raw SurrealQL query for power users

@@ -293,3 +293,4 @@ func TestGetFileContext_IDMismatch(t *testing.T) {
 		t.Errorf("Expected ID 'commit:123', got '%s'", c.ID)
 	}
 }
+

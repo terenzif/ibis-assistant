@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +16,7 @@ import (
 )
 
 const (
-	BatchSize    = 100 // Adjust based on API limits. Google usually allows ~100-1000 requests per batch.
+	BatchSize    = 100 // Adjust based on API limits.
 	PollInterval = 10 * time.Second
 )
 
@@ -24,15 +26,19 @@ type BatchManager struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+	DiscoveryRoot string
+	MaxDeltaSize  int
 }
 
-func NewBatchManager(dbClient db.Executor, aiClient *Client) *BatchManager {
+func NewBatchManager(dbClient db.Executor, aiClient *Client, discoveryRoot string, maxDeltaSize int) *BatchManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &BatchManager{
-		DB:     dbClient,
-		AI:     aiClient,
-		ctx:    ctx,
-		cancel: cancel,
+		DB:            dbClient,
+		AI:            aiClient,
+		ctx:           ctx,
+		cancel:        cancel,
+		DiscoveryRoot: discoveryRoot,
+		MaxDeltaSize:  maxDeltaSize,
 	}
 }
 
@@ -61,8 +67,8 @@ func (bm *BatchManager) runLoop() {
 			return
 		case <-ticker.C:
 			if bm.DB != nil {
-				bm.processPendingChunks()
-				bm.checkActiveBatches()
+				bm.processPendingCommits() // Extract patches and create chunks
+				bm.processPendingChunks()  // Embed all pending chunks (file & commit)
 			}
 		}
 	}
@@ -70,48 +76,52 @@ func (bm *BatchManager) runLoop() {
 
 // processPendingChunks finds chunks waiting for embedding and submits them in batches
 func (bm *BatchManager) processPendingChunks() {
-	if bm.DB == nil {
-		return
-	}
-	// 1. Find pending chunks
-	// To avoid race conditions in a scaled env (though this is single instance),
-	// we should mark them as 'processing' or similar.
-	// For now, we select limit N.
-
-	ql := fmt.Sprintf("SELECT id, content FROM %s WHERE batch_status = 'pending' LIMIT %d;", schema.TableFileChunk, BatchSize)
-	res, err := bm.DB.Execute(bm.ctx, ql)
-	if err != nil {
-		logger.Error("BatchManager: Failed to fetch pending chunks: %v", err)
+	if bm.DB == nil || bm.AI == nil || !bm.AI.IsFunctional() {
 		return
 	}
 
-	rows, ok := res.([]interface{})
-	if !ok || len(rows) == 0 {
+	// Separate queries to avoid issues with multi-table SELECT syntax in some SurrealDB versions
+	tables := []string{schema.TableFileChunk, schema.TableCommitChunk}
+	var allRows []interface{}
+
+	for _, table := range tables {
+		ql := fmt.Sprintf("SELECT id, content FROM %s WHERE batch_status = 'pending' LIMIT %d;", table, BatchSize)
+		res, err := bm.DB.Execute(bm.ctx, ql)
+		if err != nil {
+			logger.Error("BatchManager: Failed to fetch pending chunks from %s: %v", table, err)
+			continue
+		}
+		if res != nil {
+			logger.Debug("BatchManager: Query for %s returned type %T", table, res)
+		}
+		if rows, ok := res.([]interface{}); ok {
+			allRows = append(allRows, rows...)
+		} else {
+			logger.Debug("BatchManager: Failed to cast result to []interface{}. Res: %v", res)
+		}
+		if len(allRows) >= BatchSize {
+			allRows = allRows[:BatchSize]
+			break
+		}
+	}
+
+	if len(allRows) == 0 {
 		return // Nothing to do
 	}
-
-	logger.Info("BatchManager: Found %d pending chunks", len(rows))
 
 	var chunkIDs []string
 	var texts []string
 
-	for _, r := range rows {
+	for _, r := range allRows {
 		row, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
+		if !ok { continue }
 		
-		// Robust extraction of ID and content.
-		// In SurrealDB v3, IDs might be represented as RecordID strings or objects.
 		var id string
 		if rawID, exists := row["id"]; exists {
 			switch v := rawID.(type) {
-			case string:
-				id = v
+			case string: id = v
 			case map[string]interface{}:
-				if idVal, ok := v["id"].(string); ok {
-					id = idVal
-				}
+				if idVal, ok := v["id"].(string); ok { id = idVal }
 			}
 		}
 		
@@ -124,72 +134,49 @@ func (bm *BatchManager) processPendingChunks() {
 	}
 
 	if len(chunkIDs) == 0 {
-		logger.Debug("BatchManager: No valid chunks found in %d candidate rows", len(rows))
 		return
 	}
 
-	// 2. Mark chunks as 'processing' to prevent re-selection immediately?
-	// Actually, if we submit successfully, we update them. If we fail, they stay pending.
-	// But if submission takes time, next tick might pick them up.
-	// Best practice: Update to 'queued' first.
-	// Let's rely on the fact that we process them quickly here.
+	logger.Info("BatchManager: Found %d chunks. Embedding synchronously...", len(chunkIDs))
 
-	// 3. Submit to AI
-	jobName, err := bm.AI.CreateBatchEmbedJob(bm.ctx, texts)
+	// 3. Submit to AI synchronously using the worker pool
+	embeddings, err := bm.AI.BatchEmbedText(bm.ctx, texts)
 	if err != nil {
-		logger.Error("BatchManager: Failed to create batch job: %v", err)
+		logger.Error("BatchManager: Failed to embed batch: %v", err)
 		return
 	}
 
-	logger.Info("BatchManager: Submitted Job %s with %d items", jobName, len(texts))
-
-	// 4. Create Batch Job Record
-	// Store mapping of order -> chunkID if needed, or just link chunks to batchID.
-	// Since order is preserved, we can just query chunks by batch_id later?
-	// No, easier to store the list of IDs in the batch job record or rely on `chunk.batch_id`.
-	// We update chunks to point to this batch.
-
-	// Transaction to create job and update chunks
+	// 4. Update Chunks with results in a transaction
 	var sb strings.Builder
 	sb.WriteString("BEGIN TRANSACTION; ")
 
-	// Create Job
-	// We need to store the chunk IDs in order to map results back correctly!
-	// SurrealDB allows array of strings.
-	chunkIDsJson, _ := json.Marshal(chunkIDs)
-
-	// jobID: batch_job:<jobName_sanitized>
-	jobID := db.FormatRecordID(schema.TableBatchJob, db.SanitizeID(jobName))
-
-	sb.WriteString(fmt.Sprintf("CREATE %s SET name = '%s', status = 'submitted', chunk_ids = %s, created_at = time::now(); ",
-		jobID, jobName, string(chunkIDsJson)))
-
-	// Update Chunks
-	// We can use WHERE id IN [...]
-	// Ensure IDs are properly quoted if they contain special characters.
-	formattedIDs := make([]string, len(chunkIDs))
 	for i, id := range chunkIDs {
-		// id might be 'table:id'. Format it for SurrealQL safety.
-		formattedIDs[i] = db.FormatRecordID("", id)
+		vecJson, _ := json.Marshal(embeddings[i])
+		safeID := db.FormatRecordID("", id)
+		sb.WriteString(fmt.Sprintf("UPDATE %s SET embedding = %s, batch_status = 'completed'; ",
+			safeID, string(vecJson)))
 	}
-	idList := "[" + strings.Join(formattedIDs, ", ") + "]"
-	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_id = %s, batch_status = 'submitted' WHERE id IN %s; ",
-		schema.TableFileChunk, jobID, idList))
 
 	sb.WriteString("COMMIT TRANSACTION;")
 
 	if _, err := bm.DB.Execute(bm.ctx, sb.String()); err != nil {
-		logger.Error("BatchManager: Failed to save batch job info: %v", err)
+		logger.Error("BatchManager: Failed to save batch results: %v", err)
+	} else {
+		logger.Info("BatchManager: Successfully saved %d embeddings", len(chunkIDs))
 	}
 }
 
-// checkActiveBatches polls submitted jobs for completion
-func (bm *BatchManager) checkActiveBatches() {
-	// 1. Find submitted jobs
-	ql := fmt.Sprintf("SELECT id, name, chunk_ids FROM %s WHERE status = 'submitted';", schema.TableBatchJob)
+// processPendingCommits finds pending commits, extracts patches via Git, chunks them, and creates TableCommitChunk
+func (bm *BatchManager) processPendingCommits() {
+	if bm.DB == nil {
+		return
+	}
+
+	ql := fmt.Sprintf(`SELECT id, hash, repo.name as repo_name, message 
+		FROM %s WHERE batch_status = 'pending' LIMIT %d;`, schema.TableCommit, BatchSize)
 	res, err := bm.DB.Execute(bm.ctx, ql)
 	if err != nil {
-		logger.Error("BatchManager: Failed to fetch active batches: %v", err)
+		logger.Error("BatchManager: Failed to fetch pending commits: %v", err)
 		return
 	}
 
@@ -198,90 +185,111 @@ func (bm *BatchManager) checkActiveBatches() {
 		return
 	}
 
+	var sb strings.Builder
+	sb.WriteString("BEGIN TRANSACTION;\n")
+	hasUpdates := false
+
 	for _, r := range rows {
 		row, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
+		if !ok { continue }
 
-		dbID, _ := row["id"].(string)
-		jobName, _ := row["name"].(string)
-
-		// Parse chunk_ids safely
-		var chunkIDs []string
-		if cids, ok := row["chunk_ids"].([]interface{}); ok {
-			for _, c := range cids {
-				if s, ok := c.(string); ok {
-					chunkIDs = append(chunkIDs, s)
-				}
+		var id string
+		if rawID, exists := row["id"]; exists {
+			switch v := rawID.(type) {
+			case string: id = v
+			case map[string]interface{}:
+				if idVal, ok := v["id"].(string); ok { id = idVal }
 			}
 		}
 
-		// 2. Poll API
-		status, err := bm.AI.GetBatchJob(bm.ctx, jobName)
+		hash, _ := row["hash"].(string)
+		repoName, _ := row["repo_name"].(string)
+		message, _ := row["message"].(string)
+
+		if id == "" || hash == "" || repoName == "" {
+			continue
+		}
+
+		absRepoPath := filepath.Join(bm.DiscoveryRoot, repoName)
+		
+		cmd := exec.CommandContext(bm.ctx, "git", "diff", hash+"^", hash)
+		cmd.Dir = absRepoPath
+		out, err := cmd.Output()
+		
+		var patch string
 		if err != nil {
-			logger.Warn("BatchManager: Error polling job %s: %v", jobName, err)
+			cmdShow := exec.CommandContext(bm.ctx, "git", "show", "--format=", "--patch", hash)
+			cmdShow.Dir = absRepoPath
+			if outShow, errShow := cmdShow.Output(); errShow == nil {
+				patch = string(outShow)
+			}
+		} else {
+			patch = string(out)
+		}
+
+		if patch == "" && message == "" {
+			safeID := db.FormatRecordID("", id)
+			sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_status = 'completed';\n", safeID))
+			hasUpdates = true
 			continue
 		}
 
-		if status.Done {
-			if status.Error != nil {
-				logger.Error("BatchManager: Job %s failed: %v", jobName, status.Error)
-				// Mark as failed, reset chunks to pending?
-				bm.markJobFailed(dbID, chunkIDs, status.Error.Error())
-			} else {
-				// Success
-				logger.Info("BatchManager: Job %s completed. Processing results...", jobName)
-				bm.processJobResults(dbID, chunkIDs, status.Embeddings)
-			}
+		if bm.MaxDeltaSize <= 0 {
+			bm.MaxDeltaSize = 8000
+		}
+		
+		fullText := fmt.Sprintf("COMMIT MESSAGE:\n%s\n\nPATCH:\n%s", message, patch)
+		chunks := chunkString(fullText, bm.MaxDeltaSize)
+		
+		for i, chunkText := range chunks {
+			chunkID := db.FormatRecordID(schema.TableCommitChunk, fmt.Sprintf("%s_chunk%d", hash, i))
+			escapedText := db.EscapeSQL(chunkText)
+			sb.WriteString(fmt.Sprintf("UPDATE %s SET content = '%s', batch_status = 'pending', commit_hash = '%s';\n",
+				chunkID, escapedText, hash))
+			
+			safeCommitID := db.FormatRecordID("", id)
+			sb.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", safeCommitID, schema.EdgeHasCommitChunk, chunkID))
+		}
+		
+		safeID := db.FormatRecordID("", id)
+		sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_status = 'completed';\n", safeID))
+		hasUpdates = true
+	}
+
+	sb.WriteString("COMMIT TRANSACTION;\n")
+
+	if hasUpdates {
+		if _, err := bm.DB.Execute(bm.ctx, sb.String()); err != nil {
+			logger.Error("BatchManager: Failed to save commit chunks: %v", err)
+		} else {
+			logger.Info("BatchManager: Processed %d pending commits into chunks.", len(rows))
 		}
 	}
 }
 
-func (bm *BatchManager) processJobResults(jobID string, chunkIDs []string, embeddings [][]float32) {
-	if len(chunkIDs) != len(embeddings) {
-		logger.Error("BatchManager: Mismatch in result count for %s. Chunks: %d, Embeddings: %d", jobID, len(chunkIDs), len(embeddings))
-		bm.markJobFailed(jobID, chunkIDs, "Count mismatch")
-		return
+func chunkString(text string, maxLen int) []string {
+	if len(text) <= maxLen {
+		return []string{text}
 	}
-
-	var sb strings.Builder
-	sb.WriteString("BEGIN TRANSACTION; ")
-
-	// Update chunks with embeddings
-	for i, id := range chunkIDs {
-		vecJson, _ := json.Marshal(embeddings[i])
-		// batch_status = 'completed'
-		sb.WriteString(fmt.Sprintf("UPDATE %s SET embedding = %s, batch_status = 'completed'; ",
-			id, string(vecJson)))
+	
+	var chunks []string
+	lines := strings.Split(text, "\n")
+	var current string
+	
+	for _, line := range lines {
+		if len(current)+len(line)+1 > maxLen && len(current) > 0 {
+			chunks = append(chunks, current)
+			current = line
+		} else {
+			if len(current) > 0 {
+				current += "\n" + line
+			} else {
+				current = line
+			}
+		}
 	}
-
-	// Update Job Status
-	sb.WriteString(fmt.Sprintf("UPDATE %s SET status = 'completed', completed_at = time::now(); ", jobID))
-	sb.WriteString("COMMIT TRANSACTION;")
-
-	if _, err := bm.DB.Execute(bm.ctx, sb.String()); err != nil {
-		logger.Error("BatchManager: Failed to apply results for %s: %v", jobID, err)
-	} else {
-		logger.Info("BatchManager: Successfully updated %d chunks from job %s", len(chunkIDs), jobID)
+	if len(current) > 0 {
+		chunks = append(chunks, current)
 	}
-}
-
-func (bm *BatchManager) markJobFailed(jobID string, chunkIDs []string, reason string) {
-	var sb strings.Builder
-	sb.WriteString("BEGIN TRANSACTION; ")
-
-	// Reset chunks to 'pending' so they are picked up again
-	// Ensure IDs are properly formatted/quoted. Since they are ⟨table:id⟩, they don't need quotes in SurrealQL.
-	idList := "[" + strings.Join(chunkIDs, ", ") + "]"
-	sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_status = 'pending', batch_error = '%s' WHERE id IN %s; ",
-		schema.TableFileChunk, db.EscapeSQL(reason), idList))
-
-	// Mark Job as failed
-	sb.WriteString(fmt.Sprintf("UPDATE %s SET status = 'failed', error = '%s' WHERE id = %s; ",
-		jobID, db.EscapeSQL(reason), jobID))
-
-	sb.WriteString("COMMIT TRANSACTION;")
-
-	bm.DB.Execute(bm.ctx, sb.String())
+	return chunks
 }

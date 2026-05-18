@@ -40,13 +40,18 @@ GUIDELINES:
 - Cite the file paths in your answer.`
 
 // AskProjectAgentic performs a multi-step ReAct search
-func (s *Service) AskProjectAgentic(ctx context.Context, query string) (*AgenticResult, error) {
+func (s *Service) AskProjectAgentic(ctx context.Context, query string, branchContext string) (*AgenticResult, error) {
 	// Initialize History
+	systemText := SystemPrompt
+	if branchContext != "" {
+		systemText += fmt.Sprintf("\n\nTOPOLOGICAL CONTEXT:\nYou are currently operating on branch/commit: %s. Keep in mind that search results might come from different parallel branches. Use this context to provide cross-branch insights when useful.", branchContext)
+	}
+	
 	history := []ai.Content{
 		{
 			Role: "user",
 			Parts: []ai.Part{
-				{Text: SystemPrompt + "\n\nQuestion: " + query},
+				{Text: systemText + "\n\nQuestion: " + query},
 			},
 		},
 	}

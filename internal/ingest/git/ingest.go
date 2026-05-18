@@ -37,8 +37,9 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 		return fmt.Errorf("failed to upsert repo: %w", err)
 	}
 
-	// 1. Start Hash Generator (Stream all commits)
-	cmdHashes := exec.CommandContext(ctx, "git", "log", "--all", "--reverse", "--format=%H")
+	// 1. Start Hash Generator (Stream commits reachable from HEAD)
+	// We use HEAD so we only ingest the history of the currently checked out branch/commit
+	cmdHashes := exec.CommandContext(ctx, "git", "log", "HEAD", "--reverse", "--format=%H")
 	cmdHashes.Dir = absPath
 	stdoutHashes, err := cmdHashes.StdoutPipe()
 	if err != nil {
@@ -227,6 +228,7 @@ func processGitLogStream(
 	// effectively parallelizing the two stages.
 	jobChan := make(chan string, 100)
 	var wg sync.WaitGroup
+	seenIssues := make(map[string]bool)
 
 	if redmineClient != nil {
 		for i := 0; i < concurrency; i++ {
@@ -306,7 +308,7 @@ func processGitLogStream(
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET name = '%s';\n", authorID, db.EscapeSQL(authorName)))
 
 			// 2. Create Commit (Using UPDATE to be safe/idempotent)
-			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s;\n",
+			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s, batch_status = 'pending';\n",
 				commitID, hash, date, db.EscapeSQL(subject), repoID))
 
 			// 3. Link Author -> Commit
@@ -326,9 +328,12 @@ func processGitLogStream(
 
 				// In-Band Ingestion: Trigger Redmine fetch if client is available
 				if redmineClient != nil {
-					select {
-					case jobChan <- issueIDStr:
-					case <-ctx.Done():
+					if !seenIssues[issueIDStr] {
+						seenIssues[issueIDStr] = true
+						select {
+						case jobChan <- issueIDStr:
+						case <-ctx.Done():
+						}
 					}
 				} else {
 					// Just ensure existence

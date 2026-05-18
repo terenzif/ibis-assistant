@@ -25,6 +25,61 @@ func (m *MockDBBatch) SmartQuery(ctx context.Context, sql string, vars interface
 
 func (m *MockDBBatch) Close() {}
 
+// MockAIClient implements a mock AI client for testing
+type MockAIClient struct {
+}
+
+func (m *MockAIClient) IsFunctional() bool {
+	return true
+}
+
+func (m *MockAIClient) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
+	// Return mock embeddings
+	embeddings := make([][]float32, len(texts))
+	for i := range texts {
+		embeddings[i] = make([]float32, 768)
+		for j := range embeddings[i] {
+			embeddings[i][j] = float32(j) / 768.0
+		}
+	}
+	return embeddings, nil
+}
+
+// createTestClient creates a minimal Client for testing that has IsFunctional() returning true
+// and BatchEmbedText that returns mock embeddings. It also starts a goroutine that handles
+// embed jobs by returning mock embeddings.
+func createTestClient() *Client {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &Client{
+		jobQueue:      make(chan EmbedJob, 10),
+		generateQueue: make(chan GenerateJob, 10),
+		ctx:           ctx,
+		cancel:        cancel,
+	}
+	
+	// Start a goroutine that handles embedding jobs for testing
+	go func() {
+		for {
+			select {
+			case job := <-client.jobQueue:
+				// Respond with mock embeddings
+				embeddings := make([][]float32, len(job.Texts))
+				for i := range job.Texts {
+					embeddings[i] = make([]float32, 768)
+					for j := range embeddings[i] {
+						embeddings[i][j] = float32(j) / 768.0
+					}
+				}
+				job.ResultChan <- EmbedResult{Embeddings: embeddings}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	
+	return client
+}
+
 func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {
 	// Test cases for different SurrealDB response formats
 	testCases := []struct {
@@ -66,8 +121,9 @@ func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := &MockDBBatch{Rows: tc.rows}
-			// Use context.Background() for the manager
-			bm := NewBatchManager(db, &Client{})
+			// Create a minimal Client for testing
+			client := createTestClient()
+			bm := NewBatchManager(db, client, ".", 8000)
 			
 			// We can't easily check the internal state of chunkIDs without exposing it or using a hook.
 			// But we can check if it attempted to call Execute for the selecting pending chunks.
@@ -90,7 +146,8 @@ func TestBatchManager_SQLQuoting(t *testing.T) {
 		},
 	}
 	
-	bm := NewBatchManager(db, &Client{})
+	client := createTestClient()
+	bm := NewBatchManager(db, client, ".", 8000)
 	// This test is mostly a place holder for now since mocking AI.CreateBatchEmbedJob is hard without an interface.
 	// But we've ensured the MockDB supports context.
 	bm.processPendingChunks()

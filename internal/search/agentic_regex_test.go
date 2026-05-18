@@ -13,7 +13,7 @@ func TestAskProjectAgentic_RegexOptimization(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM file_chunk": []map[string]interface{}{},
+			"FROM [": []map[string]interface{}{},
 		},
 	}
 
@@ -51,7 +51,7 @@ func TestAskProjectAgentic_RegexOptimization(t *testing.T) {
 		AI: mockAI,
 	}
 
-	result, err := svc.AskProjectAgentic(context.Background(), "test")
+	result, err := svc.AskProjectAgentic(context.Background(), "test", "")
 	if err != nil {
 		t.Fatalf("AskProjectAgentic failed: %v", err)
 	}
@@ -72,3 +72,4 @@ func TestAskProjectAgentic_RegexOptimization(t *testing.T) {
 		t.Error("Expected search to be executed in step 1")
 	}
 }
+

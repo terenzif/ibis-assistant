@@ -1,31 +1,26 @@
-# Nome degli eseguibili finali
-ifeq ($(OS),Windows_NT)
-BINARY_NAME := knowledge_server.exe
-MCP_BRIDGE_NAME := mcp-bridge.exe
-CLEAN_CMD := cmd /C del /Q
-NULL_DEV := nul
-else
-BINARY_NAME := knowledge_server
-MCP_BRIDGE_NAME := mcp-bridge
-CLEAN_CMD := rm -f
-NULL_DEV := /dev/null
-endif
+.PHONY: all build build-mcp run clean dist test lint
 
-.PHONY: build build-mcp all run clean
+all: dist
 
 build:
-	go build -o $(BINARY_NAME) ./cmd/server
+	go run ./tools/makehelper build
 
 build-mcp:
-	go build -o $(MCP_BRIDGE_NAME) ./tools/mcp-bridge
+	go run ./tools/makehelper build-mcp
 
-all: build build-mcp
-
+dist: build build-mcp
+	go run ./tools/makehelper dist
 
 run:
 	go run ./cmd/server -- /run
 
 clean:
 	go clean
-	-$(CLEAN_CMD) "$(BINARY_NAME)" "$(MCP_BRIDGE_NAME)" 2>$(NULL_DEV)
+	go run ./tools/makehelper clean
+
+test:
+	go run ./tools/makehelper test
+
+lint:
+	go run ./tools/makehelper lint
 

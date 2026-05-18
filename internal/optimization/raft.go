@@ -143,8 +143,8 @@ func (o *Optimizer) OptimizeLoop(ctx context.Context, iterations int) error {
 		// 4. Reinforce
 		if score > 0 {
 			// Found! Reinforce the node to signal it's valuable information.
-			// We pass "system" as source to indicate system-generated reinforcement.
-			if err := o.Search.ReinforcePath(ctx, "system", c.ID, 0.5); err != nil {
+			ql := fmt.Sprintf("UPDATE %s SET access_count = (access_count OR 0) + 1, last_accessed = time::now();", c.ID)
+			if _, err := o.DB.Execute(ctx, ql); err != nil {
 				logger.Warn("Optimization: Reinforce failed: %v", err)
 			}
 		} else {

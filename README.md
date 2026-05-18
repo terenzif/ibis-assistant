@@ -130,6 +130,15 @@ O via variabile d'ambiente: `DB_AUTO_UPDATE=false`.
 
 Il file `config.json` viene cercato automaticamente nella directory corrente e nella directory in cui si trova l'eseguibile (utile quando eseguito come servizio). È possibile specificare un file diverso con il flag `-config <path>`.
 
+#### 🔑 Credenziali Git e PAT (Personal Access Tokens)
+Poiché il server spesso gira come Servizio (es. LocalSystem), le interazioni Git per la clonazione non possono basarsi su prompt interattivi. Per questo motivo, puoi mappare i tuoi token d'accesso (PAT) nel `config.json` e il server li inietterà automaticamente e in totale sicurezza nelle chiamate HTTP di Git:
+
+```json
+  "git_tokens": {"default": ""}
+```
+
+Se preferisci usare le variabili d'ambiente di sistema (es. su container), puoi impostare `GIT_TOKEN=il_tuo_pat`, che fungerà da wildcard globale per *tutti* gli URL clonati.
+
 ### 🔌 Integrazione Client (Centralizzata)
 
 Il Knowledge Server è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.
@@ -263,6 +272,22 @@ go test ./...
 ### 📚 Documentazione Architetturale
 Per dettagli tecnici sulle recenti evoluzioni del sistema, consulta:
 * **[Stability Refactor 2026](docs/STABILITY_REFACTOR_2026.md)**: Dettagli su Context propagation, Shutdown management e Windows Service optimization.
+
+## 🤖 Istruzioni per AI/Copilot (Sviluppo Server)
+
+Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo sviluppo del Knowledge Server stesso**.
+
+### Convenzioni Operative
+- Trattare `cmd/server/main.go` e `internal/ingest/redmine/ingest.go` come source of truth dei tool MCP.
+- Mantenere la retrocompatibilità dei nomi dei tool già pubblici.
+- Le chiamate in scrittura a Redmine richiedono sempre l'header `X-Redmine-API-Key`.
+- I filtri di ricerca (es. date, sort) devono essere validati rigidamente lato server.
+
+### Convenzioni Architetturali (Maggio 2026)
+- **Configurazione**: L'unico file di configurazione tracciato su Git è `config_master.json`. Il file `config.json` locale non deve mai essere committato per evitare leak di chiavi e viene generato dalla build.
+- **Parsing AST**: L'estrazione dei chunk e dei log è interamente delegata al Sidecar esterno **ast-grep** (`sg.exe`), garantendo una compilazione 100% pure-Go senza CGO.
+- **Regole YAML**: I pattern di estrazione (C#, Go, TS, ecc.) risiedono nella directory `rules/` in formato YAML (gestito da `sgconfig.yml`).
+- **Deploy**: Tutto l'ambiente di produzione viene generato in modo automatizzato nella directory `dist/` usando il target `make dist`.
 
 ## 📝 Registro del Lavoro
 Il file `work_log.md` nella root del progetto contiene il log storico di tutte le modifiche strutturali, fix e miglioramenti apportati durante lo sviluppo continuo.

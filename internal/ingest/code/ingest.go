@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -103,54 +104,106 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		}()
 	}
 
-	// Walk the directory and feed the channel
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+	// 3. Get Active Files via Git
+	activeFilesMap := make(map[string]bool)
+	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "HEAD", "--name-only")
+	cmd.Dir = absPath
+	out, gitErr := cmd.Output()
+	
+	if gitErr == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, relPath := range lines {
+			relPath = strings.TrimSpace(relPath)
+			if relPath == "" {
+				continue
+			}
+
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
+			fullPath := filepath.Join(absPath, relPath)
+			info, statErr := os.Stat(fullPath)
+			if statErr != nil {
+				continue
+			}
+
+			if ignoredFiles[info.Name()] || isIgnored(fullPath, absPath, ignorePatterns, false) {
+				continue
+			}
+
+			ext := strings.ToLower(filepath.Ext(fullPath))
+			if !supportedExts[ext] {
+				continue
+			}
+
+			if info.Size() > maxSize {
+				logger.Debug("Skipping large file: %s (%d bytes)", fullPath, info.Size())
+				continue
+			}
+
+			activeFilesMap[relPath] = true
+
+			select {
+			case pathsChan <- fullPath:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	} else {
+		// Fallback to directory walk
+		logger.Warn("git ls-tree failed for %s (%v). Falling back to directory walk.", absPath, gitErr)
+		err = filepath.Walk(absPath, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
+			if info.IsDir() {
+				if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
+					return filepath.SkipDir
+				}
+				if ignoredDirs[info.Name()] {
+					return filepath.SkipDir
+				}
+				if isIgnored(path, absPath, ignorePatterns, true) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			if ignoredFiles[info.Name()] {
+				return nil
+			}
+			if isIgnored(path, absPath, ignorePatterns, false) {
+				return nil
+			}
+
+			ext := strings.ToLower(filepath.Ext(path))
+			if !supportedExts[ext] {
+				return nil
+			}
+
+			if info.Size() > maxSize {
+				return nil
+			}
+
+			relPath, _ := filepath.Rel(absPath, path)
+			activeFilesMap[filepath.ToSlash(relPath)] = true
+
+			select {
+			case pathsChan <- path:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// Directory Checks
-		if info.IsDir() {
-			if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
-				return filepath.SkipDir
-			}
-			if ignoredDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			if isIgnored(path, absPath, ignorePatterns, true) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// File Checks
-		if ignoredFiles[info.Name()] {
-			return nil
-		}
-		if isIgnored(path, absPath, ignorePatterns, false) {
-			return nil
-		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-		if !supportedExts[ext] {
-			return nil
-		}
-
-		if info.Size() > maxSize {
-			logger.Debug("Skipping large file: %s (%d bytes)", path, info.Size())
-			return nil
-		}
-
-		select {
-		case pathsChan <- path:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		return nil
-	})
+	}
 
 	close(pathsChan) // Signal workers to finish
 	wg.Wait()        // Wait for all workers
@@ -160,8 +213,8 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 		return ctx.Err()
 	}
 
-	// Prune Phase: Delete files from DB that are ignored (but NOT if just missing from disk)
-	if err := pruneRepo(ctx, dbClient, absPath, cfg, ignorePatterns); err != nil {
+	// Prune Phase: Delete files from DB that are no longer active in Git HEAD
+	if err := pruneRepo(ctx, dbClient, absPath, activeFilesMap); err != nil {
 		logger.Error("Error pruning obsolete files for %s: %v", absPath, err)
 	}
 
@@ -169,7 +222,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	return err
 }
 
-func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *config.Config, patterns []string) error {
+func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, activeFilesMap map[string]bool) error {
 	logger.Info("Pruning obsolete files for %s...", repoPath)
 
 	// Fetch all files in this repo from DB
@@ -187,27 +240,6 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 		return nil // No results
 	}
 
-	// Config lookups
-	supportedExts := make(map[string]bool)
-	ignoredDirs := make(map[string]bool)
-	ignoredFiles := make(map[string]bool)
-	maxSize := int64(10 * 1024 * 1024)
-
-	if cfg != nil {
-		for _, ext := range cfg.SupportedExtensions {
-			supportedExts[strings.ToLower(ext)] = true
-		}
-		for _, dir := range cfg.IgnoredDirs {
-			ignoredDirs[dir] = true
-		}
-		for _, file := range cfg.IgnoredFiles {
-			ignoredFiles[file] = true
-		}
-		if cfg.MaxFileSize > 0 {
-			maxSize = cfg.MaxFileSize
-		}
-	}
-
 	var toDelete []string
 
 	for _, r := range rows {
@@ -219,55 +251,19 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, cfg *
 
 		if id == "" || path == "" { continue }
 
-		shouldDelete := false
-
-		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			// FILE MISSING FROM DISK
-			// Strategy: Do NOT delete from DB. Preserve history.
-			// "what about files previously delete so no more into HEAD but still into git history?"
-			shouldDelete = false
-		} else if err == nil {
-			name := info.Name()
-
-			// Check Ignore Patterns
-			if isIgnored(path, repoPath, patterns, info.IsDir()) {
-				logger.Debug("Deleting %s (Ignored Pattern)", path)
-				shouldDelete = true
-			}
-			// Check Config Exclusions
-			if info.IsDir() {
-				if ignoredDirs[name] {
-					shouldDelete = true
-				}
-			} else {
-				if ignoredFiles[name] {
-					shouldDelete = true
-				}
-				if info.Size() > maxSize {
-					shouldDelete = true
-				}
-				ext := strings.ToLower(filepath.Ext(path))
-				if !supportedExts[ext] {
-					logger.Debug("Deleting %s (Unsupported Ext: %s)", path, ext)
-					shouldDelete = true
-				}
-			}
-
-			if !shouldDelete && len(ignoredDirs) > 0 {
-				rel, _ := filepath.Rel(repoPath, path)
-				parts := strings.Split(rel, string(os.PathSeparator))
-				for _, part := range parts {
-					if ignoredDirs[part] {
-						logger.Debug("Deleting %s (Ignored Dir Part: %s)", path, part)
-						shouldDelete = true
-						break
-					}
-				}
-			}
+		// Calculate relative path to match activeFilesMap keys
+		relPath, err := filepath.Rel(repoPath, path)
+		if err != nil {
+			logger.Warn("Failed to get relative path for %s: %v", path, err)
+			continue
 		}
+		
+		// Normalize slashes for git matching (git always uses forward slashes)
+		relPathGit := filepath.ToSlash(relPath)
 
-		if shouldDelete {
+		// If the file is not in activeFilesMap, it means it's not in git ls-tree HEAD (or directory walk).
+		if !activeFilesMap[relPathGit] && !activeFilesMap[relPath] {
+			logger.Debug("Deleting %s (Not in git HEAD / Walk)", path)
 			toDelete = append(toDelete, id)
 		}
 	}
@@ -326,10 +322,10 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		return fmt.Errorf("hashing error: %w", err)
 	}
 
-	// USE REPO-RELATIVE PATH FOR ID Consistency
+	// USE REPO-RELATIVE PATH + HASH FOR ID to allow history
 	// Prefix with repoName to avoid collisions between multiple repositories
 	safeRepoName := db.SanitizeID(repoName)
-	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", safeRepoName, db.SanitizeID(relPath)))
+	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s_%s", safeRepoName, db.SanitizeID(relPath), hash))
 
 	// 2. Check if changed / check if version already exists
 
@@ -397,26 +393,69 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		return fmt.Errorf("seek error: %w", err)
 	}
 
-	chunks, err := chunkContent(f, 1000)
+	fileBytes, err := io.ReadAll(f)
 	if err != nil {
-		return fmt.Errorf("chunking error: %w", err)
+		return fmt.Errorf("read error: %w", err)
+	}
+
+	var validChunks []ASTChunk
+	astChunks, logs, err := ParseAST(ctx, relPath, fileBytes)
+	if err == nil && len(astChunks) > 0 {
+		validChunks = astChunks
+		logger.Debug("  - Extracted %d AST chunks and %d log templates", len(astChunks), len(logs))
+	} else {
+		if _, err := f.Seek(0, 0); err != nil {
+			return fmt.Errorf("seek error: %w", err)
+		}
+		rawChunks, err := chunkContent(f, 1000)
+		if err != nil {
+			return fmt.Errorf("chunking error: %w", err)
+		}
+		for _, rc := range rawChunks {
+			validChunks = append(validChunks, ASTChunk{Content: rc})
+		}
 	}
 
 	// NOTE: We do NOT delete old chunks anymore. We keep history.
 
+	// 5.1 Persist Log Templates
+	if len(logs) > 0 {
+		var logBuilder strings.Builder
+		logBuilder.WriteString("BEGIN TRANSACTION; ")
+		for i, logDef := range logs {
+			// ID based on file and line
+			logID := db.FormatRecordID(schema.TableLogTemplate, fmt.Sprintf("%s_%s_%d", safeRepoName, db.SanitizeID(relPath), logDef.SourceLine))
+			
+			formatBytes, _ := json.Marshal(logDef.FormatString)
+			regexBytes, _ := json.Marshal(logDef.Regex)
+			
+			ql := fmt.Sprintf("CREATE %s SET format_string=%s, regex=%s, source_file='%s', source_line=%d;", 
+				logID, string(formatBytes), string(regexBytes), logDef.SourceFile, logDef.SourceLine)
+			logBuilder.WriteString(ql)
+
+			// Relate File -> LogTemplate
+			relID := db.FormatRecordID(schema.EdgeEmitsLog, fmt.Sprintf("%s_%s_%d", safeRepoName, db.SanitizeID(relPath), i))
+			logBuilder.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET id = %s; ", fileID, schema.EdgeEmitsLog, logID, relID))
+		}
+		logBuilder.WriteString("COMMIT;")
+		if _, err := dbClient.Execute(ctx, logBuilder.String()); err != nil {
+			logger.Warn("Failed to persist log templates for %s: %v", relPath, err)
+		}
+	}
+
 	// Batching Logic
 	batchSize := 100
-	for i := 0; i < len(chunks); i += batchSize {
+	for i := 0; i < len(validChunks); i += batchSize {
 		end := i + batchSize
-		if end > len(chunks) {
-			end = len(chunks)
+		if end > len(validChunks) {
+			end = len(validChunks)
 		}
-		batch := chunks[i:end]
+		batch := validChunks[i:end]
 
-		var validBatch []string
+		var validBatch []ASTChunk
 		var validIndices []int
 		for k, c := range batch {
-			if strings.TrimSpace(c) != "" {
+			if strings.TrimSpace(c.Content) != "" {
 				validBatch = append(validBatch, c)
 				validIndices = append(validIndices, i+k)
 			}
@@ -435,16 +474,17 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		var qlBuilder strings.Builder
 		qlBuilder.WriteString("BEGIN TRANSACTION; ")
 
-		for k, chunkContentStr := range validBatch {
+		for k, chunkObj := range validBatch {
 			originalIndex := validIndices[k]
 			// Chunk ID also uses prefixed relative path
 			chunkID := db.FormatRecordID(schema.TableFileChunk, fmt.Sprintf("%s_%s_%s_%d", safeRepoName, db.SanitizeID(relPath), hash, originalIndex))
 
-			contentBytes, _ := json.Marshal(chunkContentStr)
+			contentBytes, _ := json.Marshal(chunkObj.Content)
+			symNameBytes, _ := json.Marshal(chunkObj.SymbolName)
+			kindBytes, _ := json.Marshal(chunkObj.Kind)
 
-			// Ensure chunks are inserted only if they don't already exist, maintaining idempotency and preserving any existing embeddings.
-			ql := fmt.Sprintf(`IF array::len((SELECT * FROM %s)) = 0 THEN CREATE %s SET file=%s, hash='%s', content=%s, embedding=NONE, batch_status='pending'; END; `,
-				chunkID, chunkID, fileID, hash, string(contentBytes))
+			ql := fmt.Sprintf("CREATE %s SET file=%s, hash='%s', content=%s, symbol_name=%s, kind=%s, start_line=%d, end_line=%d, embedding=NONE, batch_status='pending'; ",
+				chunkID, fileID, hash, string(contentBytes), string(symNameBytes), string(kindBytes), chunkObj.StartLine, chunkObj.EndLine)
 
 			qlBuilder.WriteString(ql)
 		}
@@ -454,7 +494,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		if _, err := dbClient.Execute(ctx, qlBuilder.String()); err != nil {
 			logger.Error("Failed to persist pending chunks for %s: %v", relPath, err)
 		}
-		logger.Info("  - Queued %d/%d chunks for %s", end, len(chunks), relPath)
+		logger.Info("  - Queued %d/%d chunks for %s", end, len(validChunks), relPath)
 	}
 
 	return nil

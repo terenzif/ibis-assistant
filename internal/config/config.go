@@ -28,15 +28,18 @@ type Config struct {
 	DBDataPath          string            `json:"db_data_path"`
 	DBAutoUpdate        bool              `json:"db_auto_update"`
 	DiscoveryRoot       string            `json:"discovery_root"`
+	PollInterval        int               `json:"poll_interval"` // seconds
 	AutoScan            bool              `json:"auto_scan"`
 	GitRepos            []string          `json:"git_repos"` // Manual list override
 	LogFile             string            `json:"log_file"`
 	LogLevel            string            `json:"log_level"` // DEBUG, INFO, WARN, ERROR
-	MaxFileSize         int64             `json:"max_file_size"`
+	MaxFileSize         int64             `json:"max_file_size"` // bytes
+	MaxDeltaSize        int               `json:"max_delta_size"` // bytes/characters for commit diff chunking
 	IgnoredDirs         []string          `json:"ignored_dirs"`
 	IgnoredFiles        []string          `json:"ignored_files"`
 	SupportedExtensions []string          `json:"supported_extensions"`
 	LogsRoot            string            `json:"logs_root"`
+	GitTokens           map[string]string `json:"git_tokens"`
 	SMTP                SMTPConfig        `json:"smtp"`
 	ConfigLoaded        bool              `json:"-"` // True if a config file was successfully loaded
 	ConfigPath          string            `json:"-"` // Path to the file that was loaded
@@ -61,6 +64,29 @@ type GeminiKeyConfig struct {
 	AllowOverage bool   `json:"allow_overage"`
 }
 
+func (c *Config) GetGitToken(originUrl string) string {
+	if c.GitTokens == nil {
+		return ""
+	}
+
+	// Try specific matches first
+	for prefix, token := range c.GitTokens {
+		if prefix != "*" && prefix != "default" && strings.Contains(originUrl, prefix) {
+			return token
+		}
+	}
+
+	// Fallback to default
+	if token, ok := c.GitTokens["*"]; ok {
+		return token
+	}
+	if token, ok := c.GitTokens["default"]; ok {
+		return token
+	}
+
+	return ""
+}
+
 // Load returns the configuration loaded from Defaults + File + Env.
 // It accepts optional config search paths.
 func Load(paths ...string) *Config {
@@ -77,13 +103,15 @@ func Load(paths ...string) *Config {
 		RedmineConcurrency: 10,
 		CodeConcurrency:    5,
 		DBTimeout:          300,
-		DBDataPath:         "project.db",
+		DBDataPath:         "db",
 		DiscoveryRoot:      ".",
-		LogsRoot:           "./_logs",
+		PollInterval:       300,
+		LogsRoot:           "./logs",
 		AutoScan:           true,
 		LogLevel:           "INFO",
 		DBAutoUpdate:       true,
 		MaxFileSize:        10 * 1024 * 1024, // 10MB
+		MaxDeltaSize:       8000,
 		IgnoredDirs: []string{
 			".git", "node_modules", "bin", "obj", "vendor",
 			".idea", ".vscode", "dist", "build", "coverage", "target",
@@ -212,6 +240,12 @@ func Load(paths ...string) *Config {
 	if v := os.Getenv("AUTO_SCAN"); v == "true" {
 		cfg.AutoScan = true
 	}
+	if v := os.Getenv("GIT_TOKEN"); v != "" {
+		if cfg.GitTokens == nil {
+			cfg.GitTokens = make(map[string]string)
+		}
+		cfg.GitTokens["*"] = v
+	}
 	if v := os.Getenv("LOG_FILE"); v != "" {
 		cfg.LogFile = v
 	}
@@ -239,7 +273,9 @@ func Load(paths ...string) *Config {
 }
 
 func resolvePath(baseDir, path string) string {
-	if path == "" || filepath.IsAbs(path) || (len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
+	// Custom absolute path check for cross-platform robustness (e.g. D:\path on non-Windows)
+	isWinAbs := len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
+	if path == "" || filepath.IsAbs(path) || isWinAbs {
 		return path
 	}
 	return filepath.Join(baseDir, path)

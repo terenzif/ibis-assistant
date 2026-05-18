@@ -19,8 +19,8 @@ import (
 
 const (
 	EmbeddingModel           = "models/text-embedding-004"
-	GenerationModel          = "models/gemini-1.5-flash"
-	PreferredGenerationModel = "models/gemini-3-flash-preview"
+	GenerationModel          = "models/gemini-2.5-flash"
+	PreferredGenerationModel = "models/gemini-2.5-pro"
 )
 
 var BaseURL = "https://generativelanguage.googleapis.com/v1beta"

@@ -1,25 +1,20 @@
+.vscode/
+
 # Binaries
 *.exe
 *.dll
 server
 surreal.exe
-knowledge_server
-
-# Database
-knowledge.db
-knowledge.db-wal
-knowledge.db-shm
-*.db
-project.db/
-surreal.log
-
+knowledge_server.exe
 
 # Temporary
 tmp/
 .env
 
-# Repositories (Indexed content)
-_repos/
-_logs/
+# Database
+knowledge.db
+knowledge.db-wal
+knowledge.db-shm
 
-.vscode/
+dist/
+

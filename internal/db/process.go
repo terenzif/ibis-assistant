@@ -20,10 +20,7 @@ type ProcessManager struct {
 // StartEmbedded launches the surreal process in the background.
 // It expects the binary to be named 'surreal.exe' (Windows) or 'surreal' (Unix) in the current directory.
 func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (*ProcessManager, error) {
-	binName := "surreal"
-	if runtime.GOOS == "windows" {
-		binName = "surreal.exe"
-	}
+	binName := getSurrealBinPath()
 
 	// Ensure binary exists and is up to date
 	if err := EnsureSurrealDB(autoUpdate); err != nil {
@@ -31,7 +28,7 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 	}
 
 	// Construct command
-	// surreal start --user root --pass root --bind 127.0.0.1:8000 surrealkv:C:\path\to\project.db
+	// surreal start --user root --pass root --bind 127.0.0.1:8000 surrealkv:C:\path\to\db
 	bindAddr := fmt.Sprintf("127.0.0.1:%d", port)
 
 	absDataPath, err := filepath.Abs(dataPath)
@@ -57,7 +54,11 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 	cmd := exec.Command(absBinPath, args...)
 
 	// Check if log file exists/create it
-	logFile, err := os.OpenFile("surreal.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logPath := "surreal.log"
+	if exe, err := os.Executable(); err == nil {
+		logPath = filepath.Join(filepath.Dir(exe), "surreal.log")
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err == nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
@@ -73,7 +74,7 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 	}
 
 	// Wait for port to be open
-	if err := waitForPort(port, 10*time.Second); err != nil {
+	if err := waitForPort(port, 30*time.Second); err != nil {
 		// If timeout, try to kill and return error
 		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("database started but port %d did not open in time: %w", port, err)

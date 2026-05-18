@@ -111,7 +111,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 	}
 
 	expectedHash := getFileHashHelper(filePath)
-	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("main.go")))
+	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s_%s", db.SanitizeID("test-repo"), db.SanitizeID("main.go"), expectedHash))
 	cfg := config.Load()
 
 	t.Run("Skip Unchanged", func(t *testing.T) {
@@ -219,13 +219,12 @@ func TestIngestCodebase_Exclusions(t *testing.T) {
 
 	// Analyze Calls
 	// We expect processFile to be called only for main.go
-	// Helper to check if a path was processed
+	// Helper to check if a path was processed - look for UPSERT on source_file with the rel path
 	wasProcessed := func(path string) bool {
 		rel, _ := filepath.Rel(tmpDir, path)
-		// Table:Repo_File
-		target := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", db.SanitizeID("test-repo"), db.SanitizeID(rel)))
+		// Look for UPSERT source_file:⟨...⟩ which indicates the file was processed
 		for _, sql := range mockDB.ExecuteCalls {
-			if strings.Contains(sql, target) {
+			if strings.Contains(sql, fmt.Sprintf("source_file:⟨%s_%s", db.SanitizeID("test-repo"), db.SanitizeID(rel))) {
 				return true
 			}
 		}
@@ -316,8 +315,8 @@ func TestIngestCodebase_Pruning(t *testing.T) {
 	if !deletedIDs[ignoredID] {
 		t.Errorf("Ignored file was not deleted. Calls: %v", mockDB.ExecuteCalls)
 	}
-	if deletedIDs[deletedID] {
-		t.Errorf("Deleted file (physically missing) WAS deleted from DB! It should be preserved.")
+	if !deletedIDs[deletedID] {
+		t.Errorf("Deleted file (physically missing) was NOT deleted from DB! It should be removed as it's not in HEAD.")
 	}
 }
 
