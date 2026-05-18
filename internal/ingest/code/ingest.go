@@ -322,10 +322,10 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		return fmt.Errorf("hashing error: %w", err)
 	}
 
-	// USE REPO-RELATIVE PATH FOR ID Consistency
+	// USE REPO-RELATIVE PATH + HASH FOR ID to allow history
 	// Prefix with repoName to avoid collisions between multiple repositories
 	safeRepoName := db.SanitizeID(repoName)
-	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", safeRepoName, db.SanitizeID(relPath)))
+	fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s_%s", safeRepoName, db.SanitizeID(relPath), hash))
 
 	// 2. Check if changed / check if version already exists
 
@@ -483,9 +483,8 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 			symNameBytes, _ := json.Marshal(chunkObj.SymbolName)
 			kindBytes, _ := json.Marshal(chunkObj.Kind)
 
-			// Ensure chunks are inserted only if they don't already exist, maintaining idempotency and preserving any existing embeddings.
-			ql := fmt.Sprintf("IF array::len((SELECT * FROM %s)) = 0 THEN CREATE %s SET file=%s, hash='%s', content=%s, symbol_name=%s, kind=%s, start_line=%d, end_line=%d, embedding=NONE, batch_status='pending'; END; ",
-				chunkID, chunkID, fileID, hash, string(contentBytes), string(symNameBytes), string(kindBytes), chunkObj.StartLine, chunkObj.EndLine)
+			ql := fmt.Sprintf("CREATE %s SET file=%s, hash='%s', content=%s, symbol_name=%s, kind=%s, start_line=%d, end_line=%d, embedding=NONE, batch_status='pending'; ",
+				chunkID, fileID, hash, string(contentBytes), string(symNameBytes), string(kindBytes), chunkObj.StartLine, chunkObj.EndLine)
 
 			qlBuilder.WriteString(ql)
 		}

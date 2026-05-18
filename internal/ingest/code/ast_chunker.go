@@ -90,15 +90,15 @@ func ParseAST(ctx context.Context, filePath string, content []byte) ([]ASTChunk,
 	}
 	tmpFile.Close()
 
-	// Locate ast-grep binary
-	sgPath := filepath.Join(".", "dist", "sg.exe")
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	sgPath := filepath.Join(exeDir, "sg.exe")
 	if _, err := os.Stat(sgPath); os.IsNotExist(err) {
 		sgPath = "sg.exe"
 	}
 
 	cmd := exec.CommandContext(ctx, sgPath, "scan", "--json=stream", tmpFile.Name())
-	// Set the working directory to dist so ast-grep can find sgconfig.yml
-	cmd.Dir = filepath.Join(".", "dist")
+	cmd.Dir = exeDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	_ = cmd.Run()

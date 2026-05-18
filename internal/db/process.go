@@ -74,7 +74,7 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 	}
 
 	// Wait for port to be open
-	if err := waitForPort(port, 10*time.Second); err != nil {
+	if err := waitForPort(port, 30*time.Second); err != nil {
 		// If timeout, try to kill and return error
 		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("database started but port %d did not open in time: %w", port, err)

@@ -8,20 +8,49 @@
   "db_password": "root",
   "db_data_path": "./db",
   "db_auto_update": true,
-  "gemini_keys": [],
+  "gemini_keys": [
+    {
+      "key": "",
+      "rpm": 3000,
+      "tpm": 1000000,
+      "rpd": 10000,
+      "owner": "Fabbio"
+    },
+    {
+      "key": "",
+      "rpm": 100,
+      "tpm": 30000,
+      "rpd": 1000,
+      "owner": "Fatter"
+    },
+    {
+      "key": "",
+      "rpm": 100,
+      "tpm": 30000,
+      "rpd": 1000,
+      "owner": "Luca"
+    },
+    {
+      "key": "",
+      "rpm": 100,
+      "tpm": 30000,
+      "rpd": 1000,
+      "owner": "NicolaL"
+    }
+  ],
   "gemini_rpm": 100,
   "redmine_url": "https://redmine.users.noreply.github.com/",
   "redmine_key": "",
   "discovery_root": "./repos",
   "logs_root": "./logs",
   "smtp": {
-    "enabled": false,
-    "host": "smtp.example.com",
-    "port": 587,
-    "user": "",
+    "enabled": true,
+    "host": "shout01.ot-mail.it",
+    "port": 25,
+    "user": "1258935.out.ot-mail.it",
     "password": "",
-    "from": "noreply@example.com",
-    "to": "admin@example.com"
+    "from": "knowledge-server@users.noreply.github.com",
+    "to": "terenzif@users.noreply.github.com"
   },
   "auto_scan": true,
   "git_repos": [],

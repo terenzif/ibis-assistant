@@ -228,6 +228,7 @@ func processGitLogStream(
 	// effectively parallelizing the two stages.
 	jobChan := make(chan string, 100)
 	var wg sync.WaitGroup
+	seenIssues := make(map[string]bool)
 
 	if redmineClient != nil {
 		for i := 0; i < concurrency; i++ {
@@ -327,9 +328,12 @@ func processGitLogStream(
 
 				// In-Band Ingestion: Trigger Redmine fetch if client is available
 				if redmineClient != nil {
-					select {
-					case jobChan <- issueIDStr:
-					case <-ctx.Done():
+					if !seenIssues[issueIDStr] {
+						seenIssues[issueIDStr] = true
+						select {
+						case jobChan <- issueIDStr:
+						case <-ctx.Done():
+						}
 					}
 				} else {
 					// Just ensure existence

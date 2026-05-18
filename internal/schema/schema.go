@@ -26,6 +26,7 @@ const (
 	TableMemory     = "memory"      // Memoria collaborativa fornita dal client
 	TableReasoning  = "reasoning"   // Esiti di ragionamento semantico
 	TableLogTemplate = "log_template" // Estratti statici dei log dal codice sorgente
+	TableSystem      = "system"       // Metadata di sistema e usage tracking
 
 
 	// Edges
@@ -48,6 +49,7 @@ const (
 )
 
 var Definition = []string{
+	fmt.Sprintf("REMOVE INDEX file_path ON TABLE %s;", TableFile),
 	// Define Tables (Required for SurrealDB v3 strictness)
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableRepo),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableBranch),
@@ -68,6 +70,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableMemory),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableReasoning),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableLogTemplate),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableSystem),
 
 	// Define Edges (Tables for Relations)
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION SCHEMALESS;", EdgeContains),
@@ -101,7 +104,8 @@ var Definition = []string{
 
 	// Define Indexes
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),
-	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path UNIQUE;", TableFile),
+	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path;", TableFile),
+	fmt.Sprintf("DEFINE INDEX file_version ON TABLE %s COLUMNS path, hash UNIQUE;", TableFile),
 	fmt.Sprintf("DEFINE INDEX issue_id ON TABLE %s COLUMNS id UNIQUE;", TableIssue),
 
 	// Log & Project Indexes
