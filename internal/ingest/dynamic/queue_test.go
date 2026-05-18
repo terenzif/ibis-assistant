@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/deckonline/knowledge_mcp/internal/auth"
+	"github.com/deckonline/knowledge_mcp/internal/config"
 )
 
 type mockTokenProvider struct {
@@ -79,8 +80,11 @@ func TestProjectIngestionManager_Enqueue_WorkspaceSync(t *testing.T) {
 
 	// 2. Initialize ProjectIngestionManager with mock TokenProvider
 	discoveryRoot := t.TempDir()
-	ctx := context.WithValue(context.Background(), auth.TokenProviderKey, &mockTokenProvider{token: "mock-token"})
-	manager := NewProjectIngestionManager(ctx, discoveryRoot)
+	_ = context.WithValue(context.Background(), auth.TokenProviderKey, &mockTokenProvider{token: "mock-token"})
+	cfg := &config.Config{
+		DiscoveryRoot: discoveryRoot,
+	}
+	manager := NewProjectIngestionManager(cfg)
 
 	var processJobCalled bool
 	manager.ProcessJob = func(ctx context.Context, job IngestionJob, repoPath string) error {
