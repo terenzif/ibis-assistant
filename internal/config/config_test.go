@@ -159,6 +159,18 @@ func TestResolvePath(t *testing.T) {
 			expected: "",
 		},
 		{
+			name:     "Unix absolute path",
+			baseDir:  baseDir,
+			path:     "/var/log/file.db",
+			expected: "/var/log/file.db",
+		},
+		{
+			name:     "Windows mixed slash absolute path",
+			baseDir:  baseDir,
+			path:     "E:/data\\file.db",
+			expected: "E:/data\\file.db",
+		},
+		{
 			name:     "Current directory dot",
 			baseDir:  baseDir,
 			path:     ".",
