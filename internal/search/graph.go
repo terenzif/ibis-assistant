@@ -7,6 +7,7 @@ import (
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/deckonline/knowledge_mcp/internal/schema"
 )
 
 // GraphContext represents the historical context of a file
@@ -206,4 +207,117 @@ func GetFileContext(ctx context.Context, dbClient db.Executor, filePath string) 
 	}
 
 	return graphCtx, nil
+}
+
+// SymbolContext represents the architectural context of a symbol
+type SymbolContext struct {
+	Name          string   `json:"name"`
+	Kind          string   `json:"kind"`
+	File          string   `json:"file"`
+	Callers       []string `json:"callers"`
+	CalledSymbols []string `json:"called_symbols"`
+	BlastRadius   []string `json:"blast_radius"`
+}
+
+// AnalyzeBlastRadius performs a graph traversal to find all upstream functions that call this symbol
+func AnalyzeBlastRadius(ctx context.Context, dbClient db.Executor, repoName, symbolFile, symbolName string) (*SymbolContext, error) {
+	// Construct the symbol ID exactly as ingested
+	safeRepoName := db.SanitizeID(repoName)
+	symbolID := db.FormatRecordID(schema.TableSymbol, fmt.Sprintf("%s_%s_%s", safeRepoName, db.SanitizeID(symbolFile), db.SanitizeID(symbolName)))
+
+	// Use SurrealQL Graph Traversal to go backwards through 'calls' edges
+	// <-calls<-symbol gets direct callers
+	// <->calls gets both directions.
+	// For blast radius we want everything that depends on this symbol.
+	// We can use a recursive fetch if SurrealDB supports it, but simple depth is ok.
+	ql := fmt.Sprintf(`
+	SELECT
+		name,
+		kind,
+		file.path as file_path,
+		<-calls<-symbol.name as direct_callers,
+		->calls->symbol.name as calls_out,
+		<-calls<-symbol<-calls<-symbol.name as blast_radius
+	FROM %s;
+	`, symbolID)
+
+	res, err := dbClient.Execute(ctx, ql)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query blast radius: %w", err)
+	}
+
+	rows, ok := res.([]interface{})
+	if !ok || len(rows) == 0 {
+		return nil, fmt.Errorf("symbol not found in graph")
+	}
+
+	row := rows[0].(map[string]interface{})
+
+	symCtx := &SymbolContext{
+		Name: safeGetString(row, "name"),
+		Kind: safeGetString(row, "kind"),
+		File: safeGetString(row, "file_path"),
+	}
+
+	if directCallers, ok := row["direct_callers"].([]interface{}); ok {
+		for _, c := range directCallers {
+			symCtx.Callers = append(symCtx.Callers, c.(string))
+		}
+	}
+
+	if callsOut, ok := row["calls_out"].([]interface{}); ok {
+		for _, c := range callsOut {
+			symCtx.CalledSymbols = append(symCtx.CalledSymbols, c.(string))
+		}
+	}
+
+	if blastRadius, ok := row["blast_radius"].([]interface{}); ok {
+		for _, c := range blastRadius {
+			symCtx.BlastRadius = append(symCtx.BlastRadius, c.(string))
+		}
+	}
+
+	return symCtx, nil
+}
+
+// FindDeadCode finds symbols (Functions/Methods) in the repository that have no incoming call edges
+func FindDeadCode(ctx context.Context, dbClient db.Executor, repoName string) ([]string, error) {
+	// Query: Select symbols in this repo that are functions and have count(<-calls) == 0
+	// We filter out Test functions implicitly or explicitly in production.
+	ql := fmt.Sprintf(`
+	SELECT name, file.path as file_path
+	FROM %s
+	WHERE string::starts_with(id, 'symbol:%s')
+	  AND (kind = 'function_declaration' OR kind = 'method_declaration')
+	  AND array::len(<-calls) = 0;
+	`, schema.TableSymbol, db.SanitizeID(repoName))
+
+	res, err := dbClient.Execute(ctx, ql)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dead code: %w", err)
+	}
+
+	rows, ok := res.([]interface{})
+	if !ok {
+		return []string{}, nil
+	}
+
+	var deadSymbols []string
+	for _, raw := range rows {
+		row := raw.(map[string]interface{})
+		name := safeGetString(row, "name")
+		file := safeGetString(row, "file_path")
+		deadSymbols = append(deadSymbols, fmt.Sprintf("%s (in %s)", name, file))
+	}
+
+	return deadSymbols, nil
+}
+
+func safeGetString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok && val != nil {
+		if s, ok := val.(string); ok {
+			return s
+		}
+	}
+	return ""
 }

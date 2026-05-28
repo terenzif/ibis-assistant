@@ -10,11 +10,13 @@ import (
 
 type MockDBBatch struct {
 	LastSQL string
+	Queries []string
 	Rows    interface{}
 }
 
 func (m *MockDBBatch) Execute(ctx context.Context, sql string) (interface{}, error) {
 	m.LastSQL = sql
+	m.Queries = append(m.Queries, sql)
 	return m.Rows, nil
 }
 
@@ -129,11 +131,16 @@ func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {
 			// But we can check if it attempted to call Execute for the selecting pending chunks.
 			bm.processPendingChunks()
 			
-			if !strings.Contains(db.LastSQL, schema.TableFileChunk) {
-				t.Errorf("Expected query on %s, got %s", schema.TableFileChunk, db.LastSQL)
+			foundFileChunkQuery := false
+			for _, q := range db.Queries {
+				if strings.Contains(q, schema.TableFileChunk) && strings.Contains(q, "batch_status = 'pending'") {
+					foundFileChunkQuery = true
+					break
+				}
 			}
-			if !strings.Contains(db.LastSQL, "batch_status = 'pending'") {
-				t.Errorf("Expected filter on pending status, got %s", db.LastSQL)
+
+			if !foundFileChunkQuery {
+				t.Errorf("Expected query on %s with pending filter, queries were: %v", schema.TableFileChunk, db.Queries)
 			}
 		})
 	}

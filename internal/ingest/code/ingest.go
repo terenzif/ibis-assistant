@@ -399,10 +399,27 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 	}
 
 	var validChunks []ASTChunk
-	astChunks, logs, err := ParseAST(ctx, relPath, fileBytes)
+	astChunks, logs, calls, err := ParseAST(ctx, relPath, fileBytes)
 	if err == nil && len(astChunks) > 0 {
 		validChunks = astChunks
-		logger.Debug("  - Extracted %d AST chunks and %d log templates", len(astChunks), len(logs))
+		logger.Debug("  - Extracted %d AST chunks, %d log templates, and %d calls", len(astChunks), len(logs), len(calls))
+
+		// Persist Calls (Semantic Architecture)
+		// This translates AST CallEdges into actual Graph Relations (Symbol -> calls -> Symbol)
+		for _, call := range calls {
+			// We format the ID exactly as we create it in the chunk builder below
+			callerSymbolID := db.FormatRecordID(schema.TableSymbol, fmt.Sprintf("%s_%s_%s", safeRepoName, db.SanitizeID(relPath), db.SanitizeID(call.CallerName)))
+			calleeSymbolID := db.FormatRecordID(schema.TableSymbol, fmt.Sprintf("%s_%s_%s", safeRepoName, db.SanitizeID(relPath), db.SanitizeID(call.CalleeName)))
+
+			// We issue an upsert for the nodes just in case they haven't been created yet by the chunk logic
+			nodeQL := fmt.Sprintf("UPSERT %s SET name = '%s', file = %s; UPSERT %s SET name = '%s', file = %s;",
+				callerSymbolID, db.EscapeSQL(call.CallerName), fileID,
+				calleeSymbolID, db.EscapeSQL(call.CalleeName), fileID)
+
+			edgeQL := fmt.Sprintf("RELATE %s->%s->%s SET file = '%s', line = %d;",
+				callerSymbolID, schema.EdgeCalls, calleeSymbolID, relPath, call.StartLine)
+			dbClient.Execute(ctx, nodeQL + edgeQL)
+		}
 	} else {
 		if _, err := f.Seek(0, 0); err != nil {
 			return fmt.Errorf("seek error: %w", err)
@@ -487,6 +504,13 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 				chunkID, fileID, hash, string(contentBytes), string(symNameBytes), string(kindBytes), chunkObj.StartLine, chunkObj.EndLine)
 
 			qlBuilder.WriteString(ql)
+
+			// If chunk represents a symbol (like function or class), explicitly create a Symbol node
+			if chunkObj.Kind != "" && !strings.Contains(chunkObj.Kind, "snippet") && chunkObj.SymbolName != "" {
+				symbolID := db.FormatRecordID(schema.TableSymbol, fmt.Sprintf("%s_%s_%s", safeRepoName, db.SanitizeID(relPath), db.SanitizeID(chunkObj.SymbolName)))
+				qlBuilder.WriteString(fmt.Sprintf("CREATE %s SET name = %s, kind = %s, file = %s; ", symbolID, string(symNameBytes), string(kindBytes), fileID))
+				qlBuilder.WriteString(fmt.Sprintf("RELATE %s->%s->%s; ", fileID, schema.EdgeContains, symbolID))
+			}
 		}
 
 		qlBuilder.WriteString("COMMIT;")
