@@ -658,6 +658,62 @@ func runServer(ctx context.Context) {
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
+	s.AddTool(mcp.NewTool("analyze_blast_radius",
+		mcp.WithDescription("Analyze the blast radius of changing a specific function or symbol."),
+		mcp.WithString("repo_name", mcp.Description("Name of the repository")),
+		mcp.WithString("file_path", mcp.Description("Relative path to the file containing the symbol")),
+		mcp.WithString("symbol_name", mcp.Description("Name of the function or symbol")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: analyze_blast_radius")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+
+		repoName := getStringArg(args, "repo_name")
+		filePath := getStringArg(args, "file_path")
+		symbolName := getStringArg(args, "symbol_name")
+
+		if repoName == "" || filePath == "" || symbolName == "" {
+			return mcp.NewToolResultError("Missing required arguments"), nil
+		}
+
+		res, err := search.AnalyzeBlastRadius(ctx, dbClient, repoName, filePath, symbolName)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Blast radius analysis failed: %v", err)), nil
+		}
+
+		bytes, _ := json.MarshalIndent(res, "", "  ")
+		return mcp.NewToolResultText(string(bytes)), nil
+	})
+
+	s.AddTool(mcp.NewTool("find_dead_code",
+		mcp.WithDescription("Find potential dead code (functions with no callers) in a repository."),
+		mcp.WithString("repo_name", mcp.Description("Name of the repository to scan")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: find_dead_code")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+
+		repoName := getStringArg(args, "repo_name")
+		if repoName == "" {
+			return mcp.NewToolResultError("Missing required argument: repo_name"), nil
+		}
+
+		res, err := search.FindDeadCode(ctx, dbClient, repoName)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Dead code analysis failed: %v", err)), nil
+		}
+
+		if len(res) == 0 {
+			return mcp.NewToolResultText("No dead code found."), nil
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Found %d potentially dead symbols:\n- %s", len(res), strings.Join(res, "\n- "))), nil
+	})
+
 	s.AddTool(mcp.NewTool("ask_project",
 		mcp.WithDescription("Ask a natural language question about the project history and code. Uses Agentic reasoning."),
 		mcp.WithString("query", mcp.Description("The question (e.g., 'Why was login changed?')")),

@@ -1,0 +1,7 @@
+id: css-calls
+language: css
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: identifier
