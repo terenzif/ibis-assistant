@@ -28,9 +28,13 @@ const (
 	TableLogTemplate = "log_template" // Estratti statici dei log dal codice sorgente
 	TableSystem      = "system"       // Metadata di sistema e usage tracking
 
+	// Axon-like Nodes
+	TableSymbol    = "symbol"    // Explicit representation of Function, Class, Method
+	TableCommunity = "community" // Functional cluster of symbols
+	TableProcess   = "process"   // Traced execution flow
 
 	// Edges
-	EdgeContains   = "contains"   // Repo -> Branch, Repo -> File
+	EdgeContains   = "contains"   // Repo -> Branch, Repo -> File, File -> Symbol
 	EdgeParentOf   = "parent_of"  // Commit -> Commit
 	EdgePointedTo  = "pointed_to" // Branch -> Commit
 	EdgeChanged    = "changed"    // Commit -> File
@@ -46,6 +50,13 @@ const (
 	EdgeHasReasoning = "has_reasoning" // Repo -> Reasoning
 	EdgeHasCommitChunk = "has_commit_chunk" // Commit -> CommitChunk
 	EdgeEmitsLog     = "emits_log"     // File -> LogTemplate
+
+	// Axon-like Edges
+	EdgeCalls       = "calls"        // Symbol -> Symbol (Function invocations)
+	EdgeUsesType    = "uses_type"    // Symbol -> Symbol (Parameter/Return types)
+	EdgeExtends     = "extends"      // Symbol -> Symbol (Inheritance/Interfaces)
+	EdgeCoupledWith = "coupled_with" // File -> File (Co-occurring changes in Git)
+	EdgeMemberOf    = "member_of"    // Symbol -> Community
 )
 
 var Definition = []string{
@@ -72,12 +83,17 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableLogTemplate),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableSystem),
 
+	// Axon-like Tables
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableSymbol),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableCommunity),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableProcess),
+
 	// Define Edges (Tables for Relations)
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION SCHEMALESS;", EdgeContains),
 	fmt.Sprintf("REMOVE FIELD in ON TABLE %s;", EdgeContains),
 	fmt.Sprintf("REMOVE FIELD out ON TABLE %s;", EdgeContains),
 	fmt.Sprintf("DEFINE FIELD in ON TABLE %s TYPE record<%s>;", EdgeContains, TableRepo),
-	fmt.Sprintf("DEFINE FIELD out ON TABLE %s TYPE record<%s | %s>;", EdgeContains, TableBranch, TableFile),
+	fmt.Sprintf("DEFINE FIELD out ON TABLE %s TYPE record<%s | %s | %s>;", EdgeContains, TableBranch, TableFile, TableSymbol),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeParentOf, TableCommit, TableCommit),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgePointedTo, TableBranch, TableCommit),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeChanged, TableCommit, TableFile),
@@ -101,6 +117,13 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasReasoning, TableRepo, TableReasoning),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeHasCommitChunk, TableCommit, TableCommitChunk),
 	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeEmitsLog, TableFile, TableLogTemplate),
+
+	// Axon-like Edges definitions
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeCalls, TableSymbol, TableSymbol),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeUsesType, TableSymbol, TableSymbol),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeExtends, TableSymbol, TableSymbol),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeCoupledWith, TableFile, TableFile),
+	fmt.Sprintf("DEFINE TABLE %s TYPE RELATION IN %s OUT %s SCHEMALESS;", EdgeMemberOf, TableSymbol, TableCommunity),
 
 	// Define Indexes
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),

@@ -229,6 +229,7 @@ func processGitLogStream(
 	jobChan := make(chan string, 100)
 	var wg sync.WaitGroup
 	seenIssues := make(map[string]bool)
+	var filesInCommit []string
 
 	if redmineClient != nil {
 		for i := 0; i < concurrency; i++ {
@@ -298,6 +299,9 @@ func processGitLogStream(
 			// Skip processing if the commit has already been ingested.
 			skipping = false
 			currentCommitID = commitID
+
+			// We track files changed in this commit for coupling analysis
+			filesInCommit = []string{}
 
 			// Author Node
 			authorID := db.FormatRecordID(schema.TableAuthor, db.SanitizeID(authorName))
@@ -428,6 +432,20 @@ func processGitLogStream(
 			if currentCommitID != "" {
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET impact = %f, added = %d, deleted = %d;\n",
 					currentCommitID, schema.EdgeChanged, fileID, impact, added, deleted))
+
+				// Change Coupling Edge: relate this file to all other files previously seen in this commit
+				// In a real scenario with thousands of files this needs optimization, but fine for local bounds
+				// and using INSERT IF NOT EXISTS or UPSERT to increment strength.
+				// Since SurrealDB doesn't have a direct upsert-increment syntax in RELATE, we just create the edge
+				// and a background job could consolidate them, or we just write them and query with GROUP BY count().
+				// For now, we just create a coupled_with edge for every pair.
+				for _, prevFileID := range filesInCommit {
+					batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET commit = %s;\n",
+						fileID, schema.EdgeCoupledWith, prevFileID, currentCommitID))
+					batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET commit = %s;\n",
+						prevFileID, schema.EdgeCoupledWith, fileID, currentCommitID))
+				}
+				filesInCommit = append(filesInCommit, fileID)
 			}
 		}
 

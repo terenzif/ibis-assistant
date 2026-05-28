@@ -19,6 +19,12 @@ type ASTChunk struct {
 	EndLine    uint32
 }
 
+type CallEdge struct {
+	CallerName string
+	CalleeName string
+	StartLine  uint32
+}
+
 type LogTemplate struct {
 	FormatString string
 	Regex        string
@@ -77,16 +83,16 @@ func parseFormatToRegex(format string) string {
 	return "^" + regexStr + "$"
 }
 
-func ParseAST(ctx context.Context, filePath string, content []byte) ([]ASTChunk, []LogTemplate, error) {
+func ParseAST(ctx context.Context, filePath string, content []byte) ([]ASTChunk, []LogTemplate, []CallEdge, error) {
 	// Write to a temporary file since we get content from git blob directly
 	tmpFile, err := os.CreateTemp("", "sg_ast_*.tmp" + filepath.Ext(filePath))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.Write(content); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	tmpFile.Close()
 
@@ -105,6 +111,7 @@ func ParseAST(ctx context.Context, filePath string, content []byte) ([]ASTChunk,
 
 	var chunks []ASTChunk
 	var logs []LogTemplate
+	var calls []CallEdge
 
 	scanner := bufio.NewScanner(&stdout)
 	for scanner.Scan() {
@@ -133,8 +140,17 @@ func ParseAST(ctx context.Context, filePath string, content []byte) ([]ASTChunk,
 				SourceFile:   filePath,
 				SourceLine:   match.Range.Start.Line + 1,
 			})
+		} else if strings.HasSuffix(match.RuleId, "-calls") {
+			// Extract callee name. A real impl would parse the text deeper or use ast-grep multiple-var match
+			// Here we just use the matched text (e.g. `fmt.Println`)
+			callee := strings.SplitN(match.Text, "(", 2)[0]
+			calls = append(calls, CallEdge{
+				CallerName: "Unknown", // Would need contextual match to find parent func
+				CalleeName: callee,
+				StartLine:  match.Range.Start.Line + 1,
+			})
 		}
 	}
 
-	return chunks, logs, nil
+	return chunks, logs, calls, nil
 }
