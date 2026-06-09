@@ -24,25 +24,47 @@ import (
 	"github.com/deckonline/knowledge_mcp/internal/ingest/dynamic"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/git"
 	"github.com/deckonline/knowledge_mcp/internal/ingest/logs"
-	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/optimization"
+	"github.com/deckonline/knowledge_mcp/internal/repopr"
+	repoprado "github.com/deckonline/knowledge_mcp/internal/repopr/providers/azuredevops"
 	"github.com/deckonline/knowledge_mcp/internal/search"
+	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	ticketado "github.com/deckonline/knowledge_mcp/internal/ticketing/providers/azuredevops"
+	ticketjira "github.com/deckonline/knowledge_mcp/internal/ticketing/providers/jira"
+	ticketredmine "github.com/deckonline/knowledge_mcp/internal/ticketing/providers/redmine"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// AuthMiddleware injects the X-Redmine-API-Key into the request context for downstream services.
+// AuthMiddleware injects ticketing and repo-provider auth headers into request context.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-Redmine-API-Key")
-		if key != "" {
-			ctx := context.WithValue(r.Context(), auth.RedmineKeyContextKey, key)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		} else {
-			next.ServeHTTP(w, r)
+		ctx := r.Context()
+
+		if key := strings.TrimSpace(r.Header.Get("X-Redmine-API-Key")); key != "" {
+			ctx = context.WithValue(ctx, auth.RedmineKeyContextKey, key)
 		}
+		if email := strings.TrimSpace(r.Header.Get("X-Jira-Email")); email != "" {
+			ctx = context.WithValue(ctx, auth.JiraEmailContextKey, email)
+		}
+		if token := strings.TrimSpace(r.Header.Get("X-Jira-API-Token")); token != "" {
+			ctx = context.WithValue(ctx, auth.JiraAPITokenContextKey, token)
+		}
+		if pat := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-PAT")); pat != "" {
+			ctx = context.WithValue(ctx, auth.AzureDevOpsPATContextKey, pat)
+		}
+		if org := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Org")); org != "" {
+			ctx = context.WithValue(ctx, auth.AzureDevOpsOrgContextKey, org)
+		}
+		if project := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Project")); project != "" {
+			ctx = context.WithValue(ctx, auth.AzureDevOpsProjectContextKey, project)
+		}
+		if repo := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Repo")); repo != "" {
+			ctx = context.WithValue(ctx, auth.AzureDevOpsRepoContextKey, repo)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -114,16 +136,6 @@ func printHelp() {
 	fmt.Printf("  %s run -port 9000 -mode sse\n", binName)
 }
 
-type redmineSearchToolResponse struct {
-	Summary    string                      `json:"summary"`
-	Issues     []redmine.Issue             `json:"issues"`
-	TotalCount int                         `json:"total_count"`
-	Offset     int                         `json:"offset"`
-	Limit      int                         `json:"limit"`
-	Compact    []string                    `json:"compact"`
-	Filters    redmine.SearchIssuesParams  `json:"filters"`
-}
-
 func getStringArg(args map[string]interface{}, key string) string {
 	v, ok := args[key]
 	if !ok {
@@ -160,62 +172,6 @@ func getIntArg(args map[string]interface{}, key string) (int, error) {
 	default:
 		return 0, fmt.Errorf("%s must be a number", key)
 	}
-}
-
-func buildSearchParamsFromArgs(args map[string]interface{}) (redmine.SearchIssuesParams, error) {
-	limit, err := getIntArg(args, "limit")
-	if err != nil {
-		return redmine.SearchIssuesParams{}, err
-	}
-	offset, err := getIntArg(args, "offset")
-	if err != nil {
-		return redmine.SearchIssuesParams{}, err
-	}
-
-	params := redmine.SearchIssuesParams{
-		Query:        getStringArg(args, "query"),
-		ProjectID:    getStringArg(args, "project_id"),
-		StatusID:     getStringArg(args, "status_id"),
-		TrackerID:    getStringArg(args, "tracker_id"),
-		AssignedToID: getStringArg(args, "assigned_to_id"),
-		AuthorID:     getStringArg(args, "author_id"),
-		PriorityID:   getStringArg(args, "priority_id"),
-		UpdatedFrom:  getStringArg(args, "updated_from"),
-		UpdatedTo:    getStringArg(args, "updated_to"),
-		Limit:        limit,
-		Offset:       offset,
-		Sort:         getStringArg(args, "sort"),
-	}
-
-	if err := redmine.ValidateSearchParams(params); err != nil {
-		return redmine.SearchIssuesParams{}, err
-	}
-
-	return params, nil
-}
-
-func formatRedmineSearchResponse(result *redmine.SearchIssuesResult, params redmine.SearchIssuesParams, label string) (string, error) {
-	compact := make([]string, 0, len(result.Issues))
-	for _, idx := range result.Issues {
-		compact = append(compact, fmt.Sprintf("[%d] %s (%s) - %s", idx.ID, idx.Subject, idx.Status.Name, idx.Author.Name))
-	}
-
-	payload := redmineSearchToolResponse{
-		Summary:    label,
-		Issues:     result.Issues,
-		TotalCount: result.TotalCount,
-		Offset:     result.Offset,
-		Limit:      result.Limit,
-		Compact:    compact,
-		Filters:    params,
-	}
-
-	b, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return "", err
-	}
-
-	return string(b), nil
 }
 
 func runServer(ctx context.Context) {
@@ -372,8 +328,48 @@ func runServer(ctx context.Context) {
 		defer batchManager.Stop()
 	}
 
-	logger.Info("Initializing Redmine Client at %s...", cfg.RedmineURL)
-	redmineClient := redmine.NewClient(cfg.RedmineURL, cfg.RedmineKey)
+	ticketCfg, ticketCfgErr := ticketing.LoadConfig()
+	if ticketCfgErr != nil {
+		logger.Warn("Ticketing config not found or invalid (%v). Falling back to defaults.", ticketCfgErr)
+		ticketCfg = ticketing.NewDefaultConfig()
+	}
+	ticketService := ticketing.NewService(ticketCfg, dbClient)
+	if ticketCfg.Providers.Redmine.BaseURL != "" {
+		logger.Info("Initializing ticket provider: redmine (%s)", ticketCfg.Providers.Redmine.BaseURL)
+		ticketService.RegisterProvider(ticketredmine.New(ticketCfg.Providers.Redmine))
+	}
+	if ticketCfg.Providers.Jira.BaseURL != "" {
+		logger.Info("Initializing ticket provider: jira (%s)", ticketCfg.Providers.Jira.BaseURL)
+		ticketService.RegisterProvider(ticketjira.New(ticketCfg.Providers.Jira))
+	}
+	if ticketCfg.Providers.AzureDevOps.OrganizationURL != "" {
+		logger.Info("Initializing ticket provider: azure_devops (%s)", ticketCfg.Providers.AzureDevOps.OrganizationURL)
+		ticketService.RegisterProvider(ticketado.New(ticketCfg.Providers.AzureDevOps))
+	}
+	if dbClient != nil {
+		if err := ticketing.MigrateLegacyIssues(ctx, dbClient); err != nil {
+			logger.Warn("Legacy issue migration warning: %v", err)
+		}
+	}
+
+	projectProviderMap := map[string]repopr.ProviderName{}
+	for project, provider := range ticketCfg.ProjectProviderMap {
+		projectProviderMap[project] = repopr.ProviderName(provider)
+	}
+	prService := repopr.NewService(repopr.Config{
+		DefaultProvider:     repopr.ProviderName(ticketCfg.DefaultProvider),
+		ProjectProviderMap:  projectProviderMap,
+		DefaultTargetBranch: ticketCfg.PR.DefaultTargetBranch,
+		ProjectTargetBranch: ticketCfg.PR.ProjectTargetBranch,
+	})
+	if ticketCfg.Providers.AzureDevOps.OrganizationURL != "" {
+		prService.RegisterProvider(repoprado.New(repoprado.Config{
+			OrganizationURL: ticketCfg.Providers.AzureDevOps.OrganizationURL,
+			Project:         ticketCfg.Providers.AzureDevOps.Project,
+			Repository:      ticketCfg.Providers.AzureDevOps.Repository,
+			PAT:             ticketCfg.Providers.AzureDevOps.PAT,
+		}))
+	}
 
 	searchService := &search.Service{DB: dbClient, AI: aiClient}
 	optimizer := optimization.NewOptimizer(dbClient, aiClient, searchService)
@@ -384,8 +380,8 @@ func runServer(ctx context.Context) {
 		logger.Warn("   - Add keys to 'config.json' (gemini_keys: [\"...\"])")
 		logger.Warn("   - Or set 'GEMINI_API_KEY' environment variable.")
 	}
-	if cfg.RedmineURL == "" {
-		logger.Warn("⚠️  Redmine URL not configured. Issue tracking features will be limited.")
+	if len(ticketService.Capabilities()["providers"].([]string)) == 0 {
+		logger.Warn("⚠️  No ticketing providers configured. ticket_* tools will return configuration errors.")
 	}
 
 	// --- [NEW] Background Indexing ---
@@ -438,7 +434,8 @@ func runServer(ctx context.Context) {
 					}
 
 					logger.Info("Background: Indexing Git history for %s...", repoName)
-					if err := git.IngestRepo(ctx, dbClient, redmineClient, r, repoName, cfg.RedmineConcurrency); err != nil {
+					patterns := ticketService.ReferencePatternsForProject(repoName)
+					if err := git.IngestRepo(ctx, dbClient, ticketService, r, repoName, cfg.RedmineConcurrency, patterns...); err != nil {
 						logger.Error("Background: Git ingestion error for %s: %v", repoName, err)
 					}
 				}()
@@ -480,7 +477,8 @@ func runServer(ctx context.Context) {
 		ingestionManager.ProcessJob = func(jobCtx context.Context, job dynamic.IngestionJob, repoPath string) error {
 			repoName := job.ProjectName
 			logger.Info("Background: Indexing Git history for %s...", repoName)
-			if err := git.IngestRepo(jobCtx, dbClient, redmineClient, repoPath, repoName, cfg.RedmineConcurrency); err != nil {
+			patterns := ticketService.ReferencePatternsForProject(repoName)
+			if err := git.IngestRepo(jobCtx, dbClient, ticketService, repoPath, repoName, cfg.RedmineConcurrency, patterns...); err != nil {
 				return fmt.Errorf("git ingestion error for %s: %w", repoName, err)
 			}
 			logger.Info("Background: Vectorizing codebase for %s...", repoName)
@@ -489,6 +487,29 @@ func runServer(ctx context.Context) {
 			}
 			return nil
 		}
+	}
+
+	type repoSessionContext struct {
+		ProjectName string
+		OriginURL   string
+		Branch      string
+		Commit      string
+	}
+	var sessionMu sync.RWMutex
+	projectSessions := map[string]repoSessionContext{}
+	setSession := func(s repoSessionContext) {
+		if strings.TrimSpace(s.ProjectName) == "" {
+			return
+		}
+		sessionMu.Lock()
+		projectSessions[s.ProjectName] = s
+		sessionMu.Unlock()
+	}
+	getSession := func(projectName string) (repoSessionContext, bool) {
+		sessionMu.RLock()
+		defer sessionMu.RUnlock()
+		val, ok := projectSessions[projectName]
+		return val, ok
 	}
 
 	// 7. Register Tools
@@ -504,7 +525,7 @@ func runServer(ctx context.Context) {
 		if !ok {
 			return mcp.NewToolResultError("Invalid arguments"), nil
 		}
-		
+
 		syncDone := make(chan dynamic.IngestionResult, 1)
 		job := dynamic.IngestionJob{
 			ProjectName: getStringArg(args, "project_name"),
@@ -522,6 +543,12 @@ func runServer(ctx context.Context) {
 				logger.Info(msg)
 			},
 		}
+		setSession(repoSessionContext{
+			ProjectName: job.ProjectName,
+			OriginURL:   job.OriginURL,
+			Branch:      job.Branch,
+			Commit:      job.Commit,
+		})
 
 		ingestionManager.Enqueue(job)
 
@@ -557,6 +584,12 @@ func runServer(ctx context.Context) {
 			Branch:      getStringArg(args, "branch"),
 			Commit:      getStringArg(args, "commit"),
 		}
+		setSession(repoSessionContext{
+			ProjectName: job.ProjectName,
+			OriginURL:   job.OriginURL,
+			Branch:      job.Branch,
+			Commit:      job.Commit,
+		})
 		ingestionManager.Enqueue(job)
 		return mcp.NewToolResultText("Aggiornamento accodato con successo."), nil
 	})
@@ -572,7 +605,7 @@ func runServer(ctx context.Context) {
 		if !ok {
 			return mcp.NewToolResultError("Invalid arguments"), nil
 		}
-		
+
 		projectName := getStringArg(args, "project_name")
 		memoryText := getStringArg(args, "memory_text")
 		var embedding []float64
@@ -606,7 +639,7 @@ func runServer(ctx context.Context) {
 		projectName := getStringArg(args, "project_name")
 		question := getStringArg(args, "question")
 		outcomeText := getStringArg(args, "outcome_text")
-		
+
 		var sources []string
 		if srcStr, ok := args["useful_sources"].(string); ok && srcStr != "" {
 			parts := strings.Split(srcStr, ",")
@@ -765,205 +798,491 @@ func runServer(ctx context.Context) {
 
 	// reinforce_path tool has been removed as it is now integrated into save_reasoning_outcome.
 
-	// --- Redmine Direct Tools ---
+	// --- Ticketing Tools (provider-agnostic) ---
 
-	s.AddTool(mcp.NewTool("redmine_search_issues",
-		mcp.WithDescription("Search matching issues in Redmine by text/subject or structured filters (status, assignee, etc)."),
-		mcp.WithString("query", mcp.Description("Optional subject text query")),
-		mcp.WithString("project_id", mcp.Description("Optional Redmine project id or identifier")),
-		mcp.WithString("status_id", mcp.Description("Optional status filter (e.g. open, closed, *)")),
-		mcp.WithString("tracker_id", mcp.Description("Optional tracker id")),
-		mcp.WithString("assigned_to_id", mcp.Description("Optional assignee id (e.g. me, 15)")),
-		mcp.WithString("author_id", mcp.Description("Optional author id")),
-		mcp.WithString("priority_id", mcp.Description("Optional priority id")),
-		mcp.WithString("updated_from", mcp.Description("Optional lower bound date (YYYY-MM-DD or RFC3339)")),
-		mcp.WithString("updated_to", mcp.Description("Optional upper bound date (YYYY-MM-DD or RFC3339)")),
-		mcp.WithNumber("limit", mcp.Description("Optional max results (1..100), default 20")),
-		mcp.WithNumber("offset", mcp.Description("Optional pagination offset, default 0")),
-		mcp.WithString("sort", mcp.Description("Optional sort (e.g. updated_on:desc)")),
+	s.AddTool(mcp.NewTool("ticket_get_capabilities",
+		mcp.WithDescription("Return ticketing capabilities, configured providers, header hints, and client env hints."),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: redmine_search_issues")
-		if cfg.RedmineURL == "" {
-			return mcp.NewToolResultError("Redmine not configured"), nil
+		logger.Info("MCP Tool Call: ticket_get_capabilities")
+		out, err := json.MarshalIndent(ticketService.Capabilities(), "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_search",
+		mcp.WithDescription("Search issues/work items across configured ticketing providers."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: redmine|jira|azure_devops")),
+		mcp.WithString("query", mcp.Description("Optional search query")),
+		mcp.WithString("project_key", mcp.Description("Optional project key for routing/filtering")),
+		mcp.WithString("status", mcp.Description("Optional status filter")),
+		mcp.WithString("type", mcp.Description("Optional issue/work-item type filter")),
+		mcp.WithString("assignee", mcp.Description("Optional assignee filter")),
+		mcp.WithString("author", mcp.Description("Optional author filter")),
+		mcp.WithString("priority", mcp.Description("Optional priority filter")),
+		mcp.WithString("updated_from", mcp.Description("Optional lower bound date")),
+		mcp.WithString("updated_to", mcp.Description("Optional upper bound date")),
+		mcp.WithNumber("limit", mcp.Description("Optional max results (default 20)")),
+		mcp.WithNumber("offset", mcp.Description("Optional pagination offset")),
+		mcp.WithString("sort", mcp.Description("Optional sort expression")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_search")
 		args, _ := request.Params.Arguments.(map[string]interface{})
-		params, err := buildSearchParamsFromArgs(args)
+		params, err := buildTicketSearchParamsFromArgs(args)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
 		}
-		if params.Limit == 0 {
-			params.Limit = 20
-		}
-		if params.Sort == "" {
-			params.Sort = "updated_on:desc"
-		}
-
-		// Pass context to use User Key if available
-		result, err := redmineClient.SearchIssuesAdvanced(ctx, params)
+		result, err := ticketService.Search(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
 		}
-
-		out, err := formatRedmineSearchResponse(result, params, "Redmine search results")
+		out, err := formatTicketSearchResponse(result, params, "Ticket search results")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
 		return mcp.NewToolResultText(out), nil
 	})
 
-
-	s.AddTool(mcp.NewTool("redmine_search_my_issues",
-		mcp.WithDescription("Search Redmine issues assigned to the current user (assigned_to_id=me)."),
-		mcp.WithString("query", mcp.Description("Optional subject text query")),
-		mcp.WithString("status_id", mcp.Description("Optional status filter")),
-		mcp.WithString("project_id", mcp.Description("Optional project filter")),
-		mcp.WithString("tracker_id", mcp.Description("Optional tracker filter")),
-		mcp.WithString("priority_id", mcp.Description("Optional priority filter")),
-		mcp.WithString("updated_from", mcp.Description("Optional lower bound date (YYYY-MM-DD or RFC3339)")),
-		mcp.WithString("updated_to", mcp.Description("Optional upper bound date (YYYY-MM-DD or RFC3339)")),
-		mcp.WithNumber("limit", mcp.Description("Optional max results (1..100), default 20")),
-		mcp.WithNumber("offset", mcp.Description("Optional pagination offset, default 0")),
-		mcp.WithString("sort", mcp.Description("Optional sort, default updated_on:desc")),
+	s.AddTool(mcp.NewTool("ticket_search_my",
+		mcp.WithDescription("Search issues/work items assigned to the current user."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: redmine|jira|azure_devops")),
+		mcp.WithString("query", mcp.Description("Optional search query")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("status", mcp.Description("Optional status filter")),
+		mcp.WithString("type", mcp.Description("Optional issue/work-item type filter")),
+		mcp.WithString("priority", mcp.Description("Optional priority filter")),
+		mcp.WithString("updated_from", mcp.Description("Optional lower bound date")),
+		mcp.WithString("updated_to", mcp.Description("Optional upper bound date")),
+		mcp.WithNumber("limit", mcp.Description("Optional max results (default 20)")),
+		mcp.WithNumber("offset", mcp.Description("Optional pagination offset")),
+		mcp.WithString("sort", mcp.Description("Optional sort expression")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: redmine_search_my_issues")
-		if cfg.RedmineURL == "" {
-			return mcp.NewToolResultError("Redmine not configured"), nil
-		}
-
+		logger.Info("MCP Tool Call: ticket_search_my")
 		args, _ := request.Params.Arguments.(map[string]interface{})
-		params, err := buildSearchParamsFromArgs(args)
+		params, err := buildTicketSearchParamsFromArgs(args)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
 		}
-
-		result, err := redmineClient.SearchMyIssues(ctx, params)
+		result, err := ticketService.SearchMy(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
 		}
-
-		params.AssignedToID = "me"
-		if params.Sort == "" {
-			params.Sort = "updated_on:desc"
-		}
-		if params.Limit == 0 {
-			params.Limit = 20
-		}
-
-		out, err := formatRedmineSearchResponse(result, params, "Redmine my-issues search results")
+		out, err := formatTicketSearchResponse(result, params, "Ticket my-issues search results")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
-
 		return mcp.NewToolResultText(out), nil
 	})
 
-	s.AddTool(mcp.NewTool("redmine_get_issue",
-		mcp.WithDescription("Get detailed information for a specific Redmine issue."),
-		mcp.WithString("id", mcp.Description("Issue ID")),
+	s.AddTool(mcp.NewTool("ticket_get",
+		mcp.WithDescription("Get a ticket/work-item by ID or external key."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: redmine|jira|azure_devops")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key for routing")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: redmine_get_issue")
-		if cfg.RedmineURL == "" {
-			return mcp.NewToolResultError("Redmine not configured"), nil
-		}
-		args := request.Params.Arguments.(map[string]interface{})
-		id, _ := args["id"].(string)
-
-		// Pass context to use User Key if available
-		issue, err := redmineClient.GetIssue(ctx, id)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
-		}
-		if issue == nil {
-			return mcp.NewToolResultError("Issue not found"), nil
-		}
-
-		out := fmt.Sprintf("ID: %d\nSubject: %s\nStatus: %s\nTracker: %s\nAuthor: %s\nCreated: %s\n\n%s",
-			issue.ID, issue.Subject, issue.Status.Name, issue.Tracker.Name, issue.Author.Name, issue.CreatedOn, issue.Description)
-		return mcp.NewToolResultText(out), nil
-	})
-
-	s.AddTool(mcp.NewTool("redmine_update_issue",
-		mcp.WithDescription("Update a Redmine issue (notes and selected fields)."),
-		mcp.WithString("id", mcp.Description("Issue ID")),
-		mcp.WithString("notes", mcp.Description("Optional notes/comment to add")),
-		mcp.WithNumber("status_id", mcp.Description("Optional status ID")),
-		mcp.WithNumber("priority_id", mcp.Description("Optional priority ID")),
-		mcp.WithNumber("assigned_to_id", mcp.Description("Optional assignee user ID")),
-		mcp.WithNumber("fixed_version_id", mcp.Description("Optional target version ID")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: redmine_update_issue")
-		if cfg.RedmineURL == "" {
-			return mcp.NewToolResultError("Redmine not configured"), nil
-		}
+		logger.Info("MCP Tool Call: ticket_get")
 		args, _ := request.Params.Arguments.(map[string]interface{})
 		id := getStringArg(args, "id")
 		if id == "" {
 			return mcp.NewToolResultError("Invalid arguments: id is required"), nil
 		}
-
-		statusID, err := getIntArg(args, "status_id")
+		issue, err := ticketService.Get(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"))
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
 		}
-		priorityID, err := getIntArg(args, "priority_id")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		if issue == nil {
+			return mcp.NewToolResultError("Ticket not found"), nil
 		}
-		assignedToID, err := getIntArg(args, "assigned_to_id")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
-		}
-		fixedVersionID, err := getIntArg(args, "fixed_version_id")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
-		}
-
-		update := redmine.UpdateIssueParams{
-			Notes:          getStringArg(args, "notes"),
-			StatusID:       statusID,
-			PriorityID:     priorityID,
-			AssignedToID:   assignedToID,
-			FixedVersionID: fixedVersionID,
-		}
-
-		// ENFORCE: Update requires User Key
-		if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); !ok || k == "" {
-			return mcp.NewToolResultError("Permission denied: You must provide a valid X-Redmine-API-Key header to update issues."), nil
-		}
-
-		err = redmineClient.UpdateIssue(ctx, id, update)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
-		}
-		return mcp.NewToolResultText(fmt.Sprintf("Issue #%s updated successfully.", id)), nil
-	})
-
-	s.AddTool(mcp.NewTool("redmine_search_users",
-		mcp.WithDescription("Search Redmine users by name to find their IDs for assignment or filtering."),
-		mcp.WithString("name", mcp.Description("Name to search for")),
-		mcp.WithNumber("limit", mcp.Description("Optional limit (default 100)")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		logger.Info("MCP Tool Call: redmine_search_users")
-		if cfg.RedmineURL == "" {
-			return mcp.NewToolResultError("Redmine not configured"), nil
-		}
-		args, _ := request.Params.Arguments.(map[string]interface{})
-		name := getStringArg(args, "name")
-		limit, _ := getIntArg(args, "limit")
-		if limit == 0 {
-			limit = 100
-		}
-
-		res, err := redmineClient.GetUsers(ctx, name, limit)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Redmine error: %v", err)), nil
-		}
-		
-		b, err := json.MarshalIndent(res, "", "  ")
+		out, err := json.MarshalIndent(issue, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
 		}
-		return mcp.NewToolResultText(string(b)), nil
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_create",
+		mcp.WithDescription("Create a new ticket/work-item on the selected provider."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: redmine|jira|azure_devops")),
+		mcp.WithString("project_key", mcp.Description("Project key or identifier")),
+		mcp.WithString("title", mcp.Description("Ticket title/summary")),
+		mcp.WithString("description", mcp.Description("Optional description")),
+		mcp.WithString("type", mcp.Description("Optional issue/work-item type")),
+		mcp.WithString("assignee", mcp.Description("Optional assignee")),
+		mcp.WithString("priority", mcp.Description("Optional priority")),
+		mcp.WithString("provider_fields_json", mcp.Description("Optional provider-specific JSON fields")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_create")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		params := ticketing.CreateParams{
+			Provider:           getStringArg(args, "provider"),
+			ProjectKey:         getStringArg(args, "project_key"),
+			Title:              getStringArg(args, "title"),
+			Description:        getStringArg(args, "description"),
+			Type:               getStringArg(args, "type"),
+			Assignee:           getStringArg(args, "assignee"),
+			Priority:           getStringArg(args, "priority"),
+			ProviderFieldsJSON: getStringArg(args, "provider_fields_json"),
+		}
+		issue, err := ticketService.Create(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(issue, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_update",
+		mcp.WithDescription("Update an existing ticket/work-item."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: redmine|jira|azure_devops")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key for routing")),
+		mcp.WithString("notes", mcp.Description("Optional notes/comment")),
+		mcp.WithString("status", mcp.Description("Optional status")),
+		mcp.WithString("type", mcp.Description("Optional issue/work-item type")),
+		mcp.WithString("assignee", mcp.Description("Optional assignee")),
+		mcp.WithString("priority", mcp.Description("Optional priority")),
+		mcp.WithString("workflow_action", mcp.Description("Optional semantic action: resolve|close|reopen")),
+		mcp.WithString("fixed_version", mcp.Description("Optional fixed/target version")),
+		mcp.WithString("provider_fields_json", mcp.Description("Optional provider-specific JSON fields")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_update")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		if id == "" {
+			return mcp.NewToolResultError("Invalid arguments: id is required"), nil
+		}
+		params := ticketing.UpdateParams{
+			Provider:           getStringArg(args, "provider"),
+			Notes:              getStringArg(args, "notes"),
+			Status:             getStringArg(args, "status"),
+			Type:               getStringArg(args, "type"),
+			Assignee:           getStringArg(args, "assignee"),
+			Priority:           getStringArg(args, "priority"),
+			WorkflowAction:     getStringArg(args, "workflow_action"),
+			FixedVersion:       getStringArg(args, "fixed_version"),
+			ProviderFieldsJSON: getStringArg(args, "provider_fields_json"),
+		}
+		issue, err := ticketService.Update(ctx, id, getStringArg(args, "project_key"), params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(issue, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_add_comment",
+		mcp.WithDescription("Add a comment to a ticket/work-item."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("comment", mcp.Description("Comment text")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_add_comment")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		comment := getStringArg(args, "comment")
+		if id == "" || comment == "" {
+			return mcp.NewToolResultError("Invalid arguments: id and comment are required"), nil
+		}
+		if err := ticketService.AddComment(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), comment); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Comment added to ticket %s.", id)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_assign",
+		mcp.WithDescription("Assign a ticket/work-item to a user."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("assignee", mcp.Description("Assignee identifier")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_assign")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		assignee := getStringArg(args, "assignee")
+		if id == "" || assignee == "" {
+			return mcp.NewToolResultError("Invalid arguments: id and assignee are required"), nil
+		}
+		if err := ticketService.Assign(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), assignee); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Ticket %s assigned to %s.", id, assignee)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_transition",
+		mcp.WithDescription("Transition a ticket/work-item to a specific state/status."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("transition", mcp.Description("Target transition/status id or name")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_transition")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		transition := getStringArg(args, "transition")
+		if id == "" || transition == "" {
+			return mcp.NewToolResultError("Invalid arguments: id and transition are required"), nil
+		}
+		if err := ticketService.Transition(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), transition); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Ticket %s transitioned to %s.", id, transition)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_list_statuses",
+		mcp.WithDescription("List statuses/states for a provider/project and optional issue type."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("issue_type", mcp.Description("Optional issue/work-item type")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_list_statuses")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		statuses, err := ticketService.ListStatuses(ctx, getStringArg(args, "provider"), getStringArg(args, "project_key"), getStringArg(args, "issue_type"))
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(statuses, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_search_users",
+		mcp.WithDescription("Search users in ticketing provider for assignment/filtering."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("query", mcp.Description("User search query")),
+		mcp.WithNumber("limit", mcp.Description("Optional max results (default 20)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_search_users")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		limit, _ := getIntArg(args, "limit")
+		if limit <= 0 {
+			limit = 20
+		}
+		users, err := ticketService.SearchUsers(ctx, getStringArg(args, "provider"), getStringArg(args, "project_key"), getStringArg(args, "query"), limit)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(users, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_list_projects",
+		mcp.WithDescription("List projects available in the selected ticketing provider."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_list_projects")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		projects, err := ticketService.ListProjects(ctx, getStringArg(args, "provider"))
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(projects, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_mark_resolved",
+		mcp.WithDescription("Move a ticket/work-item to resolved state using provider/project workflow mapping."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("issue_type", mcp.Description("Optional issue/work-item type")),
+		mcp.WithString("notes", mcp.Description("Optional comment to append after transition")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_mark_resolved")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		if id == "" {
+			return mcp.NewToolResultError("Invalid arguments: id is required"), nil
+		}
+		res, err := ticketService.MarkResolved(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), getStringArg(args, "issue_type"))
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		if notes := getStringArg(args, "notes"); notes != "" {
+			_ = ticketService.AddComment(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), notes)
+		}
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_mark_closed",
+		mcp.WithDescription("Move a ticket/work-item to closed state using provider/project workflow mapping."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("issue_type", mcp.Description("Optional issue/work-item type")),
+		mcp.WithString("notes", mcp.Description("Optional comment to append after transition")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_mark_closed")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		if id == "" {
+			return mcp.NewToolResultError("Invalid arguments: id is required"), nil
+		}
+		res, err := ticketService.MarkClosed(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), getStringArg(args, "issue_type"))
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		if notes := getStringArg(args, "notes"); notes != "" {
+			_ = ticketService.AddComment(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), notes)
+		}
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("ticket_reopen",
+		mcp.WithDescription("Reopen a ticket/work-item using provider/project workflow mapping."),
+		mcp.WithString("provider", mcp.Description("Optional provider override")),
+		mcp.WithString("id", mcp.Description("Ticket/work-item ID or key")),
+		mcp.WithString("project_key", mcp.Description("Optional project key")),
+		mcp.WithString("issue_type", mcp.Description("Optional issue/work-item type")),
+		mcp.WithString("notes", mcp.Description("Optional comment to append after transition")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: ticket_reopen")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		id := getStringArg(args, "id")
+		if id == "" {
+			return mcp.NewToolResultError("Invalid arguments: id is required"), nil
+		}
+		res, err := ticketService.Reopen(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), getStringArg(args, "issue_type"))
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Ticketing error: %v", err)), nil
+		}
+		if notes := getStringArg(args, "notes"); notes != "" {
+			_ = ticketService.AddComment(ctx, getStringArg(args, "provider"), id, getStringArg(args, "project_key"), notes)
+		}
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	// --- Repository Pull Request Tools ---
+
+	s.AddTool(mcp.NewTool("repo_pr_create",
+		mcp.WithDescription("Create a pull request using configured SCM provider (Azure DevOps in v1)."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: azure_devops")),
+		mcp.WithString("project_name", mcp.Description("Optional project name (fallback to init_project session)")),
+		mcp.WithString("origin_url", mcp.Description("Optional repository origin URL (fallback to session)")),
+		mcp.WithString("repository", mcp.Description("Optional repository id/name (fallback derive from origin_url/session)")),
+		mcp.WithString("source_branch", mcp.Description("Source branch (fallback to current init_project branch)")),
+		mcp.WithString("target_branch", mcp.Description("Optional target branch (fallback project/default config)")),
+		mcp.WithString("title", mcp.Description("Optional PR title (auto-generated if omitted)")),
+		mcp.WithString("description", mcp.Description("Optional PR description (auto-generated if omitted)")),
+		mcp.WithString("ticket_ids", mcp.Description("Optional comma-separated ticket ids/keys")),
+		mcp.WithString("reviewer_ids", mcp.Description("Optional comma-separated reviewer ids")),
+		mcp.WithString("auto_complete", mcp.Description("Optional true/false to request auto-complete")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: repo_pr_create")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		projectName := getStringArg(args, "project_name")
+		originURL := getStringArg(args, "origin_url")
+		sourceBranch := getStringArg(args, "source_branch")
+		repository := getStringArg(args, "repository")
+
+		if projectName != "" {
+			if sess, ok := getSession(projectName); ok {
+				if originURL == "" {
+					originURL = sess.OriginURL
+				}
+				if sourceBranch == "" {
+					sourceBranch = sess.Branch
+				}
+			}
+		}
+		if repository == "" {
+			repository = deriveRepositoryFromOrigin(originURL)
+		}
+		if sourceBranch == "" {
+			return mcp.NewToolResultError("Invalid arguments: source_branch is required (or initialize project session via init_project)."), nil
+		}
+
+		params := repopr.CreateParams{
+			Provider:     getStringArg(args, "provider"),
+			ProjectName:  projectName,
+			OriginURL:    originURL,
+			Repository:   repository,
+			SourceBranch: sourceBranch,
+			TargetBranch: getStringArg(args, "target_branch"),
+			Title:        getStringArg(args, "title"),
+			Description:  getStringArg(args, "description"),
+			TicketIDs:    getStringSliceArg(args, "ticket_ids"),
+			ReviewerIDs:  getStringSliceArg(args, "reviewer_ids"),
+			AutoComplete: getBoolArg(args, "auto_complete"),
+		}
+		res, err := prService.CreatePR(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("PR error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
+	s.AddTool(mcp.NewTool("repo_pr_complete",
+		mcp.WithDescription("Complete/merge an existing pull request."),
+		mcp.WithString("provider", mcp.Description("Optional provider override: azure_devops")),
+		mcp.WithString("project_name", mcp.Description("Optional project name")),
+		mcp.WithString("repository", mcp.Description("Optional repository id/name")),
+		mcp.WithString("pr_id", mcp.Description("Pull request id")),
+		mcp.WithString("delete_source_branch", mcp.Description("Optional true/false")),
+		mcp.WithString("squash", mcp.Description("Optional true/false")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: repo_pr_complete")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		projectName := getStringArg(args, "project_name")
+		repository := getStringArg(args, "repository")
+		if projectName != "" && repository == "" {
+			if sess, ok := getSession(projectName); ok {
+				repository = deriveRepositoryFromOrigin(sess.OriginURL)
+			}
+		}
+		params := repopr.CompleteParams{
+			Provider:           getStringArg(args, "provider"),
+			ProjectName:        projectName,
+			Repository:         repository,
+			PRID:               getStringArg(args, "pr_id"),
+			DeleteSourceBranch: getBoolArg(args, "delete_source_branch"),
+			Squash:             getBoolArg(args, "squash"),
+		}
+		if params.PRID == "" {
+			return mcp.NewToolResultError("Invalid arguments: pr_id is required"), nil
+		}
+		res, err := prService.CompletePR(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("PR error: %v", err)), nil
+		}
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
 	})
 
 	// 8. Start Server
@@ -979,7 +1298,7 @@ func runServer(ctx context.Context) {
 
 		// Standard HTTP server with graceful shutdown
 		mux := http.NewServeMux()
-		
+
 		// Legacy SSE endpoints
 		mux.Handle("/sse", sseServer.SSEHandler())
 		mux.Handle("/message", sseServer.MessageHandler())
@@ -1003,7 +1322,6 @@ func runServer(ctx context.Context) {
 				sigChan <- syscall.SIGTERM
 			}
 		}()
-
 
 		// Block until a shutdown signal or context cancellation is received.
 		logger.Info("Knowledge Server is operational. Press Ctrl+C to stop.")

@@ -7,24 +7,24 @@ import (
 
 const (
 	// Nodes
-	TableRepo       = "repo"
-	TableBranch     = "branch"
-	TableCommit     = "commit"
-	TableAuthor     = "author"
-	TableFile       = "source_file"
-	TableFileChunk  = "file_chunk"
+	TableRepo        = "repo"
+	TableBranch      = "branch"
+	TableCommit      = "commit"
+	TableAuthor      = "author"
+	TableFile        = "source_file"
+	TableFileChunk   = "file_chunk"
 	TableCommitChunk = "commit_chunk"
-	TableIssue      = "issue"       // Redmine Issue
-	TableTracker    = "tracker"     // Redmine Tracker/Epic
-	TableBatchJob   = "batch_job"   // Gemini Async Batch Job
-	TableProject    = "project"     // Mappa dei progetti
-	TableLogFile    = "log_file"    // Traccia del file monitorato
-	TableLogEntry   = "log_entry"   // Singola riga/anomalia loggata
-	TableErrorType  = "error_type"  // Signature log errore
-	TableErrorState = "error_state" // Stato e temporalità dell'errore
-	TableKeyUsage   = "key_usage"   // Traccia costi Gemini
-	TableMemory     = "memory"      // Memoria collaborativa fornita dal client
-	TableReasoning  = "reasoning"   // Esiti di ragionamento semantico
+	TableIssue       = "issue"        // Unified ticketing issue (Redmine/Jira/Azure DevOps)
+	TableTracker     = "tracker"      // Ticket type/tracker grouping
+	TableBatchJob    = "batch_job"    // Gemini Async Batch Job
+	TableProject     = "project"      // Mappa dei progetti
+	TableLogFile     = "log_file"     // Traccia del file monitorato
+	TableLogEntry    = "log_entry"    // Singola riga/anomalia loggata
+	TableErrorType   = "error_type"   // Signature log errore
+	TableErrorState  = "error_state"  // Stato e temporalità dell'errore
+	TableKeyUsage    = "key_usage"    // Traccia costi Gemini
+	TableMemory      = "memory"       // Memoria collaborativa fornita dal client
+	TableReasoning   = "reasoning"    // Esiti di ragionamento semantico
 	TableLogTemplate = "log_template" // Estratti statici dei log dal codice sorgente
 	TableSystem      = "system"       // Metadata di sistema e usage tracking
 
@@ -34,22 +34,22 @@ const (
 	TableProcess   = "process"   // Traced execution flow
 
 	// Edges
-	EdgeContains   = "contains"   // Repo -> Branch, Repo -> File, File -> Symbol
-	EdgeParentOf   = "parent_of"  // Commit -> Commit
-	EdgePointedTo  = "pointed_to" // Branch -> Commit
-	EdgeChanged    = "changed"    // Commit -> File
-	EdgeAuthored   = "authored"   // Author -> Commit
-	EdgeImplements = "implements" // Commit -> Issue
-	EdgePartOf     = "part_of"    // Issue -> Tracker
-	EdgeHasRepo    = "has_repo"   // Project -> Repo
-	EdgeHasLog     = "has_log"    // Project -> LogFile
-	EdgeHasEntry   = "has_entry"  // LogFile -> LogEntry
-	EdgeIsTypeOf   = "is_type_of" // LogEntry -> ErrorType
-	EdgeRelatedTo  = "related_to" // ErrorType -> File / FileChunk / Issue
-	EdgeHasMemory    = "has_memory"    // Repo -> Memory
-	EdgeHasReasoning = "has_reasoning" // Repo -> Reasoning
+	EdgeContains       = "contains"         // Repo -> Branch, Repo -> File, File -> Symbol
+	EdgeParentOf       = "parent_of"        // Commit -> Commit
+	EdgePointedTo      = "pointed_to"       // Branch -> Commit
+	EdgeChanged        = "changed"          // Commit -> File
+	EdgeAuthored       = "authored"         // Author -> Commit
+	EdgeImplements     = "implements"       // Commit -> Issue
+	EdgePartOf         = "part_of"          // Issue -> Tracker
+	EdgeHasRepo        = "has_repo"         // Project -> Repo
+	EdgeHasLog         = "has_log"          // Project -> LogFile
+	EdgeHasEntry       = "has_entry"        // LogFile -> LogEntry
+	EdgeIsTypeOf       = "is_type_of"       // LogEntry -> ErrorType
+	EdgeRelatedTo      = "related_to"       // ErrorType -> File / FileChunk / Issue
+	EdgeHasMemory      = "has_memory"       // Repo -> Memory
+	EdgeHasReasoning   = "has_reasoning"    // Repo -> Reasoning
 	EdgeHasCommitChunk = "has_commit_chunk" // Commit -> CommitChunk
-	EdgeEmitsLog     = "emits_log"     // File -> LogTemplate
+	EdgeEmitsLog       = "emits_log"        // File -> LogTemplate
 
 	// Axon-like Edges
 	EdgeCalls       = "calls"        // Symbol -> Symbol (Function invocations)
@@ -129,7 +129,8 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE INDEX commit_hash ON TABLE %s COLUMNS hash UNIQUE;", TableCommit),
 	fmt.Sprintf("DEFINE INDEX file_path ON TABLE %s COLUMNS path;", TableFile),
 	fmt.Sprintf("DEFINE INDEX file_version ON TABLE %s COLUMNS path, hash UNIQUE;", TableFile),
-	fmt.Sprintf("DEFINE INDEX issue_id ON TABLE %s COLUMNS id UNIQUE;", TableIssue),
+	fmt.Sprintf("REMOVE INDEX issue_id ON TABLE %s;", TableIssue),
+	fmt.Sprintf("DEFINE INDEX issue_external ON TABLE %s COLUMNS provider, external_key UNIQUE;", TableIssue),
 
 	// Log & Project Indexes
 	fmt.Sprintf("DEFINE INDEX project_name ON TABLE %s COLUMNS name UNIQUE;", TableProject),

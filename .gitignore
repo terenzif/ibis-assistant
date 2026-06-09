@@ -4,6 +4,8 @@
 *.exe
 *.dll
 server
+!cmd/server/
+!cmd/server/*.go
 surreal.exe
 knowledge_server.exe
 

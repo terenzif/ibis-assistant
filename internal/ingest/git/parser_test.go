@@ -40,7 +40,7 @@ COMMIT|hash5|hash4|Author Five|2024-01-05T00:00:00Z|Test tab split failure fallb
 	mockDB := &MockDB{}
 	mockRedmine := &MockRedmine{}
 
-	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1)
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1, nil)
 	if err != nil {
 		t.Fatalf("processGitLogStream failed: %v", err)
 	}
@@ -51,8 +51,12 @@ COMMIT|hash5|hash4|Author Five|2024-01-05T00:00:00Z|Test tab split failure fallb
 	found123 := false
 	found456 := false
 	for _, id := range mockRedmine.IngestedIDs {
-		if id == "123" { found123 = true }
-		if id == "456" { found456 = true }
+		if id == "123" {
+			found123 = true
+		}
+		if id == "456" {
+			found456 = true
+		}
 	}
 	if !found123 {
 		t.Errorf("Failed to parse issue #123")
@@ -104,7 +108,7 @@ func TestProcessGitLogStream_Parsing_Robustness(t *testing.T) {
 	mockDB := &MockDB{}
 	mockRedmine := &MockRedmine{}
 
-	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1)
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1, nil)
 	if err != nil {
 		t.Fatalf("processGitLogStream failed: %v", err)
 	}
@@ -147,7 +151,7 @@ func TestProcessGitLogStream_TabInPath(t *testing.T) {
 	mockDB := &MockDB{}
 	mockRedmine := &MockRedmine{}
 
-	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1)
+	err := processGitLogStream(context.Background(), scanner, mockDB, mockRedmine, "repo:test", "test-repo", 1, nil)
 	if err != nil {
 		t.Fatalf("processGitLogStream failed: %v", err)
 	}

@@ -10,18 +10,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/ticketing"
 )
 
 type ConcurrencyMockRedmine struct {
-	mu           sync.Mutex
-	Active       int
-	MaxActive    int
-	CallCount    int
+	mu            sync.Mutex
+	Active        int
+	MaxActive     int
+	CallCount     int
 	SleepDuration time.Duration
 }
 
-func (m *ConcurrencyMockRedmine) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error {
+func (m *ConcurrencyMockRedmine) ResolveReference(projectKey string, ref ticketing.IssueReference) (ticketing.IssueReference, error) {
+	if ref.Provider == "" {
+		ref.Provider = ticketing.ProviderRedmine
+	}
+	if ref.ExternalKey == "" {
+		ref.ExternalKey = ref.ExternalID
+	}
+	return ref, nil
+}
+
+func (m *ConcurrencyMockRedmine) IngestIssueReference(ctx context.Context, projectKey string, ref ticketing.IssueReference) error {
 	m.mu.Lock()
 	m.Active++
 	if m.Active > m.MaxActive {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/deckonline/knowledge_mcp/internal/ticketing"
 )
 
 // MockDBClient for Git Ingestion
@@ -27,16 +27,35 @@ func (m *MockDB) SmartQuery(ctx context.Context, sql string, vars interface{}) (
 	return m.MockResult, nil
 }
 
-// MockRedmineIngester for Git Ingestion
+// MockRedmineIngester (name preserved for existing tests) implements ticketing.Ingester.
 type MockRedmine struct {
-	IngestedIDs []string
-	Delay       time.Duration
+	IngestedIDs  []string
+	IngestedRefs []ticketing.IssueReference
+	Delay        time.Duration
 }
-func (m *MockRedmine) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error {
+
+func (m *MockRedmine) ResolveReference(projectKey string, ref ticketing.IssueReference) (ticketing.IssueReference, error) {
+	if ref.Provider == "" {
+		ref.Provider = ticketing.ProviderRedmine
+	}
+	if ref.ExternalKey == "" {
+		ref.ExternalKey = ref.ExternalID
+	}
+	if ref.ExternalID == "" {
+		ref.ExternalID = ref.ExternalKey
+	}
+	if ref.ProjectKey == "" {
+		ref.ProjectKey = projectKey
+	}
+	return ref, nil
+}
+
+func (m *MockRedmine) IngestIssueReference(ctx context.Context, projectKey string, ref ticketing.IssueReference) error {
 	if m.Delay > 0 {
 		time.Sleep(m.Delay)
 	}
-	m.IngestedIDs = append(m.IngestedIDs, issueIDStr)
+	m.IngestedRefs = append(m.IngestedRefs, ref)
+	m.IngestedIDs = append(m.IngestedIDs, ref.ExternalID)
 	return nil
 }
 

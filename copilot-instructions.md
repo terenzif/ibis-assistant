@@ -1,58 +1,62 @@
-# Copilot Instructions — Template per Client MCP
+# Copilot Instructions — Ticketing + PR MCP Client
 
 > Copia/incolla questa sezione nel progetto client che consuma il Knowledge Server.
 
-
-
 ### Configurazione MCP client
 
-- Connetti il server remoto via SSE: `http://localhost:3333/sse`
-- Usa `X-Redmine-API-Key` dell'utente corrente per operazioni ticket personalizzate/scrittura.
+- Connetti il server remoto via SSE (es. `http://localhost:3333/sse`)
+- Per override credenziali runtime usa gli header provider:
+  - `X-Redmine-API-Key`
+  - `X-Jira-Email`, `X-Jira-API-Token`
+  - `X-Azure-DevOps-PAT`
 - Non chiamare manualmente `/message`: è gestito dal client MCP.
 
-### Tool disponibili (client-side usage)
+### Tool principali (client-side usage)
 
-3. `init_project(project_name, origin_url, branch, commit?)`
-   - Entrypoint iniziale obbligatorio all'avvio della sessione per allineare il Knowledge Server al branch e al commit attuale del client.
+1. `init_project(project_name, origin_url, branch, commit?)`
+2. `update_project_status(project_name, origin_url, branch, commit)`
+3. `ask_project(query, branch_or_commit?)`
+4. `provide_collaborative_memory(project_name, memory_text, embedding?)`
+5. `save_reasoning_outcome(project_name, question, outcome_text, useful_sources)`
 
-4. `update_project_status(project_name, origin_url, branch, commit)`
-   - Da richiamare dopo commit o push locali per aggiornare l'ingestione vettoriale incrementale in background.
+### Tool ticketing (`ticket_*`)
 
-5. `ask_project(query, branch_or_commit?)`
-   - Usa questo tool come entrypoint principale per la comprensione del codice e la ricerca di impatti. Fornire sempre il contesto del branch/commit corrente se disponibile.
+- Discovery:
+  - `ticket_get_capabilities()`
 
-6. `provide_collaborative_memory(project_name, memory_text, embedding?)`
-   - Usa per iniettare contesto di business o regole di progetto che ritieni utili per l'intero team. Se calcoli l'embedding localmente, passalo per ottimizzare i costi server.
+- Search & Read:
+  - `ticket_search(provider?, query?, project_key?, status?, type?, assignee?, author?, priority?, updated_from?, updated_to?, limit?, offset?, sort?)`
+  - `ticket_search_my(provider?, query?, project_key?, status?, type?, priority?, updated_from?, updated_to?, limit?, offset?, sort?)`
+  - `ticket_get(provider?, id, project_key?)`
+  - `ticket_list_statuses(provider?, project_key?, issue_type?)`
+  - `ticket_search_users(provider?, project_key?, query?, limit?)`
+  - `ticket_list_projects(provider?)`
 
-7. `save_reasoning_outcome(project_name, question, outcome_text, useful_sources)`
-   - Usa per storicizzare una tua deduzione semantica utile (outcome) e rinforzare automaticamente i pesi degli issue o commit (sources) che ti hanno aiutato a rispondere. Questo arricchisce in modalità "Dual-Loop" il grafo aziendale.
+- Write & Workflow:
+  - `ticket_create(provider?, project_key, title, description?, type?, assignee?, priority?, provider_fields_json?)`
+  - `ticket_update(provider?, id, project_key?, notes?, status?, type?, assignee?, priority?, workflow_action?, fixed_version?, provider_fields_json?)`
+  - `ticket_add_comment(provider?, id, project_key?, comment)`
+  - `ticket_assign(provider?, id, project_key?, assignee)`
+  - `ticket_transition(provider?, id, project_key?, transition)`
+  - `ticket_mark_resolved(provider?, id, project_key?, issue_type?, notes?)`
+  - `ticket_mark_closed(provider?, id, project_key?, issue_type?, notes?)`
+  - `ticket_reopen(provider?, id, project_key?, issue_type?, notes?)`
 
-8. `redmine_search_issues(query, limit?, offset?, sort?)`
-   - Ricerca rapida per subject.
-   - Default: `limit=10`, `offset=0`, `sort=updated_on:desc`.
+### Tool PR (`repo_pr_*`)
 
-3. `redmine_search_issues_advanced(query?, project_id?, status_id?, tracker_id?, assigned_to_id?, author_id?, priority_id?, updated_from?, updated_to?, limit?, offset?, sort?)`
-   - Usa per triage operativo con filtri composti e paginazione.
+- `repo_pr_create(provider?, project_name?, origin_url?, repository?, source_branch?, target_branch?, title?, description?, ticket_ids?, reviewer_ids?, auto_complete?)`
+- `repo_pr_complete(provider?, project_name?, repository?, pr_id, delete_source_branch?, squash?)`
 
-4. `redmine_search_my_issues(query?, status_id?, project_id?, tracker_id?, priority_id?, updated_from?, updated_to?, limit?, offset?, sort?)`
-   - Cerca ticket assegnati all'utente corrente (`assigned_to_id=me`).
+### Playbook operativo (consigliato)
 
-5. `redmine_get_issue(id)`
-   - Recupera dettagli completi ticket (inclusi journals lato API Redmine).
-
-6. `redmine_update_issue(id, notes?, status_id?, priority_id?, assigned_to_id?, fixed_version_id?)`
-   - Aggiorna ticket con note e/o campi autorizzati.
-   - Richiede sempre chiave utente valida.
-
-### Playbook consigliato per ticket
-
-1. Cerca: `redmine_search_issues` o `redmine_search_issues_advanced`
-2. Verifica: `redmine_get_issue(id)`
-3. Aggiorna: `redmine_update_issue(...)`
-4. Ri-leggi ticket per confermare stato finale
+1. Cerca ticket: `ticket_search` o `ticket_search_my`
+2. Verifica dettagli: `ticket_get`
+3. Dev conclude fix: `ticket_mark_resolved`
+4. Crea PR: `repo_pr_create`
+5. Tester verifica e chiude: `ticket_mark_closed`
 
 ### Errori comuni
 
-- `Permission denied` su update: manca header `X-Redmine-API-Key` utente.
-- Zero risultati: query troppo generica o filtri troppo restrittivi.
-- Errore validazione sort/date: usare sort whitelist e date `YYYY-MM-DD` o RFC3339.
+- `provider not registered`: provider non configurato in `config/ticketing_config.json`
+- `permission denied` / auth errors: header credenziali utente mancanti/invalidi
+- `workflow target not found`: mapping status non configurato e fallback euristico insufficiente

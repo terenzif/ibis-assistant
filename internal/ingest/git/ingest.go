@@ -13,13 +13,13 @@ import (
 	"sync"
 
 	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
 	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/deckonline/knowledge_mcp/internal/ticketing"
 )
 
 // IngestRepo analyzes the Git history and structure of a repository, populating the Knowledge Graph with commits, authors, and file relationships.
-func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.Ingester, repoPath string, repoName string, concurrency int) error {
+func IngestRepo(ctx context.Context, client db.Executor, ticketIngester ticketing.Ingester, repoPath string, repoName string, concurrency int, customPatterns ...string) error {
 	logger.Info("Ingesting git repository: %s (Name: %s)", repoPath, repoName)
 	if client == nil {
 		return fmt.Errorf("database client is nil")
@@ -29,16 +29,12 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 		return fmt.Errorf("invalid repo path: %w", err)
 	}
 
-	// Register Repo Node
-	// 1. Ensure Repo Node exists
 	repoID := db.FormatRecordID(schema.TableRepo, db.SanitizeID(repoName))
 	_, err = client.Execute(ctx, fmt.Sprintf("UPSERT %s SET name = '%s';", repoID, db.EscapeSQL(repoName)))
 	if err != nil {
 		return fmt.Errorf("failed to upsert repo: %w", err)
 	}
 
-	// 1. Start Hash Generator (Stream commits reachable from HEAD)
-	// We use HEAD so we only ingest the history of the currently checked out branch/commit
 	cmdHashes := exec.CommandContext(ctx, "git", "log", "HEAD", "--reverse", "--format=%H")
 	cmdHashes.Dir = absPath
 	stdoutHashes, err := cmdHashes.StdoutPipe()
@@ -49,8 +45,6 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 		return fmt.Errorf("failed to start git log hashes: %w", err)
 	}
 
-	// 2. Start Ingest Worker (Consumes new hashes, produces log output)
-	// We use --no-walk --stdin to ingest only specific commits provided on stdin.
 	cmdIngest := exec.CommandContext(ctx, "git", "log", "--no-walk", "--stdin", "--numstat", "--format=COMMIT|%H|%P|%an|%aI|%s")
 	cmdIngest.Dir = absPath
 	stdinIngest, err := cmdIngest.StdinPipe()
@@ -61,25 +55,19 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 	if err != nil {
 		return fmt.Errorf("failed to create ingest stdout pipe: %w", err)
 	}
-	// stderr for debugging
-	// cmdIngest.Stderr = os.Stderr
 
 	if err := cmdIngest.Start(); err != nil {
 		return fmt.Errorf("failed to start git log ingest: %w", err)
 	}
 
-	// Channel to signal feeder completion/error
 	feederErrChan := make(chan error, 1)
 
-	// Goroutine: Feed Hashes to Ingest Worker
 	go func() {
-		defer stdinIngest.Close() // Close stdin to signal we are done feeding
+		defer stdinIngest.Close()
 
 		scanner := bufio.NewScanner(stdoutHashes)
 		batchSize := 500
 		var batch []string
-
-		// Pre-allocate reusable buffers for batch processing to reduce GC pressure
 		ids := make([]string, 0, batchSize)
 		idMap := make(map[string]bool)
 		vars := make(map[string]interface{}, 1)
@@ -89,33 +77,14 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 				return nil
 			}
 
-			// Clear maps and reset slice
 			for k := range idMap {
 				delete(idMap, k)
 			}
 			ids = ids[:0]
-
-			// Check DB for existing commits
-			// We can't pass 500 IDs in a single query if the string is too long?
-			// 500 * 40 chars = 20KB. Fine.
-
-			// Build ID list
-			// "SELECT id FROM commit WHERE id IN ['commit:hash1', 'commit:hash2', ...]"
 			for _, h := range batch {
 				id := db.FormatRecordID(schema.TableCommit, h)
 				ids = append(ids, id)
 			}
-
-			// SmartQuery with array param?
-			// SurrealDB: "SELECT id FROM commit WHERE id INSIDE $ids"
-			// But SmartQuery vars handling depends on driver.
-			// Let's assume we can pass a slice of strings.
-
-			// Optimization: If we query, we get back IDs that EXIST.
-			// The ones NOT in the result are NEW.
-
-			// If slice param fails, we might need to construct the query string manually or loops.
-			// Trying SmartQuery with slice.
 
 			vars["ids"] = ids
 			resRaw, err := client.SmartQuery(ctx, "SELECT VALUE id FROM commit WHERE id IN $ids", vars)
@@ -123,7 +92,6 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 				return fmt.Errorf("failed to check existing commits: %w", err)
 			}
 
-			// Parse result to find existing (Optimized: Direct Type Assertion for SELECT VALUE)
 			if results, ok := resRaw.([]interface{}); ok {
 				for _, item := range results {
 					if id, ok := item.(string); ok {
@@ -132,12 +100,10 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 				}
 			}
 
-			// Identify New
-			var newCount int
+			newCount := 0
 			for _, h := range batch {
 				id := db.FormatRecordID(schema.TableCommit, h)
 				if !idMap[id] {
-					// Is new, write to ingest stdin
 					if _, err := io.WriteString(stdinIngest, h+"\n"); err != nil {
 						return fmt.Errorf("failed to write to ingest stdin: %w", err)
 					}
@@ -166,7 +132,6 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 				batch = batch[:0]
 			}
 		}
-		// Final batch
 		if err := processBatch(); err != nil {
 			feederErrChan <- err
 			return
@@ -175,20 +140,14 @@ func IngestRepo(ctx context.Context, client db.Executor, redmineClient redmine.I
 		feederErrChan <- nil
 	}()
 
-	// 3. Main Thread: Consume Ingest Output
 	scannerIngest := bufio.NewScanner(stdoutIngest)
-	// Use larger buffer for numstat output
 	buf := make([]byte, 0, 64*1024)
 	scannerIngest.Buffer(buf, 1024*1024)
 
-	// We pass nil for existingCommits because we already filtered them!
-	ingestErr := processGitLogStream(ctx, scannerIngest, client, redmineClient, repoID, repoName, concurrency)
-
-	// Wait for feeder
+	ingestErr := processGitLogStream(ctx, scannerIngest, client, ticketIngester, repoID, repoName, concurrency, customPatterns)
 	feederErr := <-feederErrChan
 
-	// Wait for commands
-	cmdHashes.Wait() // Ignore error here if pipe closed early? usually fine.
+	cmdHashes.Wait()
 	cmdIngest.Wait()
 
 	if feederErr != nil {
@@ -207,10 +166,11 @@ func processGitLogStream(
 	ctx context.Context,
 	scanner *bufio.Scanner,
 	client db.Executor,
-	redmineClient redmine.Ingester,
+	ticketIngester ticketing.Ingester,
 	repoID string,
 	repoName string,
 	concurrency int,
+	customPatterns []string,
 ) error {
 	var (
 		currentCommitID string
@@ -223,31 +183,31 @@ func processGitLogStream(
 		concurrency = 1
 	}
 
-	// Worker Pool for Redmine Ingestion
-	// Using a buffered channel allows the main loop (Git Log Parsing) to proceed ahead of Redmine ingestion,
-	// effectively parallelizing the two stages.
-	jobChan := make(chan string, 100)
+	jobChan := make(chan ticketing.IssueReference, 100)
 	var wg sync.WaitGroup
 	seenIssues := make(map[string]bool)
 	var filesInCommit []string
 
-	if redmineClient != nil {
+	if ticketIngester != nil {
 		for i := 0; i < concurrency; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for id := range jobChan {
-					if err := redmineClient.IngestIssue(ctx, client, id); err != nil {
-						logger.Warn("Failed to ingest referenced issue #%s: %v", id, err)
+				for ref := range jobChan {
+					projectKey := ref.ProjectKey
+					if projectKey == "" {
+						projectKey = repoName
+					}
+					if err := ticketIngester.IngestIssueReference(ctx, projectKey, ref); err != nil {
+						logger.Warn("Failed to ingest referenced ticket %s (%s): %v", ref.ExternalKey, ref.Provider, err)
 					}
 				}
 			}()
 		}
 	}
 
-	// Ensure workers are stopped on exit
 	defer func() {
-		if redmineClient != nil {
+		if ticketIngester != nil {
 			close(jobChan)
 			wg.Wait()
 		}
@@ -257,7 +217,6 @@ func processGitLogStream(
 		if batchQL.Len() == 0 {
 			return nil
 		}
-		// Execute transaction
 		ql := "BEGIN TRANSACTION;\n" + batchQL.String() + "COMMIT TRANSACTION;"
 		logger.Debug("Flushing batch of %d operations", batchCount)
 		_, err := client.Execute(ctx, ql)
@@ -270,7 +229,6 @@ func processGitLogStream(
 	}
 
 	for scanner.Scan() {
-		// Check context cancellation
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -287,61 +245,81 @@ func processGitLogStream(
 			if len(parts) < 6 {
 				continue
 			}
-			// COMMIT|Hash|Parents|Author|Date|Subject
 			hash := parts[1]
-			parents := strings.Fields(parts[2]) // Split by space
+			parents := strings.Fields(parts[2])
 			authorName := parts[3]
 			date := parts[4]
 			subject := parts[5]
 
 			commitID := db.FormatRecordID(schema.TableCommit, hash)
-
-			// Skip processing if the commit has already been ingested.
 			skipping = false
 			currentCommitID = commitID
-
-			// We track files changed in this commit for coupling analysis
 			filesInCommit = []string{}
-
-			// Author Node
 			authorID := db.FormatRecordID(schema.TableAuthor, db.SanitizeID(authorName))
 
-			// --- Batch Construction ---
-
-			// 1. Upsert Author
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET name = '%s';\n", authorID, db.EscapeSQL(authorName)))
-
-			// 2. Create Commit (Using UPDATE to be safe/idempotent)
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET hash = '%s', date = '%s', message = '%s', repo = %s, batch_status = 'pending';\n",
 				commitID, hash, date, db.EscapeSQL(subject), repoID))
-
-			// 3. Link Author -> Commit
 			batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", authorID, schema.EdgeAuthored, commitID))
 
-			// 4. Link Parents (Timeline)
 			for _, pHash := range parents {
 				parentID := db.FormatRecordID(schema.TableCommit, pHash)
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", parentID, schema.EdgeParentOf, commitID))
 			}
 
-			// 5. Link Issues
-			issueRefs := ExtractIssueRefs(subject)
+			issueRefs := ExtractIssueRefs(subject, customPatterns...)
 			for _, ref := range issueRefs {
-				issueIDStr := ref.ID
-				issueID := db.FormatRecordID(schema.TableIssue, issueIDStr)
+				ticketRef := ticketing.IssueReference{
+					Provider:    ref.Provider,
+					ExternalID:  ref.ID,
+					ExternalKey: ref.Key,
+					ProjectKey:  ref.ProjectKey,
+					Confidence:  ref.Confidence,
+				}
+				if ticketRef.ProjectKey == "" {
+					ticketRef.ProjectKey = repoName
+				}
 
-				// In-Band Ingestion: Trigger Redmine fetch if client is available
-				if redmineClient != nil {
-					if !seenIssues[issueIDStr] {
-						seenIssues[issueIDStr] = true
+				resolvedRef := ticketRef
+				if ticketIngester != nil {
+					resolved, err := ticketIngester.ResolveReference(ticketRef.ProjectKey, ticketRef)
+					if err != nil {
+						logger.Warn("Failed to resolve ticket reference %+v: %v", ticketRef, err)
+						continue
+					}
+					resolvedRef = resolved
+				} else if resolvedRef.Provider == "" {
+					resolvedRef.Provider = ticketing.ProviderRedmine
+				}
+
+				if resolvedRef.ExternalKey == "" {
+					resolvedRef.ExternalKey = resolvedRef.ExternalID
+				}
+				if resolvedRef.ExternalID == "" {
+					resolvedRef.ExternalID = resolvedRef.ExternalKey
+				}
+				if resolvedRef.Provider == "" {
+					resolvedRef.Provider = ticketing.ProviderRedmine
+				}
+
+				issueID := ticketing.IssueRecordID(resolvedRef.Provider, resolvedRef.ExternalKey)
+				dedupeKey := fmt.Sprintf("%s|%s", resolvedRef.Provider, resolvedRef.ExternalKey)
+
+				if ticketIngester != nil {
+					if !seenIssues[dedupeKey] {
+						seenIssues[dedupeKey] = true
 						select {
-						case jobChan <- issueIDStr:
+						case jobChan <- resolvedRef:
 						case <-ctx.Done():
 						}
 					}
 				} else {
-					// Just ensure existence
-					batchQL.WriteString(fmt.Sprintf("UPDATE %s SET id = %s;\n", issueID, issueIDStr))
+					batchQL.WriteString(fmt.Sprintf("UPDATE %s SET provider = '%s', external_id = '%s', external_key = '%s';\n",
+						issueID,
+						db.EscapeSQL(string(resolvedRef.Provider)),
+						db.EscapeSQL(resolvedRef.ExternalID),
+						db.EscapeSQL(resolvedRef.ExternalKey),
+					))
 				}
 
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET confidence = %f, usage_weight = 1.0;\n",
@@ -352,9 +330,6 @@ func processGitLogStream(
 			if skipping {
 				continue
 			}
-			// Numstat line: Added Deleted Path
-			// e.g. "5       3       src/main.go"
-			// Binary files: "-       -       image.png"
 			parts := strings.Fields(line)
 			if len(parts) < 3 {
 				continue
@@ -362,14 +337,6 @@ func processGitLogStream(
 
 			addedStr := parts[0]
 			deletedStr := parts[1]
-			// Path is the rest (could have spaces if not properly separated, but fields splits by whitespace)
-			// Wait, Fields splits by whitespace. Git --numstat output uses TABS between numbers and path,
-			// but path can contain spaces. If path contains spaces, it is NOT quoted in numstat unless weird config.
-			// Actually, git log --numstat separates by TAB.
-
-			// Let's re-parse using Tab delimiter for safety if possible, but scanner.Text() gives a string.
-			// Standard git numstat: <added>\t<deleted>\t<path>
-			// Let's try splitting by tab.
 			tabParts := strings.Split(line, "\t")
 			var path string
 			var added, deleted int
@@ -379,14 +346,9 @@ func processGitLogStream(
 				deletedStr = tabParts[1]
 				path = strings.Join(tabParts[2:], "\t")
 			} else {
-				// Fallback to Fields if tabs missing (e.g. ecosystem quirks)
-				// But path with spaces will break Fields logic.
-				// Assuming standard git output.
-				// If we fail to parse, skip.
 				continue
 			}
 
-			// Handle binary
 			if addedStr == "-" {
 				added = 0
 			} else {
@@ -400,45 +362,30 @@ func processGitLogStream(
 				deleted = d
 			}
 
-			// Handle quoted paths
 			if strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"") {
 				if unquoted, err := strconv.Unquote(path); err == nil {
 					path = unquoted
 				}
 			}
 
-			// Calculate the modification impact based on the total number of lines changed.
 			totalChanged := float64(added + deleted)
 			impact := 0.0
 			if totalChanged > 0 {
 				impact = math.Log10(totalChanged + 1)
 				if impact > 1.0 {
 					impact = 1.0
-				} // Normalize? Log10(10)=1, Log10(100)=2.
-				// Maybe sigmoid? Or just raw log.
-				// Spec says "float 0.0-1.0".
-				// Let's limit it. If > 100 lines, impact = 1.0?
-				// Let's use a sigmoid-like: x / (x + 20) -> 20 lines = 0.5 impact. 100 lines = 0.83.
+				}
 				impact = totalChanged / (totalChanged + 50.0)
 			}
 
 			safeRepoName := db.SanitizeID(repoName)
 			fileID := db.FormatRecordID(schema.TableFile, fmt.Sprintf("%s_%s", safeRepoName, db.SanitizeID(path)))
-
-			// 1. Upsert File
 			batchQL.WriteString(fmt.Sprintf("UPDATE %s SET path = '%s';\n", fileID, db.EscapeSQL(path)))
 
-			// 3. Link Commit -> File (Changed) with Impact
 			if currentCommitID != "" {
 				batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET impact = %f, added = %d, deleted = %d;\n",
 					currentCommitID, schema.EdgeChanged, fileID, impact, added, deleted))
 
-				// Change Coupling Edge: relate this file to all other files previously seen in this commit
-				// In a real scenario with thousands of files this needs optimization, but fine for local bounds
-				// and using INSERT IF NOT EXISTS or UPSERT to increment strength.
-				// Since SurrealDB doesn't have a direct upsert-increment syntax in RELATE, we just create the edge
-				// and a background job could consolidate them, or we just write them and query with GROUP BY count().
-				// For now, we just create a coupled_with edge for every pair.
 				for _, prevFileID := range filesInCommit {
 					batchQL.WriteString(fmt.Sprintf("RELATE %s->%s->%s SET commit = %s;\n",
 						fileID, schema.EdgeCoupledWith, prevFileID, currentCommitID))
@@ -458,7 +405,6 @@ func processGitLogStream(
 		}
 	}
 
-	// Final flush
 	if err := flushBatch(); err != nil {
 		return err
 	}

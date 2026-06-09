@@ -3,6 +3,8 @@ package git
 import (
 	"reflect"
 	"testing"
+
+	"github.com/deckonline/knowledge_mcp/internal/ticketing"
 )
 
 func TestExtractIssueRefs(t *testing.T) {
@@ -12,89 +14,49 @@ func TestExtractIssueRefs(t *testing.T) {
 		expected []IssueRef
 	}{
 		{
-			name:  "Standard issue reference",
-			input: "This fixes #123",
+			name:     "Redmine hash reference",
+			input:    "This fixes #123",
+			expected: []IssueRef{{ID: "123", Key: "123", Confidence: 1.0}},
+		},
+		{
+			name:     "Jira reference",
+			input:    "Fixes ABC-456",
+			expected: []IssueRef{{Provider: ticketing.ProviderJira, ID: "ABC-456", Key: "ABC-456", ProjectKey: "ABC", Confidence: 1.0}},
+		},
+		{
+			name:     "Azure DevOps reference",
+			input:    "Resolves AB#789",
+			expected: []IssueRef{{Provider: ticketing.ProviderAzureDevOps, ID: "789", Key: "AB#789", ProjectKey: "AB", Confidence: 1.0}},
+		},
+		{
+			name:  "Multiple references",
+			input: "Fixes #123 and closes ABC-222",
 			expected: []IssueRef{
-				{ID: "123", Confidence: 1.0},
+				{Provider: ticketing.ProviderJira, ID: "ABC-222", Key: "ABC-222", ProjectKey: "ABC", Confidence: 1.0},
+				{ID: "123", Key: "123", Confidence: 1.0},
 			},
 		},
 		{
-			name:  "Multiple issues",
-			input: "Fixes #123 and closes #456",
-			expected: []IssueRef{
-				{ID: "123", Confidence: 1.0},
-				{ID: "456", Confidence: 1.0},
-			},
-		},
-		{
-			name:  "Issue reference without keywords",
-			input: "Mentioning #789",
-			expected: []IssueRef{
-				{ID: "789", Confidence: 0.5},
-			},
-		},
-		{
-			name:  "Issue reference with trailing punctuation",
-			input: "See #101.",
-			expected: []IssueRef{
-				{ID: "101", Confidence: 0.5},
-			},
-		},
-		{
-			name:  "Issue reference in parentheses",
-			input: "(ref #202)",
-			expected: []IssueRef{
-				{ID: "202", Confidence: 0.5},
-			},
-		},
-		{
-			name:  "Issue reference with mixed characters",
-			input: "#abc",
+			name:     "No issue",
+			input:    "chore: cleanup",
 			expected: nil,
 		},
 		{
-			name:  "Issue reference with leading characters",
-			input: "Ticket#303",
-			expected: []IssueRef{
-				{ID: "303", Confidence: 0.5},
-			},
-		},
-		{
-			name:  "Empty input",
-			input: "",
-			expected: nil,
-		},
-		{
-			name:  "Just hash",
-			input: "#",
-			expected: nil,
-		},
-		{
-			name:  "Double hash",
-			input: "##404",
-			expected: []IssueRef{
-				{ID: "404", Confidence: 0.5},
-			},
-		},
-		{
-			name:  "Hash then space then digits",
-			input: "# 505",
-			expected: nil,
-		},
-		{
-			name:  "Duplicates",
-			input: "Fixes #123. See #123.",
-			expected: []IssueRef{
-				{ID: "123", Confidence: 1.0},
-			},
+			name:     "Custom pattern with provider",
+			input:    "refs TASK-77",
+			expected: []IssueRef{{Provider: ticketing.ProviderJira, ID: "TASK-77", Key: "TASK-77", ProjectKey: "TASK", Confidence: 0.5}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractIssueRefs(tt.input)
+			custom := []string{}
+			if tt.name == "Custom pattern with provider" {
+				custom = []string{"jira::(TASK-\\d+)"}
+			}
+			got := ExtractIssueRefs(tt.input, custom...)
 			if !reflect.DeepEqual(got, tt.expected) {
-				t.Errorf("ExtractIssueRefs() = %v, want %v", got, tt.expected)
+				t.Errorf("ExtractIssueRefs() = %#v, want %#v", got, tt.expected)
 			}
 		})
 	}

@@ -1,6 +1,6 @@
 # Knowledge Server (MCP)
 
-**Knowledge Server** è un server MCP (Model Context Protocol) avanzato progettato per agire come una "memoria vivente" del progetto. Integra l'analisi strutturale del codice (Git), la comprensione semantica (RAG vettoriale) e l'intento gestionale (Redmine) in un unico grafo della conoscenza interrogabile.
+**Knowledge Server** è un server MCP (Model Context Protocol) avanzato progettato per agire come una "memoria vivente" del progetto. Integra l'analisi strutturale del codice (Git), la comprensione semantica (RAG vettoriale) e l'intento gestionale (ticketing multi-provider: Redmine/Jira/Azure DevOps) in un unico grafo della conoscenza interrogabile.
 
 Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini) un contesto profondo che va oltre la semplice lettura dei file attuali, permettendo risposte basate su *storia*, *evoluzione* e *ragionamento*.
 
@@ -8,7 +8,7 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
 
 * **Grafo della Conoscenza Unificato**: Collega File, Commit, Autori, Branch e Issue in un database a grafo (SurrealDB).
 * **Git Ingestion**: Analizza la storia di Git per costruire relazioni causali (`commit` -> `changed` -> `file`).
-* **Integrazione Redmine**: Collega le modifiche del codice ai ticket di gestione (`commit` -> `implements` -> `issue`), permettendo di capire *perché* una modifica è stata fatta.
+* **Integrazione Ticketing Multi-Provider**: Collega le modifiche del codice ai ticket/work item (`commit` -> `implements` -> `issue`), permettendo di capire *perché* una modifica è stata fatta.
 * **Analisi Log Avanzata**: Ingestione log e riconoscimento pattern d'errore (Error Type) unificati al grafo semantico con **persistenza dell'offset**.
 * **Reporting Automatico**: Generazione di report periodici via email (SMTP) per anomalie e costi AI.
 * **Vector RAG Efficiente**: Utilizza l'API Batch di Gemini (`batchEmbedContents`) per generare embedding di centinaia di chunk in una singola chiamata, ottimizzando costi e latenza.
@@ -74,7 +74,20 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
     }
    ```
    
-   > **Nota su Redmine**: La chiave `redmine_key` nel config è la **System Key**, utilizzata per operazioni di background (es. ingestion automatica). Per operazioni utente (es. aggiornare un ticket), il client deve fornire la propria chiave via header `X-Redmine-API-Key`.
+   > **Nota Ticketing**: La configurazione operativa provider-aware è in `config/ticketing_config.json` (template: `config/ticketing_config.example.json`). Le credenziali utente possono essere passate anche via header HTTP per singola request.
+
+### 🧾 Ticketing + PR Automation (Nuovo)
+
+Consulta la guida completa client/operativa:
+
+* **[docs/TICKETING_CLIENT.md](docs/TICKETING_CLIENT.md)**
+
+Include:
+
+* Tool MCP `ticket_*` (search/get/create/update/workflow)
+* Tool MCP `repo_pr_*` (create/complete PR Azure DevOps)
+* Flusso Dev -> Tester (`resolved` -> `closed`)
+* Header runtime per override credenziali provider
 
 4. **Avvia il Server**:
    Il server avvierà automaticamente SurrealDB se configurato per l'uso locale (default). L'avvio standard è:
@@ -145,13 +158,16 @@ Il Knowledge Server è installato centralmente su **`localhost`** e funge da ora
 
 **Endpoint Pubblico:** `http://localhost:3030/sse`
 
-### 🔑 Autenticazione Utente (Redmine)
+### 🔑 Autenticazione Utente (Ticketing)
 
-Per eseguire azioni che richiedono l'identità dell'utente (es. `redmine_update_issue`, `search_my_issues`), il client SSE **deve** passare la chiave API Redmine dell'utente corrente tramite l'header HTTP:
+Per eseguire azioni che richiedono l'identità dell'utente, il client SSE può passare le credenziali provider via header HTTP (override runtime):
 
-`X-Redmine-API-Key: <USER_API_KEY>`
+* `X-Redmine-API-Key: <USER_API_KEY>`
+* `X-Jira-Email: <USER_EMAIL>`
+* `X-Jira-API-Token: <USER_API_TOKEN>`
+* `X-Azure-DevOps-PAT: <USER_PAT>`
 
-Se questo header non è presente, il server utilizzerà la *System Key* (sola lettura/globale) definita in `config.json`. Le azioni di scrittura falliranno senza una chiave utente valida.
+Se gli header non sono presenti, il server usa le credenziali tecniche definite in `config/ticketing_config.json`.
 
 #### 1. Claude Desktop (Windows/Mac)
 
@@ -280,7 +296,8 @@ Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo s
 ### Convenzioni Operative
 - Trattare `cmd/server/main.go` e `internal/ingest/redmine/ingest.go` come source of truth dei tool MCP.
 - Mantenere la retrocompatibilità dei nomi dei tool già pubblici.
-- Le chiamate in scrittura a Redmine richiedono sempre l'header `X-Redmine-API-Key`.
+- Usare i tool `ticket_*` (i vecchi `redmine_*` sono deprecati/rimossi).
+- Le credenziali provider possono essere passate via header runtime (vedi `docs/TICKETING_CLIENT.md`).
 - I filtri di ricerca (es. date, sort) devono essere validati rigidamente lato server.
 
 ### Convenzioni Architetturali (Maggio 2026)

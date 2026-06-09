@@ -1,0 +1,44 @@
+{
+  "default_provider": "redmine",
+  "project_provider_map": {},
+  "providers": {
+    "redmine": {
+      "base_url": "",
+      "api_key": ""
+    },
+    "jira": {
+      "base_url": "",
+      "email": "",
+      "api_token": ""
+    },
+    "azure_devops": {
+      "organization_url": "",
+      "project": "",
+      "repository": "",
+      "pat": ""
+    }
+  },
+  "workflow": {
+    "actions": {
+      "resolve": { "per_provider": {} },
+      "close": { "per_provider": {} },
+      "reopen": { "per_provider": {} }
+    }
+  },
+  "reference_patterns": {
+    "*": []
+  },
+  "default_create_type": {},
+  "pr": {
+    "default_target_branch": "main",
+    "project_target_branch": {}
+  },
+  "header_hints": {
+    "redmine": ["X-Redmine-API-Key"],
+    "jira": ["X-Jira-Email", "X-Jira-API-Token"],
+    "azure_devops": ["X-Azure-DevOps-PAT", "X-Azure-DevOps-Org", "X-Azure-DevOps-Project", "X-Azure-DevOps-Repo"]
+  },
+  "client_env_hints": {
+    "TICKETING_PROVIDER": "redmine|jira|azure_devops"
+  }
+}

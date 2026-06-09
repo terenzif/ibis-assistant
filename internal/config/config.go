@@ -32,8 +32,8 @@ type Config struct {
 	AutoScan            bool              `json:"auto_scan"`
 	GitRepos            []string          `json:"git_repos"` // Manual list override
 	LogFile             string            `json:"log_file"`
-	LogLevel            string            `json:"log_level"` // DEBUG, INFO, WARN, ERROR
-	MaxFileSize         int64             `json:"max_file_size"` // bytes
+	LogLevel            string            `json:"log_level"`      // DEBUG, INFO, WARN, ERROR
+	MaxFileSize         int64             `json:"max_file_size"`  // bytes
 	MaxDeltaSize        int               `json:"max_delta_size"` // bytes/characters for commit diff chunking
 	IgnoredDirs         []string          `json:"ignored_dirs"`
 	IgnoredFiles        []string          `json:"ignored_files"`
@@ -56,9 +56,9 @@ type SMTPConfig struct {
 }
 
 type GeminiKeyConfig struct {
-	Key   string `json:"key"`
-	RPM   int    `json:"rpm"`
-	TPM   int    `json:"tpm"`
+	Key          string `json:"key"`
+	RPM          int    `json:"rpm"`
+	TPM          int    `json:"tpm"`
 	RPD          int    `json:"rpd"`
 	Owner        string `json:"owner"`
 	AllowOverage bool   `json:"allow_overage"`
@@ -207,13 +207,8 @@ func Load(paths ...string) *Config {
 		cfg.GeminiKeys = keys // Replace file keys if ENV is set
 	}
 
-	// Redmine
-	if v := os.Getenv("REDMINE_URL"); v != "" {
-		cfg.RedmineURL = v
-	}
-	if v := os.Getenv("REDMINE_API_KEY"); v != "" {
-		cfg.RedmineKey = v
-	}
+	// Legacy REDMINE_URL/REDMINE_API_KEY environment fallbacks intentionally removed.
+	// Ticketing providers are configured via config/ticketing_config.json.
 	if v := os.Getenv("REDMINE_CONCURRENCY"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.RedmineConcurrency = p
@@ -275,7 +270,8 @@ func Load(paths ...string) *Config {
 func resolvePath(baseDir, path string) string {
 	// Custom absolute path check for cross-platform robustness (e.g. D:\path on non-Windows)
 	isWinAbs := len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
-	if path == "" || filepath.IsAbs(path) || isWinAbs {
+	isUnixAbs := strings.HasPrefix(path, "/")
+	if path == "" || filepath.IsAbs(path) || isWinAbs || isUnixAbs {
 		return path
 	}
 	return filepath.Join(baseDir, path)
