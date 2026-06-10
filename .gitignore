@@ -7,16 +7,16 @@ server
 !cmd/server/
 !cmd/server/*.go
 surreal.exe
-knowledge_server.exe
+ibis-arc.exe
 
 # Temporary
 tmp/
 .env
 
 # Database
-knowledge.db
-knowledge.db-wal
-knowledge.db-shm
+ibis-arc.db
+ibis-arc.db-wal
+ibis-arc.db-shm
 
 dist/
 

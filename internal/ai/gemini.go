@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 const (

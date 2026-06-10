@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // GraphContext represents the historical context of a file
@@ -129,8 +129,8 @@ func GetFileContext(ctx context.Context, dbClient db.Executor, filePath string) 
 		ID      interface{} `json:"id"` // Need ID to map impact
 		Hash    string      `json:"hash"`
 		Message string      `json:"message"`
-		Date    string `json:"date"`
-		Author  []string `json:"author"`
+		Date    string      `json:"date"`
+		Author  []string    `json:"author"`
 		Issues  []struct {
 			ID      interface{} `json:"id"`
 			Subject string      `json:"subject"`

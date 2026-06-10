@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 func TestProviderGetIssueUsesHeaderOverride(t *testing.T) {
@@ -20,11 +20,11 @@ func TestProviderGetIssueUsesHeaderOverride(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"issue": map[string]interface{}{
-				"id": 42,
+				"id":      42,
 				"subject": "Fix startup",
-				"status": map[string]interface{}{"id": 1, "name": "New"},
+				"status":  map[string]interface{}{"id": 1, "name": "New"},
 				"tracker": map[string]interface{}{"id": 2, "name": "Bug"},
-				"author": map[string]interface{}{"id": 3, "name": "Dev"},
+				"author":  map[string]interface{}{"id": 3, "name": "Dev"},
 			},
 		})
 	}))

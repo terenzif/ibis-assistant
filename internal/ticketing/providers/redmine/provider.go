@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
-	legacy "github.com/deckonline/knowledge_mcp/internal/ingest/redmine"
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/auth"
+	legacy "github.com/terenzif/ibis-arc/internal/ingest/redmine"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 type Provider struct {

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/surrealdb/surrealdb.go" // Standard driver
 	"github.com/surrealdb/surrealdb.go/pkg/connection"
 	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type Executor interface {

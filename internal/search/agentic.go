@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 // AgenticResult represents the outcome of an agentic search
@@ -47,7 +47,7 @@ func (s *Service) AskProjectAgentic(ctx context.Context, query string, branchCon
 	if branchContext != "" {
 		systemText += fmt.Sprintf("\n\nTOPOLOGICAL CONTEXT:\nYou are currently operating on branch/commit: %s. Keep in mind that search results might come from different parallel branches. Use this context to provide cross-branch insights when useful.", branchContext)
 	}
-	
+
 	history := []ai.Content{
 		{
 			Role: "user",

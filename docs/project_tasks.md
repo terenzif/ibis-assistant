@@ -1,8 +1,8 @@
 # Task Tracking
 
 - [x] Analyze existing `_local_knowledge_graph` implementation (Superseded) <!-- id: 0 -->
-- [x] Migrate `_local_knowledge_graph` to workspace root (`knowledge_server`) <!-- id: 4 -->
-- [x] Migrate `_local_knowledge_graph` to workspace root (`knowledge_server`) <!-- id: 4 -->
+- [x] Migrate `_local_knowledge_graph` to workspace root (`ibis-arc`) <!-- id: 4 -->
+- [x] Migrate `_local_knowledge_graph` to workspace root (`ibis-arc`) <!-- id: 4 -->
 - [x] Research/Design integration of Git Analysis and Project Analysis tools <!-- id: 1 -->
 - [x] Analyze external Copilot shared page for inspiration (Done via user summary) <!-- id: 5 -->
 - [x] Design MCP Server architecture in Go <!-- id: 2 -->

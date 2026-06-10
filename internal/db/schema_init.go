@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // InitSchema initializes the database schema by defining tables and indexes.

@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 type Ingester interface {
@@ -77,14 +77,14 @@ type IssuesResponse struct {
 	Limit      int     `json:"limit"`
 }
 type Issue struct {
-	ID          int       `json:"id"`
-	Subject     string    `json:"subject"`
-	Description string    `json:"description"`
-	Status      NamedObj  `json:"status"`
-	Tracker     NamedObj  `json:"tracker"`
-	Author      NamedObj  `json:"author"`
-	CreatedOn   string    `json:"created_on"`
-	UpdatedOn   string    `json:"updated_on"`
+	ID          int      `json:"id"`
+	Subject     string   `json:"subject"`
+	Description string   `json:"description"`
+	Status      NamedObj `json:"status"`
+	Tracker     NamedObj `json:"tracker"`
+	Author      NamedObj `json:"author"`
+	CreatedOn   string   `json:"created_on"`
+	UpdatedOn   string   `json:"updated_on"`
 }
 type NamedObj struct {
 	ID   int    `json:"id"`
@@ -108,7 +108,7 @@ type UsersResponse struct {
 // This is called "On-Demand" when a commit references an issue.
 func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDStr string) error {
 	logger.Info("Fetching Redmine Issue #%s...", issueIDStr)
-	
+
 	// Use provided context or Background
 	if ctx == nil {
 		ctx = context.Background()
@@ -150,21 +150,21 @@ func (c *Client) IngestIssue(ctx context.Context, dbClient db.Executor, issueIDS
 	}); err != nil {
 		return fmt.Errorf("failed to ingest issue graph: %w", err)
 	}
-	
+
 	logger.Info("Successfully ingested Issue #%d", issue.ID)
-	
+
 	return nil
 }
 
 // GetIssue fetches a raw Issue from Redmine
 func (c *Client) GetIssue(ctx context.Context, id string) (*Issue, error) {
 	endpoint := fmt.Sprintf("%s/issues/%s.json?include=journals", c.BaseURL, id)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Determine Key: Context > Client Config
 	apiKey := c.APIKey
 	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
@@ -201,7 +201,7 @@ func (c *Client) GetIssue(ctx context.Context, id string) (*Issue, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	
+
 	return &result.Issue, nil
 }
 
@@ -215,14 +215,14 @@ func (c *Client) GetUsers(ctx context.Context, name string, limit int) (*UsersRe
 		v.Set("name", name)
 	}
 	v.Set("limit", fmt.Sprintf("%d", limit))
-	
+
 	endpoint := fmt.Sprintf("%s/users.json?%s", c.BaseURL, v.Encode())
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	apiKey := c.APIKey
 	if k, ok := ctx.Value(auth.RedmineKeyContextKey).(string); ok && k != "" {
 		apiKey = k
@@ -247,7 +247,7 @@ func (c *Client) GetUsers(ctx context.Context, name string, limit int) (*UsersRe
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	
+
 	return &result, nil
 }
 
@@ -449,13 +449,13 @@ func (c *Client) UpdateIssue(ctx context.Context, id string, params UpdateIssueP
 
 	req.Header.Set("X-Redmine-API-Key", apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("redmine update error %d: %s", resp.StatusCode, string(respBody))
@@ -463,5 +463,3 @@ func (c *Client) UpdateIssue(ctx context.Context, id string, params UpdateIssueP
 
 	return nil
 }
-
-

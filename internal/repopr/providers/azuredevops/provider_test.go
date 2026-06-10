@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/repopr"
+	"github.com/terenzif/ibis-arc/internal/repopr"
 )
 
 func TestCreatePR(t *testing.T) {
@@ -26,9 +26,9 @@ func TestCreatePR(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"pullRequestId": 88,
-			"title": "My PR",
-			"status": "active",
-			"url": "http://ado/pr/88",
+			"title":         "My PR",
+			"status":        "active",
+			"url":           "http://ado/pr/88",
 		})
 	}))
 	defer srv.Close()
@@ -50,8 +50,8 @@ func TestCompletePR(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"pullRequestId": 88,
-			"title": "My PR",
-			"status": "completed",
+			"title":         "My PR",
+			"status":        "completed",
 		})
 	}))
 	defer srv.Close()

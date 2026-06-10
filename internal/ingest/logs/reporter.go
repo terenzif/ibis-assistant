@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type Reporter struct {

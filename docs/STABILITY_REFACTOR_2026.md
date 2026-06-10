@@ -1,6 +1,6 @@
 # Architecture Stability Refactor (2026-03)
 
-This document summarizes the major technical refactorings implemented to enhance the stability, reliability, and deployability of the Knowledge Server on Windows.
+This document summarizes the major technical refactorings implemented to enhance the stability, reliability, and deployability of the Ibis Arc on Windows.
 
 ## 1. Context Propagation Layer
 To support graceful shutdowns and robust cancellation of high-load operations, the entire AI and Database communication layer was refactored for consistent `context.Context` propagation.

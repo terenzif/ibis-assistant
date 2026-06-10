@@ -1,6 +1,6 @@
-# Knowledge Server (MCP)
+# Ibis Arc (MCP)
 
-**Knowledge Server** è un server MCP (Model Context Protocol) avanzato progettato per agire come una "memoria vivente" del progetto. Integra l'analisi strutturale del codice (Git), la comprensione semantica (RAG vettoriale) e l'intento gestionale (ticketing multi-provider: Redmine/Jira/Azure DevOps) in un unico grafo della conoscenza interrogabile.
+**Ibis Arc** è un server MCP (Model Context Protocol) avanzato progettato per agire come una "memoria vivente" del progetto. Integra l'analisi strutturale del codice (Git), la comprensione semantica (RAG vettoriale) e l'intento gestionale (ticketing multi-provider: Redmine/Jira/Azure DevOps) in un unico grafo della conoscenza interrogabile.
 
 Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini) un contesto profondo che va oltre la semplice lettura dei file attuali, permettendo risposte basate su *storia*, *evoluzione* e *ragionamento*.
 
@@ -33,13 +33,13 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
    
    ```bash
    git clone <tuo-repo>
-   cd knowledge_server
+   cd ibis-arc
    ```
 
 2. **Compila il server**:
    
    ```bash
-   go build -o knowledge_server.exe ./cmd/server
+   go build -o ibis-arc.exe ./cmd/server
    ```
 
 3. **Configurazione**:
@@ -68,7 +68,7 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
         "port": 587,
         "user": "username",
         "password": "",
-        "from": "alerts@knowledge-server.com",
+        "from": "alerts@ibis-arc.com",
         "to": "admin@example.com"
       }
     }
@@ -93,22 +93,22 @@ Include:
    Il server avvierà automaticamente SurrealDB se configurato per l'uso locale (default). L'avvio standard è:
    
    ```bash
-   ./knowledge_server.exe /run
+   ./ibis-arc.exe /run
    ```
    
-   Eseguendo `knowledge_server.exe` senza parametri verrà mostrata la guida rapida ai comandi.
+   Eseguendo `ibis-arc.exe` senza parametri verrà mostrata la guida rapida ai comandi.
 
 5. **Installazione come Servizio Windows**:
    È possibile installare il server come servizio di sistema per un avvio automatico:
 
    ```bash
    # Installa il servizio (Richiede privilegi di Amministratore)
-   ./knowledge_server.exe /install
+   ./ibis-arc.exe /install
 
    # Disinstalla il servizio
-   ./knowledge_server.exe /uninstall
+   ./ibis-arc.exe /uninstall
    ```
-   Il servizio verrà configurato con il nome "knowledge-server" e descrizione appropriata.
+   Il servizio verrà configurato con il nome "ibis-arc" e descrizione appropriata.
 
 ## 🚀 Utilizzo
 
@@ -117,14 +117,14 @@ Include:
 Il server supporta tre comandi principali:
 
 * `/run`: Avvia il server interattivamente (comportamento standard MCP).
-* `/install`: Installa il server come servizio Windows "knowledge-server".
+* `/install`: Installa il server come servizio Windows "ibis-arc".
 * `/uninstall`: Rimuove il servizio Windows.
 
 Può essere eseguito in modalità SSE (Server-Sent Events) o Stdio tramite i flag (da usare con `/run`):
 
 ```bash
 # Esempio: Analizza il repo corrente e avvia in modalità SSE
-./knowledge_server.exe /run -mode sse -port 3030 -scan
+./ibis-arc.exe /run -mode sse -port 3030 -scan
 ```
 
 ### ⚙️ Configurazione e Precedenza
@@ -154,7 +154,7 @@ Se preferisci usare le variabili d'ambiente di sistema (es. su container), puoi 
 
 ### 🔌 Integrazione Client (Centralizzata)
 
-Il Knowledge Server è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.
+Il Ibis Arc è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.
 
 **Endpoint Pubblico:** `http://localhost:3030/sse`
 
@@ -234,7 +234,7 @@ Non esiste ancora un supporto nativo *ufficiale* per MCP in SSMS.
 Gli agenti automatici (o Antigravity) configurati nella rete aziendale possono contattare direttamente l'endpoint.
 
 * **Discovery**: `http://localhost:3030`
-* **Vantaggio**: L'agente non deve clonare il repo per capirlo; chiede al Knowledge Server centrale che ha già "digerito" tutto il codice e la storia.
+* **Vantaggio**: L'agente non deve clonare il repo per capirlo; chiede al Ibis Arc centrale che ha già "digerito" tutto il codice e la storia.
 
 > **Nota Troubleshooting**: Essendo il server su `win-dev`, assicuratevi che il firewall di Windows su quella macchina permetta il traffico in ingresso sulla porta **3030**.
 
@@ -244,7 +244,7 @@ Gli agenti automatici (o Antigravity) configurati nella rete aziendale possono c
 
 ## 💡 Casi d'Uso Concreti
 
-Ecco alcuni scenari reali in cui il Knowledge Server fa la differenza:
+Ecco alcuni scenari reali in cui il Ibis Arc fa la differenza:
 
 1. **Onboarding su Codice Legacy**:
    
@@ -291,7 +291,7 @@ Per dettagli tecnici sulle recenti evoluzioni del sistema, consulta:
 
 ## 🤖 Istruzioni per AI/Copilot (Sviluppo Server)
 
-Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo sviluppo del Knowledge Server stesso**.
+Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo sviluppo del Ibis Arc stesso**.
 
 ### Convenzioni Operative
 - Trattare `cmd/server/main.go` e `internal/ingest/redmine/ingest.go` come source of truth dei tool MCP.

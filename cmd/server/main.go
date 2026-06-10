@@ -15,24 +15,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/auth"
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/discovery"
-	"github.com/deckonline/knowledge_mcp/internal/ingest/code"
-	"github.com/deckonline/knowledge_mcp/internal/ingest/dynamic"
-	"github.com/deckonline/knowledge_mcp/internal/ingest/git"
-	"github.com/deckonline/knowledge_mcp/internal/ingest/logs"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/optimization"
-	"github.com/deckonline/knowledge_mcp/internal/repopr"
-	repoprado "github.com/deckonline/knowledge_mcp/internal/repopr/providers/azuredevops"
-	"github.com/deckonline/knowledge_mcp/internal/search"
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
-	ticketado "github.com/deckonline/knowledge_mcp/internal/ticketing/providers/azuredevops"
-	ticketjira "github.com/deckonline/knowledge_mcp/internal/ticketing/providers/jira"
-	ticketredmine "github.com/deckonline/knowledge_mcp/internal/ticketing/providers/redmine"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/discovery"
+	"github.com/terenzif/ibis-arc/internal/ingest/code"
+	"github.com/terenzif/ibis-arc/internal/ingest/dynamic"
+	"github.com/terenzif/ibis-arc/internal/ingest/git"
+	"github.com/terenzif/ibis-arc/internal/ingest/logs"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/optimization"
+	"github.com/terenzif/ibis-arc/internal/repopr"
+	repoprado "github.com/terenzif/ibis-arc/internal/repopr/providers/azuredevops"
+	"github.com/terenzif/ibis-arc/internal/search"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
+	ticketado "github.com/terenzif/ibis-arc/internal/ticketing/providers/azuredevops"
+	ticketjira "github.com/terenzif/ibis-arc/internal/ticketing/providers/jira"
+	ticketredmine "github.com/terenzif/ibis-arc/internal/ticketing/providers/redmine"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -112,12 +112,12 @@ func main() {
 
 func printHelp() {
 	binName := filepath.Base(os.Args[0])
-	fmt.Println("Knowledge Server - MCP Knowledge Graph & Search")
+	fmt.Println("Ibis Arc - MCP Knowledge Graph & Search")
 	fmt.Println("\nUsage:")
 	fmt.Printf("  %s <command> [options]\n", binName)
 	fmt.Println("\nCommands:")
 	fmt.Println("  run         Run the server interactively (standard MCP behavior)")
-	fmt.Println("  install     Install as Windows Service 'knowledge-server'")
+	fmt.Println("  install     Install as Windows Service 'ibis-arc'")
 	fmt.Println("  uninstall   Uninstall the Windows Service")
 	fmt.Println("\nOptions (used with run or as flags):")
 	fmt.Println("  -port int        Port to listen on for SSE (default 8080)")
@@ -229,7 +229,7 @@ func runServer(ctx context.Context) {
 	}
 
 	// 3. Discovery Logic
-	logger.Info("Starting Knowledge Server (Mode: %s)...", cfg.Mode)
+	logger.Info("Starting Ibis Arc (Mode: %s)...", cfg.Mode)
 	var activeRepos []string
 
 	if cfg.AutoScan {
@@ -515,7 +515,7 @@ func runServer(ctx context.Context) {
 	// 7. Register Tools
 	s.AddTool(mcp.NewTool("init_project",
 		mcp.WithDescription("Initialize a repository session. Checks out the specific branch/commit and triggers ingestion if necessary."),
-		mcp.WithString("project_name", mcp.Description("Name of the project (e.g. DeckOnLine)")),
+		mcp.WithString("project_name", mcp.Description("Name of the project")),
 		mcp.WithString("origin_url", mcp.Description("Git origin URL")),
 		mcp.WithString("branch", mcp.Description("Target branch")),
 		mcp.WithString("commit", mcp.Description("Target commit hash (optional, takes precedence)")),
@@ -1324,7 +1324,7 @@ func runServer(ctx context.Context) {
 		}()
 
 		// Block until a shutdown signal or context cancellation is received.
-		logger.Info("Knowledge Server is operational. Press Ctrl+C to stop.")
+		logger.Info("Ibis Arc is operational. Press Ctrl+C to stop.")
 		select {
 		case <-sigChan:
 			logger.Info("Shutdown signal received.")

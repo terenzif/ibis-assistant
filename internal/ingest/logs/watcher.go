@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/fsnotify/fsnotify"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type Watcher struct {

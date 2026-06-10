@@ -1,7 +1,7 @@
 # Agentic RAFT Strategy
 
 **Status:** Draft
-**Objective:** Upgrade the Knowledge Server from a passive retrieval system to an active, self-optimizing agentic system.
+**Objective:** Upgrade the Ibis Arc from a passive retrieval system to an active, self-optimizing agentic system.
 
 ## 1. Core Concepts
 

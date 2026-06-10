@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 type MockDBBatch struct {
@@ -58,7 +58,7 @@ func createTestClient() *Client {
 		ctx:           ctx,
 		cancel:        cancel,
 	}
-	
+
 	// Start a goroutine that handles embedding jobs for testing
 	go func() {
 		for {
@@ -78,7 +78,7 @@ func createTestClient() *Client {
 			}
 		}
 	}()
-	
+
 	return client
 }
 
@@ -126,11 +126,11 @@ func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {
 			// Create a minimal Client for testing
 			client := createTestClient()
 			bm := NewBatchManager(db, client, ".", 8000)
-			
+
 			// We can't easily check the internal state of chunkIDs without exposing it or using a hook.
 			// But we can check if it attempted to call Execute for the selecting pending chunks.
 			bm.processPendingChunks()
-			
+
 			foundFileChunkQuery := false
 			for _, q := range db.Queries {
 				if strings.Contains(q, schema.TableFileChunk) && strings.Contains(q, "batch_status = 'pending'") {
@@ -152,7 +152,7 @@ func TestBatchManager_SQLQuoting(t *testing.T) {
 			map[string]interface{}{"id": "file_chunk:with'quote", "content": "text"},
 		},
 	}
-	
+
 	client := createTestClient()
 	bm := NewBatchManager(db, client, ".", 8000)
 	// This test is mostly a place holder for now since mocking AI.CreateBatchEmbedJob is hard without an interface.

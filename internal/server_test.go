@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // MockClient simulates database interactions for testing
@@ -38,7 +38,7 @@ func TestMockIngestionFlow(t *testing.T) {
 	// Simulate "Project Knowledge" logic
 	// 1. Create Repo
 	client.Execute(ctx, "CREATE repo:test SET path = '/tmp/test';")
-	
+
 	// 2. Create Commit
 	client.Execute(ctx, "CREATE commit:abc SET message = 'Fix bug #123';")
 

@@ -3,7 +3,7 @@ package schema_test
 import (
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 func TestSchemaConstants(t *testing.T) {

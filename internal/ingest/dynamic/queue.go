@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 // IngestionResult contains the result of the synchronous workspace sync phase.
@@ -29,12 +29,12 @@ type IngestionJob struct {
 
 // ProjectIngestionManager manages a queue of ingestion jobs per project.
 type ProjectIngestionManager struct {
-	mu       sync.Mutex
-	queues   map[string]chan IngestionJob
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	
+	mu     sync.Mutex
+	queues map[string]chan IngestionJob
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	Config     *config.Config
 	ProcessJob func(ctx context.Context, job IngestionJob, repoPath string) error
 }
@@ -60,7 +60,7 @@ func (m *ProjectIngestionManager) Enqueue(job IngestionJob) {
 		// Buffered channel to prevent blocking the caller immediately
 		q = make(chan IngestionJob, 100)
 		m.queues[job.ProjectName] = q
-		
+
 		m.wg.Add(1)
 		go m.worker(job.ProjectName, q)
 	}
@@ -104,10 +104,10 @@ func (m *ProjectIngestionManager) worker(projectName string, q chan IngestionJob
 
 func (m *ProjectIngestionManager) executeJob(job IngestionJob) {
 	logger.Info("Inizio esecuzione job per %s (Branch: %s, Commit: %s)", job.ProjectName, job.Branch, job.Commit)
-	
+
 	// 1. Sync Workspace
 	repoPath, actualCommit, isAligned, err := SyncWorkspace(m.ctx, m.Config, job.ProjectName, job.OriginURL, job.Branch, job.Commit)
-	
+
 	if job.OnSyncDone != nil {
 		job.OnSyncDone(IngestionResult{
 			ActualCommit: actualCommit,
@@ -129,7 +129,7 @@ func (m *ProjectIngestionManager) executeJob(job IngestionJob) {
 		// Diamo un timeout generoso per l'ingestione
 		jobCtx, cancel := context.WithTimeout(m.ctx, 2*time.Hour)
 		defer cancel()
-		
+
 		err = m.ProcessJob(jobCtx, job, repoPath)
 		if err != nil {
 			logger.Error("Errore ingestione per %s: %v", job.ProjectName, err)

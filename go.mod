@@ -1,4 +1,4 @@
-module github.com/deckonline/knowledge_mcp
+module github.com/terenzif/ibis-arc
 
 go 1.25.5
 

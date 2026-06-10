@@ -4,7 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"github.com/deckonline/knowledge_mcp/internal/ai"
+
+	"github.com/terenzif/ibis-arc/internal/ai"
 )
 
 func TestAskProjectAgentic_RegexOptimization(t *testing.T) {
@@ -72,4 +73,3 @@ func TestAskProjectAgentic_RegexOptimization(t *testing.T) {
 		t.Error("Expected search to be executed in step 1")
 	}
 }
-

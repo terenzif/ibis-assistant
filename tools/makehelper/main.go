@@ -38,7 +38,7 @@ func main() {
 }
 
 func buildServer() error {
-	return run("go", "build", "-o", exeName("knowledge_server"), "./cmd/server")
+	return run("go", "build", "-o", exeName("ibis-arc"), "./cmd/server")
 }
 
 func buildMCPBridge() error {
@@ -50,7 +50,7 @@ func dist() error {
 		return err
 	}
 
-	if err := moveFile(exeName("knowledge_server"), filepath.Join("dist", exeName("knowledge_server"))); err != nil {
+	if err := moveFile(exeName("ibis-arc"), filepath.Join("dist", exeName("ibis-arc"))); err != nil {
 		return err
 	}
 	if err := moveFile(exeName("mcp-bridge"), filepath.Join("dist", exeName("mcp-bridge"))); err != nil {
@@ -76,9 +76,9 @@ func dist() error {
 
 func clean() error {
 	for _, p := range []string{
-		exeName("knowledge_server"),
+		exeName("ibis-arc"),
 		exeName("mcp-bridge"),
-		filepath.Join("dist", exeName("knowledge_server")),
+		filepath.Join("dist", exeName("ibis-arc")),
 		filepath.Join("dist", exeName("mcp-bridge")),
 		filepath.Join("dist", "config.json"),
 		filepath.Join("dist", "sg.exe"),

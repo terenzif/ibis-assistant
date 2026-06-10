@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 func TestGetIssueUsesBasicAuth(t *testing.T) {
@@ -22,15 +22,15 @@ func TestGetIssueUsesBasicAuth(t *testing.T) {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"id": "100",
-			"key": "ABC-100",
+			"id":   "100",
+			"key":  "ABC-100",
 			"self": "http://jira/ABC-100",
 			"fields": map[string]interface{}{
-				"summary": "Fix login",
+				"summary":     "Fix login",
 				"description": map[string]interface{}{"type": "doc"},
-				"status": map[string]interface{}{"name": "In Progress"},
-				"issuetype": map[string]interface{}{"name": "Bug"},
-				"project": map[string]interface{}{"key": "ABC"},
+				"status":      map[string]interface{}{"name": "In Progress"},
+				"issuetype":   map[string]interface{}{"name": "Bug"},
+				"project":     map[string]interface{}{"key": "ABC"},
 			},
 		})
 	}))
@@ -49,19 +49,19 @@ func TestGetIssueUsesBasicAuth(t *testing.T) {
 func TestSearchIssues(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"total": 1,
-			"startAt": 0,
+			"total":      1,
+			"startAt":    0,
 			"maxResults": 20,
 			"issues": []map[string]interface{}{
 				{
-					"id": "101",
+					"id":  "101",
 					"key": "XYZ-101",
 					"fields": map[string]interface{}{
-						"summary": "Timeout",
+						"summary":     "Timeout",
 						"description": map[string]interface{}{"type": "doc"},
-						"status": map[string]interface{}{"name": "Open"},
-						"issuetype": map[string]interface{}{"name": "Task"},
-						"project": map[string]interface{}{"key": "XYZ"},
+						"status":      map[string]interface{}{"name": "Open"},
+						"issuetype":   map[string]interface{}{"name": "Task"},
+						"project":     map[string]interface{}{"key": "XYZ"},
 					},
 				},
 			},

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
-	"github.com/deckonline/knowledge_mcp/internal/config"
+	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/config"
 )
 
 type mockTokenProvider struct {

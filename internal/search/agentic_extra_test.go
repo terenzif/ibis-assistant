@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/ai"
 )
 
 // TestAskProjectAgentic_QueryParsing checks edge cases for query extraction
@@ -56,14 +56,14 @@ func TestAskProjectAgentic_QueryParsing(t *testing.T) {
 					if stepCounter == 1 {
 						return ai.Candidate{
 							Content: ai.Content{
-								Role: "model",
+								Role:  "model",
 								Parts: []ai.Part{{Text: tt.modelResponse}},
 							},
 						}, nil
 					}
 					return ai.Candidate{
 						Content: ai.Content{
-							Role: "model",
+							Role:  "model",
 							Parts: []ai.Part{{Text: "FINAL ANSWER: done"}},
 						},
 					}, nil
@@ -135,7 +135,7 @@ func TestAskProjectAgentic_EmptyQuery(t *testing.T) {
 					if stepCounter == 1 {
 						return ai.Candidate{
 							Content: ai.Content{
-								Role: "model",
+								Role:  "model",
 								Parts: []ai.Part{{Text: tt.modelResponse}},
 							},
 						}, nil
@@ -156,7 +156,7 @@ func TestAskProjectAgentic_EmptyQuery(t *testing.T) {
 
 					return ai.Candidate{
 						Content: ai.Content{
-							Role: "model",
+							Role:  "model",
 							Parts: []ai.Part{{Text: "FINAL ANSWER: done"}},
 						},
 					}, nil
@@ -195,7 +195,7 @@ func (m *FailingAIMock) GenerateContent(ctx context.Context, contents []ai.Conte
 	if len(contents) == 1 { // Only user prompt
 		return ai.Candidate{
 			Content: ai.Content{
-				Role: "model",
+				Role:  "model",
 				Parts: []ai.Part{{Text: "SEARCH: fail_please"}},
 			},
 		}, nil
@@ -204,7 +204,7 @@ func (m *FailingAIMock) GenerateContent(ctx context.Context, contents []ai.Conte
 	lastMsg := contents[len(contents)-1]
 	return ai.Candidate{
 		Content: ai.Content{
-			Role: "model",
+			Role:  "model",
 			Parts: []ai.Part{{Text: fmt.Sprintf("FINAL ANSWER: Observed: %s", lastMsg.Parts[0].Text)}},
 		},
 	}, nil
@@ -230,4 +230,3 @@ func TestAskProjectAgentic_AISearchError(t *testing.T) {
 		t.Errorf("Expected answer to contain failure observation, got: %s", res.Answer)
 	}
 }
-

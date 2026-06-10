@@ -1,7 +1,7 @@
-# Implementation Plan: Knowledge Server Hybrid Search
+# Implementation Plan: Ibis Arc Hybrid Search
 **Target Developer:** Jules
 **Status:** Ingestion is COMPLETE. Retrieval is PENDING.
-**Objective:** Implement "AskProject" functionality combining Vector Search with Graph Traversal in `knowledge-server`.
+**Objective:** Implement "AskProject" functionality combining Vector Search with Graph Traversal in `ibis-arc`.
 
 ## 1. Confirmed Codebase State
 -   **Ingestion (`internal/ingest/`)**:

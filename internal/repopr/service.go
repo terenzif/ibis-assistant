@@ -7,13 +7,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/auth"
 )
 
 var (
-	jiraPattern = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
+	jiraPattern    = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
 	redminePattern = regexp.MustCompile(`#\d+`)
-	adoPattern = regexp.MustCompile(`\b[A-Z][A-Z0-9]+#\d+\b`)
+	adoPattern     = regexp.MustCompile(`\b[A-Z][A-Z0-9]+#\d+\b`)
 )
 
 type Service struct {

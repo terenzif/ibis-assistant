@@ -5,8 +5,8 @@ import (
 	"net/smtp"
 	"os"
 
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type Notifier struct {
@@ -31,7 +31,7 @@ func (n *Notifier) SendEmail(reportPath string) error {
 
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
-		"Subject: Knowledge Server - Log Report\r\n"+
+		"Subject: Ibis Arc - Log Report\r\n"+
 		"Content-Type: text/plain; charset=\"UTF-8\"\r\n"+
 		"\r\n"+
 		"%s\r\n", n.Cfg.SMTP.To, n.Cfg.SMTP.From, string(content)))

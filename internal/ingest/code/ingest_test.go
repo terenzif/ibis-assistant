@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // MockDB implements db.Executor
@@ -153,7 +153,7 @@ func TestIngestCodebase_Delta(t *testing.T) {
 		foundUpdate := false
 		for _, sql := range mockDB.ExecuteCalls {
 			// Check for assignment in CREATE
-				if strings.Contains(sql, "CREATE file_chunk:⟨") && strings.Contains(sql, "batch_status='pending'") {
+			if strings.Contains(sql, "CREATE file_chunk:⟨") && strings.Contains(sql, "batch_status='pending'") {
 				foundUpdate = true
 				break
 			}

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type GitHubRelease struct {

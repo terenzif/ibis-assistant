@@ -14,10 +14,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 type AIClient interface {
@@ -109,7 +109,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "HEAD", "--name-only")
 	cmd.Dir = absPath
 	out, gitErr := cmd.Output()
-	
+
 	if gitErr == nil {
 		lines := strings.Split(string(out), "\n")
 		for _, relPath := range lines {
@@ -244,12 +244,16 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, activ
 
 	for _, r := range rows {
 		row, ok := r.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 
 		id, _ := row["id"].(string)
 		path, _ := row["path"].(string)
 
-		if id == "" || path == "" { continue }
+		if id == "" || path == "" {
+			continue
+		}
 
 		// Calculate relative path to match activeFilesMap keys
 		relPath, err := filepath.Rel(repoPath, path)
@@ -257,7 +261,7 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, activ
 			logger.Warn("Failed to get relative path for %s: %v", path, err)
 			continue
 		}
-		
+
 		// Normalize slashes for git matching (git always uses forward slashes)
 		relPathGit := filepath.ToSlash(relPath)
 
@@ -287,7 +291,9 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, activ
 		var idListBuilder strings.Builder
 		idListBuilder.WriteString("[")
 		for j, id := range batch {
-			if j > 0 { idListBuilder.WriteString(", ") }
+			if j > 0 {
+				idListBuilder.WriteString(", ")
+			}
 			idListBuilder.WriteString(id)
 		}
 		idListBuilder.WriteString("]")
@@ -360,7 +366,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 	// 3. Update File Node (Update pointer to current version)
 	// We store absolute path in the record for local discovery, but the ID is relative.
-	_, err = dbClient.Execute(ctx, fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s', rel_path = '%s', repo_name = '%s';", 
+	_, err = dbClient.Execute(ctx, fmt.Sprintf("UPSERT %s SET hash = '%s', path = '%s', rel_path = '%s', repo_name = '%s';",
 		fileID, hash, db.EscapeSQL(absPath), db.EscapeSQL(relPath), db.EscapeSQL(repoName)))
 	if err != nil {
 		return fmt.Errorf("db update error: %w", err)
@@ -375,9 +381,15 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 			if row, ok := rows[0].(map[string]interface{}); ok {
 				// Handle float64 or int (json unmarshal default is float64)
 				var count int64
-				if c, ok := row["count"].(float64); ok { count = int64(c) }
-				if c, ok := row["count"].(int64); ok { count = c }
-				if c, ok := row["count"].(int); ok { count = int64(c) }
+				if c, ok := row["count"].(float64); ok {
+					count = int64(c)
+				}
+				if c, ok := row["count"].(int64); ok {
+					count = c
+				}
+				if c, ok := row["count"].(int); ok {
+					count = int64(c)
+				}
 
 				if count > 0 {
 					logger.Info("  - Using existing embeddings for hash %s", hash[:8])
@@ -418,7 +430,7 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 			edgeQL := fmt.Sprintf("RELATE %s->%s->%s SET file = '%s', line = %d;",
 				callerSymbolID, schema.EdgeCalls, calleeSymbolID, relPath, call.StartLine)
-			dbClient.Execute(ctx, nodeQL + edgeQL)
+			dbClient.Execute(ctx, nodeQL+edgeQL)
 		}
 	} else {
 		if _, err := f.Seek(0, 0); err != nil {
@@ -442,11 +454,11 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 		for i, logDef := range logs {
 			// ID based on file and line
 			logID := db.FormatRecordID(schema.TableLogTemplate, fmt.Sprintf("%s_%s_%d", safeRepoName, db.SanitizeID(relPath), logDef.SourceLine))
-			
+
 			formatBytes, _ := json.Marshal(logDef.FormatString)
 			regexBytes, _ := json.Marshal(logDef.Regex)
-			
-			ql := fmt.Sprintf("CREATE %s SET format_string=%s, regex=%s, source_file='%s', source_line=%d;", 
+
+			ql := fmt.Sprintf("CREATE %s SET format_string=%s, regex=%s, source_file='%s', source_line=%d;",
 				logID, string(formatBytes), string(regexBytes), logDef.SourceFile, logDef.SourceLine)
 			logBuilder.WriteString(ql)
 
@@ -533,15 +545,15 @@ func fileHash(r io.Reader) (string, error) {
 }
 
 func chunkContent(r io.Reader, size int) ([]string, error) {
-	// Very naive chunking by lines/size. 
+	// Very naive chunking by lines/size.
 	// Production should use a tokenizer or smarter splitter.
 	var chunks []string
 	scanner := bufio.NewScanner(r)
 	var currentChunk strings.Builder
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		if currentChunk.Len() + len(line) > size {
+		if currentChunk.Len()+len(line) > size {
 			chunks = append(chunks, currentChunk.String())
 			currentChunk.Reset()
 		}

@@ -1,4 +1,4 @@
-# Cognitive Architecture Specification: Adaptive Knowledge Server
+# Cognitive Architecture Specification: Adaptive Ibis Arc
 **Target Developer:** Jules
 **Status:** Ingestion Complete. Cognitive Logic Pending.
 **Objective:** Implement a "Cognitive" Retrieval System that combines Vector Similarity, Graph Structure, Temporal Recency, and Usage-Based Reinforcement (Weighted Memory).

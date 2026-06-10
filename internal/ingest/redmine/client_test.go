@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/auth"
 )
 
 func TestGetIssue(t *testing.T) {
@@ -28,14 +28,14 @@ func TestGetIssue(t *testing.T) {
 		// Return Mock JSON
 		resp := map[string]interface{}{
 			"issue": map[string]interface{}{
-				"id":      123,
-				"subject": "Test Issue",
-				"status":  map[string]interface{}{"id": 1, "name": "New"},
-				"tracker": map[string]interface{}{"id": 2, "name": "Bug"},
-				"author":  map[string]interface{}{"id": 5, "name": "John Doe"},
+				"id":          123,
+				"subject":     "Test Issue",
+				"status":      map[string]interface{}{"id": 1, "name": "New"},
+				"tracker":     map[string]interface{}{"id": 2, "name": "Bug"},
+				"author":      map[string]interface{}{"id": 5, "name": "John Doe"},
 				"description": "Desc",
-				"created_on": "2023-01-01T12:00:00Z",
-				"updated_on": "2023-01-02T12:00:00Z",
+				"created_on":  "2023-01-01T12:00:00Z",
+				"updated_on":  "2023-01-02T12:00:00Z",
 			},
 		}
 		json.NewEncoder(w).Encode(resp)
@@ -78,8 +78,8 @@ func TestSearchIssues(t *testing.T) {
 
 		resp := map[string]interface{}{
 			"issues": []map[string]interface{}{
-				{"id": 10, "subject": "Login Fix", "status": map[string]interface{}{"name":"Closed"}},
-				{"id": 11, "subject": "Login UI", "status": map[string]interface{}{"name":"New"}},
+				{"id": 10, "subject": "Login Fix", "status": map[string]interface{}{"name": "Closed"}},
+				{"id": 11, "subject": "Login UI", "status": map[string]interface{}{"name": "New"}},
 			},
 		}
 		json.NewEncoder(w).Encode(resp)

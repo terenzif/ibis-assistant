@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/ai"
 )
 
 func TestAskProjectAgentic_MultilineQuery(t *testing.T) {
@@ -23,14 +23,14 @@ func TestAskProjectAgentic_MultilineQuery(t *testing.T) {
 			if stepCounter == 1 {
 				return ai.Candidate{
 					Content: ai.Content{
-						Role: "model",
+						Role:  "model",
 						Parts: []ai.Part{{Text: multilineQuery}},
 					},
 				}, nil
 			}
 			return ai.Candidate{
 				Content: ai.Content{
-					Role: "model",
+					Role:  "model",
 					Parts: []ai.Part{{Text: "FINAL ANSWER: done"}},
 				},
 			}, nil
@@ -57,4 +57,3 @@ func TestAskProjectAgentic_MultilineQuery(t *testing.T) {
 		}
 	}
 }
-

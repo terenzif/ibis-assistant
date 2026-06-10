@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // MigrateLegacyIssues backfills provider metadata for pre-ticketing issue records.

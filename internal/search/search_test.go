@@ -5,8 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	
+	"github.com/terenzif/ibis-arc/internal/ai"
 )
 
 // MockDB implements db.Executor
@@ -91,15 +90,15 @@ func TestAskProject(t *testing.T) {
 
 	graphResponse := []interface{}{
 		map[string]interface{}{
-			"history": graphHistory,
+			"history":      graphHistory,
 			"change_edges": changeEdges,
 		},
 	}
 
 	mockDB := &MockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": chunks,
-			"<-changed":       graphResponse,
+			"FROM [":    chunks,
+			"<-changed": graphResponse,
 		},
 	}
 
@@ -157,4 +156,3 @@ func TestAskProject(t *testing.T) {
 		t.Errorf("Expected 0 authors for 4th file, got %d", len(extraRes.Context.ExpertAuthors))
 	}
 }
-

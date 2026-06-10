@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
+	"github.com/terenzif/ibis-arc/internal/db"
 )
 
 func TestChunkContent(t *testing.T) {

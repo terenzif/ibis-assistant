@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 // SyncWorkspace assicura che il repo sia aggiornato.
@@ -28,7 +28,7 @@ func SyncWorkspace(ctx context.Context, cfg *config.Config, repoName, originUrl,
 	if os.IsNotExist(err) {
 		// Clone new repository
 		logger.Info("Cloning repository %s from %s", repoName, originUrl)
-		
+
 		// Note: We can't always clone a specific commit directly if the server doesn't support it,
 		// so we clone the branch first, then checkout the commit if provided.
 		var cloneArgs []string
@@ -41,7 +41,7 @@ func SyncWorkspace(ctx context.Context, cfg *config.Config, repoName, originUrl,
 			cloneArgs = append(cloneArgs, "-b", branch)
 		}
 		cloneArgs = append(cloneArgs, originUrl, repoPath)
-		
+
 		cmd := exec.CommandContext(ctx, "git", cloneArgs...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -50,7 +50,7 @@ func SyncWorkspace(ctx context.Context, cfg *config.Config, repoName, originUrl,
 	} else {
 		// Repository exists, clean and fetch
 		logger.Info("Repository %s already exists. Resetting and fetching from %s", repoName, originUrl)
-		
+
 		var fetchArgs []string
 		token := cfg.GetGitToken(originUrl)
 		if token != "" {

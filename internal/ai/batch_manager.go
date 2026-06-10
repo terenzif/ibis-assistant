@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 const (
@@ -21,11 +21,11 @@ const (
 )
 
 type BatchManager struct {
-	DB     db.Executor
-	AI     *Client // Use concrete client to access batch methods
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	DB            db.Executor
+	AI            *Client // Use concrete client to access batch methods
+	wg            sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
 	DiscoveryRoot string
 	MaxDeltaSize  int
 }
@@ -114,17 +114,22 @@ func (bm *BatchManager) processPendingChunks() {
 
 	for _, r := range allRows {
 		row, ok := r.(map[string]interface{})
-		if !ok { continue }
-		
+		if !ok {
+			continue
+		}
+
 		var id string
 		if rawID, exists := row["id"]; exists {
 			switch v := rawID.(type) {
-			case string: id = v
+			case string:
+				id = v
 			case map[string]interface{}:
-				if idVal, ok := v["id"].(string); ok { id = idVal }
+				if idVal, ok := v["id"].(string); ok {
+					id = idVal
+				}
 			}
 		}
-		
+
 		content, _ := row["content"].(string)
 
 		if id != "" && content != "" {
@@ -191,14 +196,19 @@ func (bm *BatchManager) processPendingCommits() {
 
 	for _, r := range rows {
 		row, ok := r.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 
 		var id string
 		if rawID, exists := row["id"]; exists {
 			switch v := rawID.(type) {
-			case string: id = v
+			case string:
+				id = v
 			case map[string]interface{}:
-				if idVal, ok := v["id"].(string); ok { id = idVal }
+				if idVal, ok := v["id"].(string); ok {
+					id = idVal
+				}
 			}
 		}
 
@@ -211,11 +221,11 @@ func (bm *BatchManager) processPendingCommits() {
 		}
 
 		absRepoPath := filepath.Join(bm.DiscoveryRoot, repoName)
-		
+
 		cmd := exec.CommandContext(bm.ctx, "git", "diff", hash+"^", hash)
 		cmd.Dir = absRepoPath
 		out, err := cmd.Output()
-		
+
 		var patch string
 		if err != nil {
 			cmdShow := exec.CommandContext(bm.ctx, "git", "show", "--format=", "--patch", hash)
@@ -237,20 +247,20 @@ func (bm *BatchManager) processPendingCommits() {
 		if bm.MaxDeltaSize <= 0 {
 			bm.MaxDeltaSize = 8000
 		}
-		
+
 		fullText := fmt.Sprintf("COMMIT MESSAGE:\n%s\n\nPATCH:\n%s", message, patch)
 		chunks := chunkString(fullText, bm.MaxDeltaSize)
-		
+
 		for i, chunkText := range chunks {
 			chunkID := db.FormatRecordID(schema.TableCommitChunk, fmt.Sprintf("%s_chunk%d", hash, i))
 			escapedText := db.EscapeSQL(chunkText)
 			sb.WriteString(fmt.Sprintf("UPDATE %s SET content = '%s', batch_status = 'pending', commit_hash = '%s';\n",
 				chunkID, escapedText, hash))
-			
+
 			safeCommitID := db.FormatRecordID("", id)
 			sb.WriteString(fmt.Sprintf("RELATE %s->%s->%s;\n", safeCommitID, schema.EdgeHasCommitChunk, chunkID))
 		}
-		
+
 		safeID := db.FormatRecordID("", id)
 		sb.WriteString(fmt.Sprintf("UPDATE %s SET batch_status = 'completed';\n", safeID))
 		hasUpdates = true
@@ -271,11 +281,11 @@ func chunkString(text string, maxLen int) []string {
 	if len(text) <= maxLen {
 		return []string{text}
 	}
-	
+
 	var chunks []string
 	lines := strings.Split(text, "\n")
 	var current string
-	
+
 	for _, line := range lines {
 		if len(current)+len(line)+1 > maxLen && len(current) > 0 {
 			chunks = append(chunks, current)

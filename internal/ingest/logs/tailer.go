@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/nxadm/tail"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type Tailer struct {
@@ -63,7 +63,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 	var totalErrors int
 	var discoveryDone bool
 	var chunkRegex *regexp.Regexp
-	
+
 	startTime := time.Now()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -86,7 +86,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 			text := strings.TrimSpace(line.Text)
 			if text != "" {
 				batch = append(batch, text)
-				
+
 				if !discoveryDone && len(batch) >= 50 {
 					regexStr := t.Analyzer.DiscoverFormat(ctx, batch)
 					if regexStr != "" {
@@ -120,7 +120,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 						processBatch = batch
 						batch = nil
 					}
-					
+
 					t.Analyzer.ProcessBatch(ctx, processBatch)
 					totalErrors += len(processBatch)
 					if pos, err := tailer.Tell(); err == nil {
@@ -153,8 +153,8 @@ func (t *Tailer) finalize(totalErrors int, start time.Time) {
 	if totalErrors > 0 {
 		reporter := NewReporter(t.Cfg, t.DB)
 		// Cost calculation - simple estimate
-		cost := float64(totalErrors) * 0.0001 
-		
+		cost := float64(totalErrors) * 0.0001
+
 		reportPath, err := reporter.GenerateReport(t.Analyzer.Project, t.Path, totalErrors, cost)
 		if err == nil {
 			notifier := NewNotifier(t.Cfg)

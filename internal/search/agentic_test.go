@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/ai"
 )
 
 // TestAgentMockAI implements AIProvider for testing Agentic flow
@@ -358,8 +358,8 @@ func TestAskProjectAgentic_GraphContext(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": chunks,        // Triggered by AskProject Vector Search
-			"<-changed":       graphResponse, // Triggered by AskProject -> GetFileContext
+			"FROM [":    chunks,        // Triggered by AskProject Vector Search
+			"<-changed": graphResponse, // Triggered by AskProject -> GetFileContext
 		},
 	}
 
@@ -422,4 +422,3 @@ func TestAskProjectAgentic_GraphContext(t *testing.T) {
 		t.Fatalf("AskProjectAgentic failed unexpectedly: %v", err)
 	}
 }
-

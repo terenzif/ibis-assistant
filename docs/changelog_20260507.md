@@ -1,6 +1,6 @@
 # Changelog - 07 Maggio 2026
 
-Questo documento riassume tutte le implementazioni, i refactoring architetturali e i miglioramenti introdotti tra il 6 e il 7 Maggio 2026. Tutte queste funzionalità consolidano il Knowledge Server per un utilizzo in produzione stabile, multi-linguaggio e altamente affidabile su Windows.
+Questo documento riassume tutte le implementazioni, i refactoring architetturali e i miglioramenti introdotti tra il 6 e il 7 Maggio 2026. Tutte queste funzionalità consolidano il Ibis Arc per un utilizzo in produzione stabile, multi-linguaggio e altamente affidabile su Windows.
 
 ## 1. Gestione Dinamica dei Workspace e Code Ingestion
 - **Code Ingestion Dinamica**: Aggiunti `internal/ingest/dynamic/queue.go` e `workspace.go` per orchestrare l'aggiornamento dei repository in tempo reale tramite `ProjectIngestionManager`. La sincronizzazione (fetch/checkout) è separata dalla vettorializzazione asincrona.

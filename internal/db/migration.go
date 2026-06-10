@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 // MigrateLegacyFileTable moves data from the legacy 'file' table (reserved keyword in v3)

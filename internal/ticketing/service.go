@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/auth"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 var digitRegex = regexp.MustCompile(`\d+`)
@@ -54,11 +54,11 @@ func (s *Service) Capabilities() map[string]interface{} {
 		providers = append(providers, string(name))
 	}
 	return map[string]interface{}{
-		"default_provider":    s.cfg.DefaultProvider,
+		"default_provider":     s.cfg.DefaultProvider,
 		"project_provider_map": s.cfg.ProjectProviderMap,
-		"providers":           providers,
-		"header_hints":        s.cfg.HeaderHints,
-		"client_env_hints":    s.cfg.ClientEnvHints,
+		"providers":            providers,
+		"header_hints":         s.cfg.HeaderHints,
+		"client_env_hints":     s.cfg.ClientEnvHints,
 	}
 }
 

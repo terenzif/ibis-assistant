@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 func TestExtractIssueRefs(t *testing.T) {

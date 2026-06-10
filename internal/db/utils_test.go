@@ -14,7 +14,7 @@ func TestSanitizeID(t *testing.T) {
 		{"weird char's", "weird_chars"}, // quotes removed, space to underscore
 		{"file-with-dashes", "file_with_dashes"},
 		// The failing case
-		{"deckonline_documenti_{scadenzadocumento_aspx_=>_scadenzedocumento}", "deckonline_documenti_scadenzadocumento_aspx_scadenzedocumento"},
+		{"terenzif_documenti_{scadenzadocumento_aspx_=>_scadenzedocumento}", "terenzif_documenti_scadenzadocumento_aspx_scadenzedocumento"},
 		// Windows path with multiple special chars
 		{"c:\\Users\\Foo\\Code.cs", "c_users_foo_code_cs"},
 		// Other potential issues

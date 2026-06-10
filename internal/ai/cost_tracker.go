@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type CostTracker struct {

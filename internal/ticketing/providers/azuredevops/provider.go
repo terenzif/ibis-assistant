@@ -12,24 +12,24 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 type Provider struct {
-	orgURL    string
-	project   string
-	repo      string
-	pat       string
-	http      *http.Client
+	orgURL  string
+	project string
+	repo    string
+	pat     string
+	http    *http.Client
 }
 
 func New(cfg ticketing.AzureDevOpsConfig) *Provider {
 	return &Provider{
-		orgURL: strings.TrimRight(cfg.OrganizationURL, "/"),
+		orgURL:  strings.TrimRight(cfg.OrganizationURL, "/"),
 		project: strings.TrimSpace(cfg.Project),
-		repo: strings.TrimSpace(cfg.Repository),
-		pat: strings.TrimSpace(cfg.PAT),
-		http: &http.Client{},
+		repo:    strings.TrimSpace(cfg.Repository),
+		pat:     strings.TrimSpace(cfg.PAT),
+		http:    &http.Client{},
 	}
 }
 
@@ -255,9 +255,9 @@ func (p *Provider) SearchUsers(ctx context.Context, auth ticketing.AuthContext, 
 	}
 	var out struct {
 		Value []struct {
-			ID string `json:"id"`
+			ID          string `json:"id"`
 			DisplayName string `json:"displayName"`
-			Mail string `json:"mailAddress"`
+			Mail        string `json:"mailAddress"`
 		} `json:"value"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -286,7 +286,7 @@ func (p *Provider) ListProjects(ctx context.Context, auth ticketing.AuthContext)
 	}
 	var out struct {
 		Value []struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"value"`
 	}
@@ -412,8 +412,8 @@ func (p *Provider) buildWIQL(params ticketing.SearchParams, myOnly bool) string 
 }
 
 type workItem struct {
-	ID int `json:"id"`
-	URL string `json:"url"`
+	ID     int                    `json:"id"`
+	URL    string                 `json:"url"`
 	Fields map[string]interface{} `json:"fields"`
 }
 
@@ -432,19 +432,19 @@ func mapWorkItem(item workItem) ticketing.Ticket {
 		assignee = toString(item.Fields["System.AssignedTo"])
 	}
 	return ticketing.Ticket{
-		Provider: ticketing.ProviderAzureDevOps,
-		ID: id,
-		ExternalID: id,
+		Provider:    ticketing.ProviderAzureDevOps,
+		ID:          id,
+		ExternalID:  id,
 		ExternalKey: id,
-		ProjectKey: project,
-		Title: title,
+		ProjectKey:  project,
+		Title:       title,
 		Description: desc,
-		Status: status,
-		Type: issueType,
-		Assignee: assignee,
-		URL: item.URL,
-		UpdatedOn: toString(item.Fields["System.ChangedDate"]),
-		CreatedOn: toString(item.Fields["System.CreatedDate"]),
+		Status:      status,
+		Type:        issueType,
+		Assignee:    assignee,
+		URL:         item.URL,
+		UpdatedOn:   toString(item.Fields["System.ChangedDate"]),
+		CreatedOn:   toString(item.Fields["System.CreatedDate"]),
 	}
 }
 

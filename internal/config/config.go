@@ -95,7 +95,7 @@ func Load(paths ...string) *Config {
 		Port:               3030,
 		Mode:               "sse",
 		DBUrl:              "ws://localhost:8000/rpc",
-		DBNamespace:        "",
+		DBNamespace:        "ibisarc",
 		DBDatabase:         "analysis",
 		DBUser:             "root",
 		DBPassword:         "root",

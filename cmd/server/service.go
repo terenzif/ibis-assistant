@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/deckonline/knowledge_mcp/internal/logger"
 	"github.com/kardianos/service"
+	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
 type program struct {
@@ -22,13 +22,13 @@ func (p *program) Start(s service.Service) error {
 }
 
 func (p *program) run(ctx context.Context) {
-	logger.Info("Knowledge Server Service started.")
+	logger.Info("Ibis Arc Service started.")
 	// Here we will call the main server logic, passing the context
 	runServer(ctx)
 }
 
 func (p *program) Stop(s service.Service) error {
-	logger.Info("Knowledge Server Service stopping.")
+	logger.Info("Ibis Arc Service stopping.")
 	// Signal the server to stop
 	if p.cancel != nil {
 		p.cancel()
@@ -38,9 +38,9 @@ func (p *program) Stop(s service.Service) error {
 
 func handleService(cmd string) {
 	svcConfig := &service.Config{
-		Name:        "knowledge-server",
-		DisplayName: "Knowledge Server",
-		Description: "MCP Knowledge Server for Codebase and Git Analysis",
+		Name:        "ibis-arc",
+		DisplayName: "Ibis Arc",
+		Description: "MCP Ibis Arc for Codebase and Git Analysis",
 		Arguments:   []string{"/run"}, // When running as service, use /run
 	}
 

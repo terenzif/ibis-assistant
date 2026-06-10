@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 // MockDBClient for Git Ingestion

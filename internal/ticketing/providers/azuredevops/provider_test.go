@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 func TestGetIssueUsesPAT(t *testing.T) {
@@ -22,13 +22,13 @@ func TestGetIssueUsesPAT(t *testing.T) {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"id": 123,
+			"id":  123,
 			"url": "http://ado/workitems/123",
 			"fields": map[string]interface{}{
-				"System.Title": "Fix bug",
-				"System.State": "Resolved",
+				"System.Title":        "Fix bug",
+				"System.State":        "Resolved",
 				"System.WorkItemType": "Bug",
-				"System.TeamProject": "Core",
+				"System.TeamProject":  "Core",
 			},
 		})
 	}))

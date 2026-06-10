@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // MockDB implements db.Executor
@@ -46,14 +46,14 @@ func TestIngestIssue_Integration(t *testing.T) {
 
 		resp := map[string]interface{}{
 			"issue": map[string]interface{}{
-				"id":      123,
-				"subject": "Test Issue with 'Quote'",
+				"id":          123,
+				"subject":     "Test Issue with 'Quote'",
 				"description": "Desc\nLine 2",
-				"status":  map[string]interface{}{"id": 1, "name": "New"},
-				"tracker": map[string]interface{}{"id": 2, "name": "Bug"},
-				"author":  map[string]interface{}{"id": 5, "name": "John Doe"},
-				"created_on": "2023-01-01T12:00:00Z",
-				"updated_on": "2023-01-02T12:00:00Z",
+				"status":      map[string]interface{}{"id": 1, "name": "New"},
+				"tracker":     map[string]interface{}{"id": 2, "name": "Bug"},
+				"author":      map[string]interface{}{"id": 5, "name": "John Doe"},
+				"created_on":  "2023-01-01T12:00:00Z",
+				"updated_on":  "2023-01-02T12:00:00Z",
 			},
 		}
 		json.NewEncoder(w).Encode(resp)

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 // AIProvider interface for AI client
@@ -192,7 +192,7 @@ func (s *Service) AddCollaborativeMemory(ctx context.Context, repoName, memoryTe
 	}
 
 	repoID := db.FormatRecordID(schema.TableRepo, db.SanitizeID(repoName))
-	
+
 	vecJson, _ := json.Marshal(vec)
 	ql := fmt.Sprintf(`
 		BEGIN TRANSACTION;
@@ -220,11 +220,11 @@ func (s *Service) SaveReasoningOutcome(ctx context.Context, repoName, question, 
 
 	repoID := db.FormatRecordID(schema.TableRepo, db.SanitizeID(repoName))
 	vecJson, _ := json.Marshal(vec)
-	
+
 	// Prepare structural loop commands
 	var sb strings.Builder
 	sb.WriteString("BEGIN TRANSACTION;\n")
-	sb.WriteString(fmt.Sprintf("LET $reas = CREATE %s SET question = '%s', outcome = '%s', embedding = %s;\n", 
+	sb.WriteString(fmt.Sprintf("LET $reas = CREATE %s SET question = '%s', outcome = '%s', embedding = %s;\n",
 		schema.TableReasoning, db.EscapeSQL(question), db.EscapeSQL(outcomeText), string(vecJson)))
 	sb.WriteString(fmt.Sprintf("RELATE %s->%s->$reas;\n", repoID, schema.EdgeHasReasoning))
 

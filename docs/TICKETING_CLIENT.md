@@ -1,6 +1,6 @@
 # Ticketing + PR Client Guide
 
-Questa guida descrive il nuovo flusso operativo del Knowledge Server per ticketing multi-provider e automazione PR.
+Questa guida descrive il nuovo flusso operativo del Ibis Arc per ticketing multi-provider e automazione PR.
 
 ## 1) Configurazione server
 

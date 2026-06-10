@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ticketing"
+	"github.com/terenzif/ibis-arc/internal/ticketing"
 )
 
 type Provider struct {
@@ -59,10 +59,10 @@ func (p *Provider) SearchIssues(ctx context.Context, auth ticketing.AuthContext,
 		return nil, fmt.Errorf("jira search error %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
-		Total  int `json:"total"`
-		StartAt int `json:"startAt"`
-		MaxResults int `json:"maxResults"`
-		Issues []jiraIssue `json:"issues"`
+		Total      int         `json:"total"`
+		StartAt    int         `json:"startAt"`
+		MaxResults int         `json:"maxResults"`
+		Issues     []jiraIssue `json:"issues"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
@@ -112,8 +112,8 @@ func (p *Provider) CreateIssue(ctx context.Context, auth ticketing.AuthContext, 
 		issueType = "Task"
 	}
 	fields := map[string]interface{}{
-		"project": map[string]string{"key": params.ProjectKey},
-		"summary": params.Title,
+		"project":   map[string]string{"key": params.ProjectKey},
+		"summary":   params.Title,
 		"issuetype": map[string]string{"name": issueType},
 	}
 	if params.Description != "" {
@@ -276,9 +276,9 @@ func (p *Provider) SearchUsers(ctx context.Context, auth ticketing.AuthContext, 
 		return nil, fmt.Errorf("jira search users error %d: %s", resp.StatusCode, string(raw))
 	}
 	var out []struct {
-		AccountID string `json:"accountId"`
+		AccountID   string `json:"accountId"`
 		DisplayName string `json:"displayName"`
-		Email string `json:"emailAddress"`
+		Email       string `json:"emailAddress"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
@@ -303,8 +303,8 @@ func (p *Provider) ListProjects(ctx context.Context, auth ticketing.AuthContext)
 	}
 	var out struct {
 		Values []struct {
-			ID string `json:"id"`
-			Key string `json:"key"`
+			ID   string `json:"id"`
+			Key  string `json:"key"`
 			Name string `json:"name"`
 		} `json:"values"`
 	}
@@ -331,7 +331,7 @@ func (p *Provider) listTransitions(ctx context.Context, auth ticketing.AuthConte
 	}
 	var out struct {
 		Transitions []struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"transitions"`
 	}
@@ -387,12 +387,12 @@ func withMyIssues(params ticketing.SearchParams) ticketing.SearchParams {
 }
 
 type jiraIssue struct {
-	ID string `json:"id"`
-	Key string `json:"key"`
+	ID     string `json:"id"`
+	Key    string `json:"key"`
 	Fields struct {
-		Summary string `json:"summary"`
+		Summary     string      `json:"summary"`
 		Description interface{} `json:"description"`
-		Status struct {
+		Status      struct {
 			Name string `json:"name"`
 		} `json:"status"`
 		IssueType struct {
@@ -418,19 +418,19 @@ func mapIssue(issue jiraIssue) ticketing.Ticket {
 		}
 	}
 	return ticketing.Ticket{
-		Provider: ticketing.ProviderJira,
-		ID: issue.Key,
-		ExternalID: issue.ID,
+		Provider:    ticketing.ProviderJira,
+		ID:          issue.Key,
+		ExternalID:  issue.ID,
 		ExternalKey: issue.Key,
-		ProjectKey: issue.Fields.Project.Key,
-		Title: issue.Fields.Summary,
+		ProjectKey:  issue.Fields.Project.Key,
+		Title:       issue.Fields.Summary,
 		Description: desc,
-		Status: issue.Fields.Status.Name,
-		Type: issue.Fields.IssueType.Name,
-		Assignee: issue.Fields.Assignee.DisplayName,
-		URL: issue.Self,
-		CreatedOn: issue.Fields.Created,
-		UpdatedOn: issue.Fields.Updated,
+		Status:      issue.Fields.Status.Name,
+		Type:        issue.Fields.IssueType.Name,
+		Assignee:    issue.Fields.Assignee.DisplayName,
+		URL:         issue.Self,
+		CreatedOn:   issue.Fields.Created,
+		UpdatedOn:   issue.Fields.Updated,
 	}
 }
 
@@ -481,7 +481,7 @@ func toADF(text string) map[string]interface{} {
 		"version": 1,
 		"content": []map[string]interface{}{
 			{
-				"type": "paragraph",
+				"type":    "paragraph",
 				"content": []map[string]string{{"type": "text", "text": text}},
 			},
 		},

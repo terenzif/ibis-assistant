@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/search"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/search"
 )
 
 // Optimizer manages the Retrieval-Augmented Fine-Tuning (RAFT) self-optimization loop, improving knowledge graph relevance over time.

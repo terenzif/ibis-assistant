@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckonline/knowledge_mcp/internal/ai"
-	"github.com/deckonline/knowledge_mcp/internal/config"
-	"github.com/deckonline/knowledge_mcp/internal/db"
-	"github.com/deckonline/knowledge_mcp/internal/logger"
-	"github.com/deckonline/knowledge_mcp/internal/schema"
+	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-arc/internal/schema"
 )
 
 type Pattern struct {
@@ -32,12 +32,12 @@ type LogTemplatePattern struct {
 }
 
 type LogAnalyzer struct {
-	Path          string
-	Cfg           *config.Config
-	DB            db.Executor
-	AI            *ai.Client
-	Project       string
-	LogFileID     string
+	Path           string
+	Cfg            *config.Config
+	DB             db.Executor
+	AI             *ai.Client
+	Project        string
+	LogFileID      string
 	CostTracker    *ai.CostTracker
 	knownPatterns  []Pattern
 	staticPatterns []LogTemplatePattern
@@ -102,7 +102,9 @@ func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClie
 						regexStr, _ := row["regex"].(string)
 						srcFile, _ := row["source_file"].(string)
 						var srcLine int
-						if val, ok := row["source_line"].(float64); ok { srcLine = int(val) }
+						if val, ok := row["source_line"].(float64); ok {
+							srcLine = int(val)
+						}
 
 						if regexStr != "" {
 							re, err := regexp.Compile("(?s)" + regexStr)
@@ -193,9 +195,9 @@ Log text:
 	}
 
 	type SemanticError struct {
-		Category   string `json:"category"`
-		StackTrace string `json:"stack_trace"`
-		File       string `json:"file"`
+		Category   string   `json:"category"`
+		StackTrace string   `json:"stack_trace"`
+		File       string   `json:"file"`
 		Severity   int      `json:"severity"`
 		Template   string   `json:"template"`
 		Supersedes []string `json:"supersedes"`
@@ -232,13 +234,13 @@ func (a *LogAnalyzer) FilterKnownErrors(text string) string {
 func (a *LogAnalyzer) AddKnownPattern(category, template string) error {
 	escaped := regexp.QuoteMeta(template)
 	patternStr := strings.ReplaceAll(escaped, "<VAR>", ".*?")
-	
+
 	regex, err := regexp.Compile("(?s)" + patternStr)
 	if err != nil {
 		logger.Error("Failed to compile regex from AI template for category %s: %v", category, err)
 		return err
 	}
-	
+
 	a.knownPatterns = append(a.knownPatterns, Pattern{Category: category, Regex: regex})
 	return nil
 }
@@ -247,7 +249,7 @@ func (a *LogAnalyzer) DiscoverFormat(ctx context.Context, lines []string) string
 	if a.AI == nil || !a.AI.IsFunctional() || len(lines) == 0 {
 		return ""
 	}
-	
+
 	sample := strings.Join(lines, "\n")
 	prompt := fmt.Sprintf(`Analyze the following log sample.
 What is the regular expression (RE2) that uniquely identifies the absolute BEGINNING of a new log entry (e.g. a timestamp or log level)?
@@ -257,18 +259,18 @@ Log sample:
 
 	contents := []ai.Content{{Parts: []ai.Part{{Text: prompt}}}}
 	cfg := ai.GenerationConfig{Temperature: 0.0}
-	
+
 	candidate, err := a.AI.GenerateContent(ctx, contents, cfg)
 	if err != nil {
 		return ""
 	}
-	
+
 	regexStr := strings.TrimSpace(candidate.Content.Parts[0].Text)
 	regexStr = strings.TrimPrefix(regexStr, "`")
 	regexStr = strings.TrimSuffix(regexStr, "`")
 	regexStr = strings.TrimPrefix(regexStr, "\"")
 	regexStr = strings.TrimSuffix(regexStr, "\"")
-	
+
 	return regexStr
 }
 
@@ -287,7 +289,6 @@ func (a *LogAnalyzer) ingestError(ctx context.Context, category, stack, file str
 
 	errorTypeID := db.FormatRecordID(schema.TableErrorType, hash)
 	logEntryID := db.FormatRecordID(schema.TableLogEntry, fmt.Sprintf("%s_%d", hash, time.Now().UnixNano()))
-
 
 	timestamp := time.Now().Format(time.RFC3339)
 	_, err := a.DB.Execute(ctx, fmt.Sprintf("UPDATE %s SET hash = '%s', category = '%s', stack_trace = '%s', severity = %d, template = '%s', created_at = '%s', hidden = false;",

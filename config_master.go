@@ -51,7 +51,7 @@ func Load(paths ...string) *Config {
 		Port:          3030,
 		Mode:          "sse",
 		DBUrl:         "ws://localhost:8000/rpc",
-		DBNamespace:   "deckonline",
+		DBNamespace:   "terenzif",
 		DBDatabase:    "analysis",
 		DBUser:        "root",
 		DBPassword:    "root",

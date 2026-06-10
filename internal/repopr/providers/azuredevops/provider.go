@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckonline/knowledge_mcp/internal/repopr"
+	"github.com/terenzif/ibis-arc/internal/repopr"
 )
 
 type Config struct {
@@ -23,20 +23,20 @@ type Config struct {
 }
 
 type Provider struct {
-	orgURL string
+	orgURL  string
 	project string
-	repo string
-	pat string
-	http *http.Client
+	repo    string
+	pat     string
+	http    *http.Client
 }
 
 func New(cfg Config) *Provider {
 	return &Provider{
-		orgURL: strings.TrimRight(cfg.OrganizationURL, "/"),
+		orgURL:  strings.TrimRight(cfg.OrganizationURL, "/"),
 		project: strings.TrimSpace(cfg.Project),
-		repo: strings.TrimSpace(cfg.Repository),
-		pat: strings.TrimSpace(cfg.PAT),
-		http: &http.Client{},
+		repo:    strings.TrimSpace(cfg.Repository),
+		pat:     strings.TrimSpace(cfg.PAT),
+		http:    &http.Client{},
 	}
 }
 
