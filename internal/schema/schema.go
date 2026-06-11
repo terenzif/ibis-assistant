@@ -27,6 +27,7 @@ const (
 	TableReasoning   = "reasoning"    // Esiti di ragionamento semantico
 	TableLogTemplate = "log_template" // Estratti statici dei log dal codice sorgente
 	TableSystem      = "system"       // Metadata di sistema e usage tracking
+	TableGitCredential = "git_credential" // Credenziali git persistite
 
 	// Axon-like Nodes
 	TableSymbol    = "symbol"    // Explicit representation of Function, Class, Method
@@ -82,6 +83,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableReasoning),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableLogTemplate),
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableSystem),
+	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableGitCredential),
 
 	// Axon-like Tables
 	fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableSymbol),
@@ -136,6 +138,7 @@ var Definition = []string{
 	fmt.Sprintf("DEFINE INDEX project_name ON TABLE %s COLUMNS name UNIQUE;", TableProject),
 	fmt.Sprintf("DEFINE INDEX log_file_path ON TABLE %s COLUMNS path UNIQUE;", TableLogFile),
 	fmt.Sprintf("DEFINE INDEX errortype_hash ON TABLE %s COLUMNS hash UNIQUE;", TableErrorType),
+	fmt.Sprintf("DEFINE INDEX credential_target ON TABLE %s COLUMNS target UNIQUE;", TableGitCredential),
 
 	// Batch Job Indexes
 	fmt.Sprintf("DEFINE INDEX job_status ON TABLE %s COLUMNS status;", TableBatchJob),

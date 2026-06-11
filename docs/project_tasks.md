@@ -33,3 +33,12 @@
 - [x] Implement on-demand download of Ollama binary/installer and model (`nomic-embed-text`) <!-- id: 38 -->
 - [x] Maintain full backward compatibility for legacy Gemini configuration variables <!-- id: 39 -->
 - [x] Verify complete system test suite and execution-ready clean config <!-- id: 40 -->
+- [x] Implement Git Access Generalization and Credential Management <!-- id: 41 -->
+- [x] Define `git_credential` table and index in SurrealDB schema <!-- id: 42 -->
+- [x] Implement `gitrepo` Package with Credential Store in Go <!-- id: 43 -->
+- [x] Implement Git Command Runner with credential injection and log masking <!-- id: 44 -->
+- [x] Integrate request-level override context (`X-Git-Token`) and middleware <!-- id: 45 -->
+- [x] Refactor dynamic `SyncWorkspace` to use new `gitrepo` runner and return `credentials_required` <!-- id: 46 -->
+- [x] Add `git_configure_credentials` MCP tool and update `init_project` error handling <!-- id: 47 -->
+- [x] Verify complete system test suite and manual credential validation <!-- id: 48 -->
+

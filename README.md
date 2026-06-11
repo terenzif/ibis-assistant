@@ -158,13 +158,35 @@ O via variabile d'ambiente: `DB_AUTO_UPDATE=false`.
 Il file `config.json` viene cercato automaticamente nella directory corrente e nella directory in cui si trova l'eseguibile (utile quando eseguito come servizio). È possibile specificare un file diverso con il flag `-config <path>`.
 
 #### 🔑 Credenziali Git e PAT (Personal Access Tokens)
-Poiché il server spesso gira come Servizio (es. LocalSystem), le interazioni Git per la clonazione non possono basarsi su prompt interattivi. Per questo motivo, puoi mappare i tuoi token d'accesso (PAT) nel `config.json` e il server li inietterà automaticamente e in totale sicurezza nelle chiamate HTTP di Git:
+Poiché il server spesso gira come Servizio (es. LocalSystem) in un contesto di team, la gestione delle credenziali Git è stata generalizzata e strutturata su più livelli di priorità:
 
+1. **Override Runtime (Per-User)**: Passato dall'utente tramite gli header HTTP `X-Git-Token` o `X-Git-PAT`. Questo valore ha la priorità massima e viene usato solo per la singola operazione sincrona dell'utente (non memorizzato).
+2. **Database Store (Centralizzato)**: Credenziali persistite in modo sicuro sul database SurrealDB (tabella `git_credential`). Possono essere configurate via MCP tool per singoli domini o per specifici URL di repository.
+3. **Configurazione Legacy (`config.json`)**: Configurate nel blocco `"git_tokens"` come fallback:
+   ```json
+     "git_tokens": {"default": ""}
+   ```
+4. **Variabili d'ambiente**: `GIT_TOKEN=il_tuo_pat` come wildcard globale per tutti gli URL.
+
+##### Configurazione delle credenziali nel database
+Gli agenti e i client MCP possono salvare in modo persistente le credenziali sul server tramite lo strumento dedicato:
+`git_configure_credentials(target, provider, auth_type, token, username?, ssh_private_key?)`
+
+* **target**: Dominio (es. `github.com`) o l'URL specifico del repository.
+* **auth_type**: `token` (per Personal Access Token / PAT), `basic` (username + token/password), o `ssh` (chiave privata).
+
+##### Comportamento al Primo Utilizzo (Unconfigured Repository)
+Se viene inizializzato un repository privato (`init_project`) e non vi sono credenziali configurate né a livello di header né sul server, l'operazione fallisce ritornando una risposta strutturata JSON:
 ```json
-  "git_tokens": {"default": ""}
+{
+  "status": "credentials_required",
+  "provider": "github",
+  "target": "github.com",
+  "message": "Git credentials required..."
+}
 ```
+L'agente client intercetta questa risposta, richiede il PAT all'utente in modo interattivo e lo memorizza sul server richiamando `git_configure_credentials`.
 
-Se preferisci usare le variabili d'ambiente di sistema (es. su container), puoi impostare `GIT_TOKEN=il_tuo_pat`, che fungerà da wildcard globale per *tutti* gli URL clonati.
 
 ### 🔌 Integrazione Client (Centralizzata)
 

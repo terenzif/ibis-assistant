@@ -1,4 +1,4 @@
-# Copilot Instructions — Ticketing + PR MCP Client
+# Copilot Instructions — Ticketing + PR + Git MCP Client
 
 > Copia/incolla questa sezione nel progetto client che consuma il Ibis Arc.
 
@@ -9,15 +9,19 @@
   - `X-Redmine-API-Key`
   - `X-Jira-Email`, `X-Jira-API-Token`
   - `X-Azure-DevOps-PAT`
+  - `X-Git-Token`, `X-Git-PAT` (per override runtime di repository/provider Git privati)
 - Non chiamare manualmente `/message`: è gestito dal client MCP.
 
 ### Tool principali (client-side usage)
 
 1. `init_project(project_name, origin_url, branch, commit?)`
+   * Ritorna `{"status": "credentials_required", ...}` se il repository richiede credenziali.
 2. `update_project_status(project_name, origin_url, branch, commit)`
 3. `ask_project(query, branch_or_commit?)`
 4. `provide_collaborative_memory(project_name, memory_text, embedding?)`
 5. `save_reasoning_outcome(project_name, question, outcome_text, useful_sources)`
+6. `git_configure_credentials(target, provider, auth_type, token, username?, ssh_private_key?)`
+   * Configura credenziali persistenti su SurrealDB (domain o URL specifico).
 
 ### Tool ticketing (`ticket_*`)
 
@@ -59,4 +63,6 @@
 
 - `provider not registered`: provider non configurato in `config/ticketing_config.json`
 - `permission denied` / auth errors: header credenziali utente mancanti/invalidi
-- `workflow target not found`: mapping status non configurato e fallback euristico insufficiente
+- `workflow target not found`: mapping status non configurato e fallback euristico sufficiente
+- `credentials_required` (in `init_project`): il repository richiede credenziali. L'agente client deve richiedere un PAT all'utente e configurarlo usando `git_configure_credentials` o inserirlo in `X-Git-Token` ad ogni chiamata.
+

@@ -84,7 +84,7 @@ func TestProjectIngestionManager_Enqueue_WorkspaceSync(t *testing.T) {
 	cfg := &config.Config{
 		DiscoveryRoot: discoveryRoot,
 	}
-	manager := NewProjectIngestionManager(cfg)
+	manager := NewProjectIngestionManager(cfg, nil)
 
 	var processJobCalled bool
 	manager.ProcessJob = func(ctx context.Context, job IngestionJob, repoPath string) error {

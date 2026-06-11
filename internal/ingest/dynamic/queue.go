@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-arc/internal/db"
 	"github.com/terenzif/ibis-arc/internal/logger"
 )
 
@@ -36,17 +37,19 @@ type ProjectIngestionManager struct {
 	wg     sync.WaitGroup
 
 	Config     *config.Config
+	DB         db.Executor
 	ProcessJob func(ctx context.Context, job IngestionJob, repoPath string) error
 }
 
 // NewProjectIngestionManager creates a new queue manager.
-func NewProjectIngestionManager(cfg *config.Config) *ProjectIngestionManager {
+func NewProjectIngestionManager(cfg *config.Config, dbClient db.Executor) *ProjectIngestionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ProjectIngestionManager{
 		queues: make(map[string]chan IngestionJob),
 		ctx:    ctx,
 		cancel: cancel,
 		Config: cfg,
+		DB:     dbClient,
 	}
 }
 
@@ -106,7 +109,7 @@ func (m *ProjectIngestionManager) executeJob(job IngestionJob) {
 	logger.Info("Inizio esecuzione job per %s (Branch: %s, Commit: %s)", job.ProjectName, job.Branch, job.Commit)
 
 	// 1. Sync Workspace
-	repoPath, actualCommit, isAligned, err := SyncWorkspace(m.ctx, m.Config, job.ProjectName, job.OriginURL, job.Branch, job.Commit)
+	repoPath, actualCommit, isAligned, err := SyncWorkspace(m.ctx, m.Config, m.DB, job.ProjectName, job.OriginURL, job.Branch, job.Commit)
 
 	if job.OnSyncDone != nil {
 		job.OnSyncDone(IngestionResult{

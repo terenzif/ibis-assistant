@@ -21,6 +21,9 @@ const (
 	AzureDevOpsProjectContextKey contextKey = "azure_devops_project"
 	// AzureDevOpsRepoContextKey stores an optional Azure DevOps repository override.
 	AzureDevOpsRepoContextKey contextKey = "azure_devops_repo"
+	// GitTokenContextKey stores an optional Git Token (PAT) override.
+	GitTokenContextKey contextKey = "git_token"
 	// TokenProviderKey is the key used to store/retrieve the token provider from context
 	TokenProviderKey contextKey = "token_provider"
 )
+

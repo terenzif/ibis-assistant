@@ -33,6 +33,8 @@ import (
 	ticketado "github.com/terenzif/ibis-arc/internal/ticketing/providers/azuredevops"
 	ticketjira "github.com/terenzif/ibis-arc/internal/ticketing/providers/jira"
 	ticketredmine "github.com/terenzif/ibis-arc/internal/ticketing/providers/redmine"
+	"github.com/terenzif/ibis-arc/internal/gitrepo"
+	"errors"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -63,6 +65,11 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		}
 		if repo := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Repo")); repo != "" {
 			ctx = context.WithValue(ctx, auth.AzureDevOpsRepoContextKey, repo)
+		}
+		if gitToken := strings.TrimSpace(r.Header.Get("X-Git-Token")); gitToken != "" {
+			ctx = context.WithValue(ctx, auth.GitTokenContextKey, gitToken)
+		} else if gitPat := strings.TrimSpace(r.Header.Get("X-Git-PAT")); gitPat != "" {
+			ctx = context.WithValue(ctx, auth.GitTokenContextKey, gitPat)
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -519,7 +526,7 @@ func runServer(ctx context.Context) {
 	}
 
 	// Start Dynamic Ingestion Manager
-	ingestionManager := dynamic.NewProjectIngestionManager(cfg)
+	ingestionManager := dynamic.NewProjectIngestionManager(cfg, dbClient)
 	if dbClient != nil {
 		ingestionManager.ProcessJob = func(jobCtx context.Context, job dynamic.IngestionJob, repoPath string) error {
 			repoName := job.ProjectName
@@ -602,6 +609,12 @@ func runServer(ctx context.Context) {
 		select {
 		case res := <-syncDone:
 			if res.Error != nil {
+				var credErr *gitrepo.CredentialsRequiredError
+				if errors.As(res.Error, &credErr) {
+					jsonPayload := fmt.Sprintf(`{"status": "credentials_required", "provider": "%s", "target": "%s", "message": "%s"}`,
+						credErr.Provider, credErr.Target, strings.ReplaceAll(credErr.Message, `"`, `\"`))
+					return mcp.NewToolResultText(jsonPayload), nil
+				}
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to sync: %v", res.Error)), nil
 			}
 			if !res.IsAligned {
@@ -639,6 +652,73 @@ func runServer(ctx context.Context) {
 		})
 		ingestionManager.Enqueue(job)
 		return mcp.NewToolResultText("Aggiornamento accodato con successo."), nil
+	})
+
+	s.AddTool(mcp.NewTool("git_configure_credentials",
+		mcp.WithDescription("Configure persistent Git credentials on the server for a specific domain or repository URL."),
+		mcp.WithString("target", mcp.Description("Domain (e.g. github.com) or repository URL")),
+		mcp.WithString("provider", mcp.Description("Git provider name: github, gitlab, azure_devops, or generic")),
+		mcp.WithString("auth_type", mcp.Description("Authentication type: token, basic, or ssh")),
+		mcp.WithString("token", mcp.Description("PAT, Token, or Password (required for token/basic)")),
+		mcp.WithString("username", mcp.Description("Username (optional, for basic auth)")),
+		mcp.WithString("ssh_private_key", mcp.Description("SSH Private Key (optional, for ssh auth)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: git_configure_credentials")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+
+		target := getStringArg(args, "target")
+		provider := getStringArg(args, "provider")
+		authTypeStr := getStringArg(args, "auth_type")
+		token := getStringArg(args, "token")
+		username := getStringArg(args, "username")
+		sshKey := getStringArg(args, "ssh_private_key")
+
+		if target == "" {
+			return mcp.NewToolResultError("Argument 'target' is required"), nil
+		}
+		if authTypeStr == "" {
+			return mcp.NewToolResultError("Argument 'auth_type' is required"), nil
+		}
+
+		var authType gitrepo.AuthType
+		switch strings.ToLower(authTypeStr) {
+		case "token":
+			authType = gitrepo.AuthTypeToken
+			if token == "" {
+				return mcp.NewToolResultError("Argument 'token' is required for token auth"), nil
+			}
+		case "basic":
+			authType = gitrepo.AuthTypeBasic
+			if token == "" {
+				return mcp.NewToolResultError("Argument 'token' is required for basic auth (as password)"), nil
+			}
+		case "ssh":
+			authType = gitrepo.AuthTypeSSH
+			if sshKey == "" {
+				return mcp.NewToolResultError("Argument 'ssh_private_key' is required for ssh auth"), nil
+			}
+		default:
+			return mcp.NewToolResultError("Invalid auth_type, must be: token, basic, or ssh"), nil
+		}
+
+		cred := gitrepo.Credential{
+			Target:        target,
+			Provider:      provider,
+			AuthType:      authType,
+			Token:         token,
+			Username:      username,
+			SSHPrivateKey: sshKey,
+		}
+
+		store := gitrepo.NewCredentialStore(dbClient)
+		if err := store.SaveCredential(ctx, cred); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to save credentials: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(`{"status": "configured", "message": "Git credentials saved successfully"}`), nil
 	})
 
 	s.AddTool(mcp.NewTool("provide_collaborative_memory",
