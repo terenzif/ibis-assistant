@@ -18,6 +18,7 @@ import (
 
 	"github.com/terenzif/ibis-arc/internal/ai"
 	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-arc/internal/cli"
 	"github.com/terenzif/ibis-arc/internal/config"
 	"github.com/terenzif/ibis-arc/internal/db"
 	"github.com/terenzif/ibis-arc/internal/discovery"
@@ -77,6 +78,20 @@ func AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	// Se la configurazione non esiste e non stiamo usando opzioni di help o installazione,
+	// avviamo automaticamente il wizard interattivo.
+	if !configExists() {
+		if len(os.Args) < 2 || (os.Args[1] != "help" && os.Args[1] != "-h" && os.Args[1] != "--help" && os.Args[1] != "install" && os.Args[1] != "uninstall" && os.Args[1] != "/install" && os.Args[1] != "/uninstall") {
+			if err := config.RunWizard(); err != nil {
+				fmt.Fprintf(os.Stderr, "Errore durante il wizard di configurazione: %v\n", err)
+				os.Exit(1)
+			}
+			// Una volta completato il wizard, se l'utente ha creato il file di configurazione,
+			// forziamo l'avvio del server in modalità interattiva.
+			os.Args = []string{os.Args[0], "run"}
+		}
+	}
+
 	if len(os.Args) < 2 {
 		printHelp()
 		return
@@ -86,14 +101,12 @@ func main() {
 	switch cmd {
 	case "/run":
 		// Service run mode: must use the service library to communicate with SCM
-		// We shift the arguments to skip the command for flag parsing later in runServer
 		if len(os.Args) > 1 {
 			os.Args = append(os.Args[:1], os.Args[2:]...)
 		}
 		handleService("/run")
 	case "run", "-run", "--run":
 		// Normal interactive run
-		// We shift the arguments to skip the command for flag parsing
 		if len(os.Args) > 2 {
 			os.Args = append(os.Args[:1], os.Args[2:]...)
 		} else {
@@ -104,44 +117,50 @@ func main() {
 		handleService("/install")
 	case "/uninstall", "uninstall", "-uninstall", "--uninstall":
 		handleService("/uninstall")
+	case "config":
+		if err := config.RunWizard(); err != nil {
+			fmt.Fprintf(os.Stderr, "Errore durante il wizard: %v\n", err)
+			os.Exit(1)
+		}
+	case "start":
+		startBackgroundServer()
+	case "stop":
+		stopBackgroundServer()
 	default:
-		// If it's not a known command, it might be a flag or just wrong.
-		// If it starts with - or --, we assume they want to run with flags directly?
-		// But the request says "without params it will print a syntetic --help guide"
-		// And add 3 commands.
+		// Se è una flag (inizia con - o --), avvia il server
 		if strings.HasPrefix(cmd, "-") {
 			runServer(context.Background())
 		} else {
-			fmt.Printf("Unknown command: %s\n", cmd)
-			printHelp()
+			// Altrimenti, delega al client CLI per l'inoltro delle richieste
+			cli.ExecuteCLI(os.Args[1:])
 		}
 	}
 }
 
 func printHelp() {
 	binName := filepath.Base(os.Args[0])
-	fmt.Println("Ibis Arc - MCP Knowledge Graph & Search")
-	fmt.Println("\nUsage:")
-	fmt.Printf("  %s <command> [options]\n", binName)
-	fmt.Println("\nCommands:")
-	fmt.Println("  run         Run the server interactively (standard MCP behavior)")
-	fmt.Println("  install     Install as Windows Service 'ibis-arc'")
-	fmt.Println("  uninstall   Uninstall the Windows Service")
-	fmt.Println("\nOptions (used with run or as flags):")
-	fmt.Println("  -port int        Port to listen on for SSE (default 8080)")
-	fmt.Println("  -mode string     Mode: 'sse' or 'stdio' (default 'sse')")
-	fmt.Println("  -scan            Discover git repositories in current/root directory (default true)")
-	fmt.Println("  -root string     Root directory for discovery (default '.')")
-	fmt.Println("  -log-file string Log file path")
-	fmt.Println("  -log-level string Log level: DEBUG, INFO, WARN, ERROR (default 'INFO')")
-	fmt.Println("  -config string   Path to config.json (searches current dir and exe dir by default)")
-	fmt.Println("\nConfiguration Precedence:")
-	fmt.Println("  1. Command Line Flags (highest)")
-	fmt.Println("  2. Environment Variables")
-	fmt.Println("  3. Config File (config.json)")
-	fmt.Println("  4. Hardcoded Defaults (lowest)")
-	fmt.Println("\nExample:")
-	fmt.Printf("  %s run -port 9000 -mode sse\n", binName)
+	fmt.Println("Ibis Arc - MCP Knowledge Graph & Search Engine")
+	fmt.Println("\nUso:")
+	fmt.Printf("  %s <comando> [opzioni]\n", binName)
+	fmt.Println("\nComandi del Server:")
+	fmt.Println("  run         Avvia il server in modalità interattiva (comportamento standard)")
+	fmt.Println("  start       Avvia il server in background come demone")
+	fmt.Println("  stop        Ferma il server avviato in background")
+	fmt.Println("  config      Avvia il wizard interattivo di configurazione")
+	fmt.Println("  install     Installa Ibis Arc come Servizio Windows ('ibis-arc')")
+	fmt.Println("  uninstall   Disinstalla il Servizio Windows")
+	fmt.Println("\nComandi del Client CLI:")
+	fmt.Println("  ask          Invia una domanda di reasoning sul codice")
+	fmt.Println("  ingest       Sincronizza e indicizza codice o Git")
+	fmt.Println("  ticket       Gestisce i ticket su Redmine/Jira/Azure DevOps")
+	fmt.Println("  pr           Gestisce Pull Request")
+	fmt.Println("  logs         Analizza file di log")
+	fmt.Println("  credentials  Configura credenziali Git persistenti")
+	fmt.Println("  memory       Gestisce memorie collaborative del progetto")
+	fmt.Println("  outcome      Gestisce outcome e deduizioni di reasoning")
+	fmt.Println("  optimize     Ottimizza la knowledge base tramite RAFT")
+	fmt.Println("\nEsempio:")
+	fmt.Printf("  %s run -port 3030\n", binName)
 }
 
 func getStringArg(args map[string]interface{}, key string) string {
@@ -260,11 +279,11 @@ func runServer(ctx context.Context) {
 	}
 
 	// 4. Initialize MCP Server
-	s := server.NewMCPServer(
+	s := &mcpServerWrapper{server.NewMCPServer(
 		"Knowledge Graph MCP",
 		"1.1.0",
 		server.WithLogging(),
-	)
+	)}
 
 	// --- [NEW] Start Embedded DB and Sidecars ---
 	if err := code.EnsureAstGrep(cfg.DBAutoUpdate); err != nil {
@@ -1546,11 +1565,17 @@ func runServer(ctx context.Context) {
 
 	if cfg.Mode == "sse" {
 		logger.Info("Starting SSE/Streamable HTTP server on port %d...", cfg.Port)
-		sseServer := server.NewSSEServer(s)
-		streamableServer := server.NewStreamableHTTPServer(s)
+		sseServer := server.NewSSEServer(s.MCPServer)
+		streamableServer := server.NewStreamableHTTPServer(s.MCPServer)
 
 		// Standard HTTP server with graceful shutdown
 		mux := http.NewServeMux()
+
+		// Endpoint per l'auto-discovery (HTML e metadata JSON)
+		mux.HandleFunc("/", autoDiscoveryHandler(cfg))
+
+		// Bridge HTTP POST per inoltrare i comandi CLI locali
+		mux.HandleFunc("/api/v1/cli/call", cliCallHandler())
 
 		// Legacy SSE endpoints
 		mux.Handle("/sse", sseServer.SSEHandler())
@@ -1601,7 +1626,7 @@ func runServer(ctx context.Context) {
 		logger.Info("Starting STDIO server...")
 		// STDIO usually blocks until stdin closes
 		go func() {
-			if err := server.ServeStdio(s); err != nil {
+			if err := server.ServeStdio(s.MCPServer); err != nil {
 				logger.Error("Server error: %v", err)
 			}
 			// If stdio interaction ends, we assume done

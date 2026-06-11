@@ -126,20 +126,72 @@ Include:
 
 ## 🚀 Utilizzo
 
-### Esecuzione del Server
+### Esecuzione del Server e Controllo Demone
 
-Il server supporta tre comandi principali:
+Ibis Arc può essere avviato in modalità interattiva, come servizio Windows, o come demone/processo in background:
 
-* `/run`: Avvia il server interattivamente (comportamento standard MCP).
-* `/install`: Installa il server come servizio Windows "ibis-arc".
-* `/uninstall`: Rimuove il servizio Windows.
+*   **`run` (o `-run`)**: Avvia il server interattivamente (comportamento standard MCP).
+    ```bash
+    ./ibis-arc.exe run -port 3030 -mode sse
+    ```
+*   **`start`**: Avvia il server in background come demone. I log del server vengono scritti in `server.log` ed il PID viene salvato in `ibis-arc.pid`.
+    ```bash
+    ./ibis-arc.exe start
+    ```
+*   **`stop`**: Ferma in modo controllato il server in background (legge il PID da `ibis-arc.pid` ed arresta il processo).
+    ```bash
+    ./ibis-arc.exe stop
+    ```
+*   **`config`**: Avvia il wizard testuale interattivo per la configurazione iniziale guidata (Fast o Detailed) generandola in `config.json` e `config/ticketing_config.json`.
+    ```bash
+    ./ibis-arc.exe config
+    ```
+*   **`/install` / `/uninstall`**: Installa/disinstalla Ibis Arc come Servizio Windows permanente (richiede privilegi di amministratore).
 
-Può essere eseguito in modalità SSE (Server-Sent Events) o Stdio tramite i flag (da usare con `/run`):
+> 💡 **Auto-Wizard**: Se `config.json` non è presente all'avvio dell'applicazione, il Wizard interattivo si avvierà automaticamente per guidarti nella configurazione prima di lanciare il server.
 
-```bash
-# Esempio: Analizza il repo corrente e avvia in modalità SSE
-./ibis-arc.exe /run -mode sse -port 3030 -scan
-```
+### 🖥️ Client CLI (Inoltro Comandi MCP)
+
+L'eseguibile `ibis-arc` include un client CLI completo che comunica tramite chiamate HTTP REST sicure all'endpoint locale `/api/v1/cli/call`. Questo ti permette di invocare direttamente dal terminale gli strumenti MCP esposti dal server attivo:
+
+*   **Ask (Domande sul Progetto)**:
+    ```bash
+    ./ibis-arc.exe ask "Spiega la logica di autenticazione" --branch main
+    ```
+*   **Ingestion (Codice e Git)**:
+    ```bash
+    # Indicizza codice locale
+    ./ibis-arc.exe ingest code --path ./percorso/progetto
+    # Inizializza sessione Git
+    ./ibis-arc.exe ingest git --name ProgettoA --url https://github.com/org/repo --branch main
+    ```
+*   **Gestione Ticket**:
+    ```bash
+    ./ibis-arc.exe ticket search --query "bug login" --provider jira
+    ./ibis-arc.exe ticket get 1042 --provider redmine
+    ./ibis-arc.exe ticket create --project KEY --title "Nuovo Bug" --desc "Descrizione..."
+    ```
+*   **Gestione Pull Request**:
+    ```bash
+    ./ibis-arc.exe pr create --source feature/nuova --target main --title "Aggiunta feature"
+    ```
+*   **Analisi Log e Ingestion**:
+    ```bash
+    ./ibis-arc.exe logs analyze --project ProgettoA --text "Error: NullReferenceException at..."
+    ```
+*   **Altro (Memorie, Credenziali, Ottimizzazione)**:
+    ```bash
+    ./ibis-arc.exe credentials add --target github.com --token MY_PAT
+    ./ibis-arc.exe memory add --project ProgettoA --text "Usa Go 1.26"
+    ./ibis-arc.exe optimize --iterations 5
+    ```
+
+### 🌐 Auto-Discovery HTTP (GET /)
+
+Se si effettua una richiesta GET alla radice del server (es. `http://localhost:3030/` o `http://localhost:3030/`):
+- **Web Browser (Accept: text/html)**: Mostra una dashboard web reattiva dal design moderno ed elegante in modalità dark, contenente gli endpoint attivi, le istruzioni di configurazione copia-e-incolla per Claude Desktop, Cursor, Windsurf, e l'elenco interattivo di tutti i tool MCP registrati con relativi schemi di input.
+- **Client AI / Programmatico (Accept: application/json)**: Ritorna i metadati strutturati e lo schema JSON completo di tutti i tool esposti, permettendo all'AI di auto-scoprire le potenzialità del server in autonomia senza probing manuale.
+
 
 ### ⚙️ Configurazione e Precedenza
 Il server segue una gerarchia di priorità per la configurazione:
