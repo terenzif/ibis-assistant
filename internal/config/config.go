@@ -42,18 +42,47 @@ type Config struct {
 	LogsRoot            string            `json:"logs_root"`
 	GitTokens           map[string]string `json:"git_tokens"`
 	SMTP                SMTPConfig        `json:"smtp"`
+	LogIngestion        LogIngestionConfig `json:"log_ingestion"`
 	ConfigLoaded        bool              `json:"-"` // True if a config file was successfully loaded
 	ConfigPath          string            `json:"-"` // Path to the file that was loaded
 }
 
 type SMTPConfig struct {
-	Enabled  bool   `json:"enabled"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	From     string `json:"from"`
-	To       string `json:"to"`
+	Enabled                    bool   `json:"enabled"`
+	Host                       string `json:"host"`
+	Port                       int    `json:"port"`
+	User                       string `json:"user"`
+	Password                   string `json:"password"`
+	From                       string `json:"from"`
+	To                         string `json:"to"`
+	Encryption                 string `json:"encryption"` // ssl_tls, starttls, none
+	AggregationWindow          string `json:"aggregation_window"`
+	EmergencySeverityThreshold int    `json:"emergency_severity_threshold"`
+}
+
+type LogIngestionConfig struct {
+	HTTP    HTTPIngestionConfig `json:"http"`
+	Polling []PollingSource     `json:"polling"`
+}
+
+type HTTPIngestionConfig struct {
+	Enabled bool   `json:"enabled"`
+	APIKey  string `json:"api_key"`
+}
+
+type PollingSource struct {
+	Name         string `json:"name"`
+	Enabled      bool   `json:"enabled"`
+	Protocol     string `json:"protocol"` // ftp, sftp, smb
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	User         string `json:"user"`
+	Password     string `json:"password"`
+	RemoteDir    string `json:"remote_dir"`
+	FilePattern  string `json:"file_pattern"`
+	ArchiveDir   string `json:"archive_dir"`
+	PollInterval string `json:"poll_interval"` // e.g. "15m"
+	ProjectName  string `json:"project_name"`
 }
 
 type GeminiKeyConfig struct {
@@ -156,6 +185,18 @@ func Load(paths ...string) *Config {
 		SupportedExtensions: []string{
 			".go", ".py", ".js", ".ts", ".md", ".cs",
 			".java", ".cpp", ".h", ".c", ".html", ".css", ".sql",
+		},
+		SMTP: SMTPConfig{
+			Enabled:                    false,
+			Encryption:                 "none",
+			AggregationWindow:          "1h",
+			EmergencySeverityThreshold: 9,
+		},
+		LogIngestion: LogIngestionConfig{
+			HTTP: HTTPIngestionConfig{
+				Enabled: false,
+			},
+			Polling: []PollingSource{},
 		},
 	}
 

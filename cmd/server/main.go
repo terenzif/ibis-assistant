@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -459,6 +460,59 @@ func runServer(ctx context.Context) {
 				logWatcher.Stop()
 			}()
 		}
+	}
+
+	// Start Background SMTP Notification Aggregator
+	if cfg.SMTP.Enabled && dbClient != nil {
+		window := cfg.SMTP.AggregationWindow
+		if window == "" {
+			window = "1h"
+		}
+		duration, err := time.ParseDuration(window)
+		if err != nil {
+			logger.Warn("Invalid aggregation window duration '%s', defaulting to 1 hour: %v", window, err)
+			duration = 1 * time.Hour
+		}
+
+		logger.Info("Starting notification aggregator worker (interval: %v)...", duration)
+		bgWg.Add(1)
+		go func() {
+			defer bgWg.Done()
+			ticker := time.NewTicker(duration)
+			defer ticker.Stop()
+
+			notifier := logs.NewNotifier(cfg, dbClient)
+
+			for {
+				select {
+				case <-ticker.C:
+					logger.Debug("Aggregator tick: processing pending notifications...")
+					if err := notifier.ProcessPendingNotifications(ctx); err != nil {
+						logger.Error("Aggregator: failed to process pending notifications: %v", err)
+					}
+				case <-ctx.Done():
+					logger.Info("Aggregator: context cancelled, flushing final pending notifications...")
+					flushCtx, flushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					if err := notifier.ProcessPendingNotifications(flushCtx); err != nil {
+						logger.Error("Aggregator: final flush failed: %v", err)
+					}
+					flushCancel()
+					return
+				}
+			}
+		}()
+	}
+
+	// Start Log Polling Manager
+	if dbClient != nil {
+		pollingMgr := logs.NewPollingManager(cfg, dbClient, aiClient)
+		pollingMgr.Start(ctx)
+		bgWg.Add(1)
+		go func() {
+			defer bgWg.Done()
+			<-ctx.Done()
+			pollingMgr.Stop()
+		}()
 	}
 
 	if len(activeRepos) > 0 && dbClient != nil {
@@ -1412,6 +1466,78 @@ func runServer(ctx context.Context) {
 		return mcp.NewToolResultText(string(out)), nil
 	})
 
+	s.AddTool(mcp.NewTool("analyze_logs",
+		mcp.WithDescription("Analyze log entries/text synchronously and return detected errors or anomalies."),
+		mcp.WithString("project_name", mcp.Description("Name of the project")),
+		mcp.WithString("log_file", mcp.Description("Optional log file name")),
+		mcp.WithString("log_text", mcp.Description("Raw log text content to analyze (entries separated by newlines)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: analyze_logs")
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		projectName := getStringArg(args, "project_name")
+		logFile := getStringArg(args, "log_file")
+		logText := getStringArg(args, "log_text")
+
+		if projectName == "" {
+			return mcp.NewToolResultError("project_name is required"), nil
+		}
+		if logText == "" {
+			return mcp.NewToolResultError("log_text is required"), nil
+		}
+		if logFile == "" {
+			logFile = "mcp_tool.log"
+		}
+
+		lines := strings.Split(logText, "\n")
+		var cleanLines []string
+		for _, l := range lines {
+			trimmed := strings.TrimSpace(l)
+			if trimmed != "" {
+				cleanLines = append(cleanLines, trimmed)
+			}
+		}
+
+		if len(cleanLines) == 0 {
+			return mcp.NewToolResultText(`[]`), nil
+		}
+
+		path := filepath.Join(cfg.LogsRoot, projectName, logFile)
+		analyzer := logs.NewLogAnalyzer(ctx, path, cfg, dbClient, aiClient)
+
+		anomalies, err := analyzer.ProcessBatchSync(ctx, cleanLines)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Analysis failed: %v", err)), nil
+		}
+
+		if len(anomalies) > 0 {
+			notifier := logs.NewNotifier(cfg, dbClient)
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("MCP Synchronous Log Report for Project: %s (File: %s)\r\n\r\n", projectName, logFile))
+			sb.WriteString(fmt.Sprintf("Detected %d errors/anomalies:\r\n\r\n", len(anomalies)))
+			maxSeverity := 0
+			for _, e := range anomalies {
+				if e.Severity > maxSeverity {
+					maxSeverity = e.Severity
+				}
+				sb.WriteString(fmt.Sprintf("Category: %s\r\n", e.Category))
+				sb.WriteString(fmt.Sprintf("Severity: %d/10\r\n", e.Severity))
+				if e.File != "" {
+					sb.WriteString(fmt.Sprintf("File: %s\r\n", e.File))
+				}
+				sb.WriteString("Stack Trace:\r\n")
+				sb.WriteString(e.StackTrace + "\r\n\r\n")
+			}
+			notifier.QueueNotification(ctx, projectName, logFile, len(anomalies), maxSeverity, sb.String())
+		}
+
+		out, marshalErr := json.MarshalIndent(anomalies, "", "  ")
+		if marshalErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JSON marshal failed: %v", marshalErr)), nil
+		}
+
+		return mcp.NewToolResultText(string(out)), nil
+	})
+
 	// 8. Start Server
 
 	// Handle Signals in Main Thread
@@ -1433,6 +1559,9 @@ func runServer(ctx context.Context) {
 		// Streamable HTTP endpoints (MCP standard)
 		mux.Handle("/mcp/", streamableServer)
 		mux.Handle("/mcp", streamableServer)
+
+		// New HTTP Log Upload endpoint
+		mux.HandleFunc("/api/v1/logs/upload", logUploadHandler(cfg, dbClient, aiClient))
 
 		// Wrap the entire mux with AuthMiddleware
 		handler := AuthMiddleware(mux)
@@ -1522,5 +1651,125 @@ func runServer(ctx context.Context) {
 		if err := dbProcess.Stop(); err != nil {
 			logger.Error("Error stopping database: %v", err)
 		}
+	}
+}
+
+func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if !cfg.LogIngestion.HTTP.Enabled {
+			http.Error(w, "HTTP Log Ingestion is disabled in configuration", http.StatusForbidden)
+			return
+		}
+
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" || apiKey != cfg.LogIngestion.HTTP.APIKey {
+			http.Error(w, "Unauthorized: invalid or missing API key", http.StatusUnauthorized)
+			return
+		}
+
+		var project string
+		var fileName string
+		var lines []string
+
+		contentType := r.Header.Get("Content-Type")
+		if strings.Contains(contentType, "application/json") {
+			type LogUploadRequest struct {
+				Project  string   `json:"project"`
+				FileName string   `json:"file_name"`
+				Lines    []string `json:"lines"`
+				Text     string   `json:"text"`
+			}
+			var req LogUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to parse JSON body: %v", err), http.StatusBadRequest)
+				return
+			}
+			project = req.Project
+			fileName = req.FileName
+			if req.Text != "" {
+				lines = strings.Split(req.Text, "\n")
+			} else {
+				lines = req.Lines
+			}
+		} else {
+			project = r.URL.Query().Get("project")
+			fileName = r.URL.Query().Get("file_name")
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Failed to read body", http.StatusInternalServerError)
+				return
+			}
+			lines = strings.Split(string(bodyBytes), "\n")
+		}
+
+		if project == "" {
+			project = "HTTPUpload"
+		}
+		if fileName == "" {
+			fileName = "uploaded.log"
+		}
+
+		var cleanLines []string
+		for _, l := range lines {
+			trimmed := strings.TrimSpace(l)
+			if trimmed != "" {
+				cleanLines = append(cleanLines, trimmed)
+			}
+		}
+
+		if len(cleanLines) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":    "processed",
+				"project":   project,
+				"file_name": fileName,
+				"anomalies": []logs.SemanticError{},
+			})
+			return
+		}
+
+		path := filepath.Join(cfg.LogsRoot, project, fileName)
+		analyzer := logs.NewLogAnalyzer(r.Context(), path, cfg, dbClient, aiClient)
+
+		anomalies, err := analyzer.ProcessBatchSync(r.Context(), cleanLines)
+		if err != nil {
+			logger.Error("HTTP log upload analysis error: %v", err)
+			http.Error(w, fmt.Sprintf("Analysis failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if len(anomalies) > 0 {
+			notifier := logs.NewNotifier(cfg, dbClient)
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("HTTP Upload Log Report for Project: %s (File: %s)\r\n\r\n", project, fileName))
+			sb.WriteString(fmt.Sprintf("Detected %d errors/anomalies:\r\n\r\n", len(anomalies)))
+			maxSeverity := 0
+			for _, e := range anomalies {
+				if e.Severity > maxSeverity {
+					maxSeverity = e.Severity
+				}
+				sb.WriteString(fmt.Sprintf("Category: %s\r\n", e.Category))
+				sb.WriteString(fmt.Sprintf("Severity: %d/10\r\n", e.Severity))
+				if e.File != "" {
+					sb.WriteString(fmt.Sprintf("File: %s\r\n", e.File))
+				}
+				sb.WriteString("Stack Trace:\r\n")
+				sb.WriteString(e.StackTrace + "\r\n\r\n")
+			}
+			notifier.QueueNotification(r.Context(), project, fileName, len(anomalies), maxSeverity, sb.String())
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "processed",
+			"project":   project,
+			"file_name": fileName,
+			"anomalies": anomalies,
+		})
 	}
 }

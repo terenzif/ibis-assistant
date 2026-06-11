@@ -2,6 +2,7 @@ package logs
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -75,7 +76,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 				if len(batch) > 0 {
 					t.Analyzer.ProcessBatch(ctx, batch)
 				}
-				t.finalize(totalErrors, startTime)
+				t.finalize(ctx, totalErrors, startTime)
 				logger.Info("Stopped tail on: %s", t.Path)
 				return
 			}
@@ -132,7 +133,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 			if len(batch) > 0 {
 				t.Analyzer.ProcessBatch(ctx, batch)
 			}
-			t.finalize(totalErrors, startTime)
+			t.finalize(ctx, totalErrors, startTime)
 			logger.Info("Context cancelled, stopping tail on: %s", t.Path)
 			return
 		case <-ticker.C:
@@ -148,7 +149,7 @@ func (t *Tailer) Tail(ctx context.Context) {
 	}
 }
 
-func (t *Tailer) finalize(totalErrors int, start time.Time) {
+func (t *Tailer) finalize(ctx context.Context, totalErrors int, start time.Time) {
 	// Trigger Report and Email if we processed anything
 	if totalErrors > 0 {
 		reporter := NewReporter(t.Cfg, t.DB)
@@ -157,8 +158,14 @@ func (t *Tailer) finalize(totalErrors int, start time.Time) {
 
 		reportPath, err := reporter.GenerateReport(t.Analyzer.Project, t.Path, totalErrors, cost)
 		if err == nil {
-			notifier := NewNotifier(t.Cfg)
-			notifier.SendEmail(reportPath)
+			notifier := NewNotifier(t.Cfg, t.DB)
+			content, readErr := os.ReadFile(reportPath)
+			if readErr == nil {
+				// Queue the notification which handles throttling/emergency alerts
+				notifier.QueueNotification(ctx, t.Analyzer.Project, t.Path, totalErrors, 5, string(content))
+			} else {
+				notifier.SendEmail(reportPath)
+			}
 		}
 	}
 }

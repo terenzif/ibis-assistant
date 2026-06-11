@@ -127,10 +127,25 @@ func NewLogAnalyzer(ctx context.Context, path string, cfg *config.Config, dbClie
 	return analyzer
 }
 
+type SemanticError struct {
+	Category   string   `json:"category"`
+	StackTrace string   `json:"stack_trace"`
+	File       string   `json:"file"`
+	Severity   int      `json:"severity"`
+	Template   string   `json:"template"`
+	Supersedes []string `json:"supersedes"`
+}
+
 func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
+	_, _ = a.ProcessBatchSync(ctx, lines)
+}
+
+func (a *LogAnalyzer) ProcessBatchSync(ctx context.Context, lines []string) ([]SemanticError, error) {
 	if len(lines) == 0 {
-		return
+		return nil, nil
 	}
+
+	var results []SemanticError
 
 	// Phase 1: Deterministic LogAlign Matching
 	var unmatchedLines []string
@@ -140,6 +155,13 @@ func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
 			if sp.Regex.MatchString(line) {
 				// Deterministic match found! No AI needed.
 				a.ingestError(ctx, "Static Log: "+sp.FormatStr, line, sp.SourceFile, 5, sp.FormatStr, nil)
+				results = append(results, SemanticError{
+					Category:   "Static Log: " + sp.FormatStr,
+					StackTrace: line,
+					File:       sp.SourceFile,
+					Severity:   5,
+					Template:   sp.FormatStr,
+				})
 				matched = true
 				break
 			}
@@ -150,7 +172,7 @@ func (a *LogAnalyzer) ProcessBatch(ctx context.Context, lines []string) {
 	}
 
 	if len(unmatchedLines) == 0 {
-		return // Everything was deterministically matched
+		return results, nil // Everything was deterministically matched
 	}
 
 	// Phase 2: AI Processing for unmatched lines
@@ -181,37 +203,28 @@ Log text:
 	cfg := ai.GenerationConfig{Temperature: 0.1}
 
 	if a.AI == nil || !a.AI.IsFunctional() {
-		return
+		return results, fmt.Errorf("AI client is not functional")
 	}
 
 	candidate, err := a.AI.GenerateContent(ctx, contents, cfg)
 	if err != nil {
 		logger.Error("AI Generation error for %s: %v", a.Path, err)
-		return
+		return results, err
 	}
 
 	if candidate.UsageMetadata != nil {
 		a.CostTracker.RecordUsage(ctx, a.LogFileID, candidate.UsageMetadata.PromptTokenCount, candidate.UsageMetadata.CandidatesTokenCount)
 	}
 
-	type SemanticError struct {
-		Category   string   `json:"category"`
-		StackTrace string   `json:"stack_trace"`
-		File       string   `json:"file"`
-		Severity   int      `json:"severity"`
-		Template   string   `json:"template"`
-		Supersedes []string `json:"supersedes"`
-	}
 	var errors []SemanticError
-
 	cleanJSON := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(candidate.Content.Parts[0].Text), "```"), "```json")
 	if err := json.Unmarshal([]byte(cleanJSON), &errors); err != nil {
 		logger.Debug("Failed to parse AI JSON for %s: %v", a.Path, err)
-		return
+		return results, fmt.Errorf("failed to parse AI JSON: %w", err)
 	}
 
 	if len(errors) == 0 {
-		return
+		return results, nil
 	}
 	logger.Info("Detected %d semantic errors in %s", len(errors), a.Path)
 
@@ -220,7 +233,10 @@ Log text:
 			a.AddKnownPattern(e.Category, e.Template)
 		}
 		a.ingestError(ctx, e.Category, e.StackTrace, e.File, e.Severity, e.Template, e.Supersedes)
+		results = append(results, e)
 	}
+
+	return results, nil
 }
 
 func (a *LogAnalyzer) FilterKnownErrors(text string) string {
