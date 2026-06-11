@@ -300,25 +300,72 @@ func runServer(ctx context.Context) {
 		}
 	}
 
-	// 6. Initialize Clients
-	logger.Info("Initializing Gemini AI Client with %d keys...", len(cfg.GeminiKeys))
-	var aiKeys []ai.KeyConfig
-	for _, k := range cfg.GeminiKeys {
-		// Use specific RPM if set, otherwise default
-		rpm := k.RPM
-		if rpm <= 0 {
-			rpm = cfg.GeminiDefaultRPM
+	// 6. Initialize Providers & Clients
+	var embProvider ai.EmbeddingProvider
+	var reasProvider ai.ReasoningProvider
+	var ollamaRunner *ai.OllamaRunner
+
+	// --- 6a. Initialize Embedding Provider ---
+	switch cfg.AI.Embedding.Provider {
+	case "ollama":
+		cmd, err := ai.EnsureOllama(ctx, cfg.AI.Embedding.URL, cfg.AI.Embedding.Model, cfg.AI.Embedding.AutoStart, cfg.AI.Embedding.AutoUpdate)
+		if err != nil {
+			logger.Warn("Ollama initialization failed/skipped: %v. Embedding provider might be non-functional.", err)
+		} else if cmd != nil {
+			ollamaRunner = &ai.OllamaRunner{Cmd: cmd}
 		}
-		aiKeys = append(aiKeys, ai.KeyConfig{
-			Key:          k.Key,
-			RPM:          rpm,
-			TPM:          k.TPM,
-			RPD:          k.RPD,
-			Owner:        k.Owner,
-			AllowOverage: k.AllowOverage,
-		})
+		embProvider = ai.NewOllamaProvider(cfg.AI.Embedding.Model, cfg.AI.Embedding.URL)
+
+	case "gemini":
+		var aiKeys []ai.KeyConfig
+		for _, k := range cfg.AI.Reasoning.Keys {
+			rpm := k.RPM
+			if rpm <= 0 {
+				rpm = cfg.GeminiDefaultRPM
+			}
+			aiKeys = append(aiKeys, ai.KeyConfig{
+				Key:          k.Key,
+				RPM:          rpm,
+				TPM:          k.TPM,
+				RPD:          k.RPD,
+				Owner:        k.Owner,
+				AllowOverage: k.AllowOverage,
+			})
+		}
+		embProvider = ai.NewGeminiProvider(aiKeys, dbClient)
+
+	default:
+		logger.Warn("Unknown embedding provider: %s. Defaulting to Ollama.", cfg.AI.Embedding.Provider)
+		embProvider = ai.NewOllamaProvider(cfg.AI.Embedding.Model, cfg.AI.Embedding.URL)
 	}
-	aiClient := ai.NewClient(aiKeys, dbClient)
+
+	// --- 6b. Initialize Reasoning Provider ---
+	switch cfg.AI.Reasoning.Provider {
+	case "gemini":
+		var aiKeys []ai.KeyConfig
+		for _, k := range cfg.AI.Reasoning.Keys {
+			rpm := k.RPM
+			if rpm <= 0 {
+				rpm = cfg.GeminiDefaultRPM
+			}
+			aiKeys = append(aiKeys, ai.KeyConfig{
+				Key:          k.Key,
+				RPM:          rpm,
+				TPM:          k.TPM,
+				RPD:          k.RPD,
+				Owner:        k.Owner,
+				AllowOverage: k.AllowOverage,
+			})
+		}
+		reasProvider = ai.NewGeminiProvider(aiKeys, dbClient)
+
+	default:
+		logger.Warn("Unknown reasoning provider: %s. Reasoning provider might be non-functional.", cfg.AI.Reasoning.Provider)
+	}
+
+	// --- 6c. Unified AI Client Orchestrator ---
+	aiClient := ai.NewClient(embProvider, reasProvider, ollamaRunner)
+	defer aiClient.Stop()
 
 	// Start Batch Manager
 	var batchManager *ai.BatchManager

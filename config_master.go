@@ -18,8 +18,9 @@ type Config struct {
 	DBDatabase    string     `json:"db_database"`
 	DBUser        string     `json:"db_user"`
 	DBPassword    string     `json:"db_password"`
-	GeminiKeys    []string   `json:"gemini_keys"`
-	GeminiRPM     int        `json:"gemini_rpm"`
+	AI            AIConfig   `json:"ai"`
+	GeminiKeys    []GeminiKeyConfig `json:"gemini_keys,omitempty"` // Legacy fallback
+	GeminiDefaultRPM int        `json:"gemini_rpm,omitempty"`   // Legacy fallback
 	RedmineURL    string     `json:"redmine_url"`
 	RedmineKey    string     `json:"redmine_key"`
 	DiscoveryRoot string     `json:"discovery_root"`
@@ -43,20 +44,61 @@ type SMTPConfig struct {
 	To       string `json:"to"`
 }
 
+type GeminiKeyConfig struct {
+	Key          string `json:"key"`
+	RPM          int    `json:"rpm"`
+	TPM          int    `json:"tpm"`
+	RPD          int    `json:"rpd"`
+	Owner        string `json:"owner"`
+	AllowOverage bool   `json:"allow_overage"`
+}
+
+type AIConfig struct {
+	Embedding EmbeddingConfig `json:"embedding"`
+	Reasoning ReasoningConfig `json:"reasoning"`
+}
+
+type EmbeddingConfig struct {
+	Provider   string `json:"provider"` // ollama, gemini
+	Model      string `json:"model"`
+	URL        string `json:"url"`
+	AutoStart  bool   `json:"auto_start"`
+	AutoUpdate bool   `json:"auto_update"`
+}
+
+type ReasoningConfig struct {
+	Provider string            `json:"provider"` // gemini, openai
+	Model    string            `json:"model"`
+	Keys     []GeminiKeyConfig `json:"keys"`
+}
+
 // Load returns the configuration loaded from Defaults + File + Env.
 // It accepts optional config search paths.
 func Load(paths ...string) *Config {
 	// 1. Defaults
 	cfg := &Config{
-		Port:          3030,
-		Mode:          "sse",
-		DBUrl:         "ws://localhost:8000/rpc",
-		DBNamespace:   "terenzif",
-		DBDatabase:    "analysis",
-		DBUser:        "root",
-		DBPassword:    "root",
-		GeminiRPM:     60,
-		DiscoveryRoot: ".",
+		Port:        3030,
+		Mode:        "sse",
+		DBUrl:       "ws://localhost:8000/rpc",
+		DBNamespace: "terenzif",
+		DBDatabase:  "analysis",
+		DBUser:      "root",
+		DBPassword:  "root",
+		AI: AIConfig{
+			Embedding: EmbeddingConfig{
+				Provider:   "ollama",
+				Model:      "nomic-embed-text",
+				URL:        "http://127.0.0.1:11434",
+				AutoStart:  true,
+				AutoUpdate: true,
+			},
+			Reasoning: ReasoningConfig{
+				Provider: "gemini",
+				Model:    "gemini-2.5-pro",
+			},
+		},
+		GeminiDefaultRPM: 60,
+		DiscoveryRoot:    ".",
 		LogsRoot:      "./_logs",
 		AutoScan:      true,
 		LogLevel:      "INFO",
@@ -121,22 +163,53 @@ func Load(paths ...string) *Config {
 	}
 
 	// AI
+	if v := os.Getenv("KNOWLEDGE_RPM"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.GeminiDefaultRPM = p
+			for i := range cfg.AI.Reasoning.Keys {
+				cfg.AI.Reasoning.Keys[i].RPM = p
+			}
+		}
+	}
+
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		// Split by comma for pooling
 		parts := strings.Split(v, ",")
-		var keys []string
+		var keys []GeminiKeyConfig
 		for _, p := range parts {
 			clean := strings.TrimSpace(p)
 			if clean != "" {
-				keys = append(keys, clean)
+				keys = append(keys, GeminiKeyConfig{
+					Key: clean,
+					RPM: cfg.GeminiDefaultRPM,
+				})
 			}
 		}
-		cfg.GeminiKeys = keys // Replace file keys if ENV is set
+		cfg.AI.Reasoning.Keys = keys // Replace file keys if ENV is set
+		cfg.GeminiKeys = keys        // Populate legacy field as well
 	}
-	if v := os.Getenv("KNOWLEDGE_RPM"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.GeminiRPM = p
-		}
+
+	if v := os.Getenv("EMBEDDING_PROVIDER"); v != "" {
+		cfg.AI.Embedding.Provider = v
+	}
+	if v := os.Getenv("EMBEDDING_MODEL"); v != "" {
+		cfg.AI.Embedding.Model = v
+	}
+	if v := os.Getenv("EMBEDDING_URL"); v != "" {
+		cfg.AI.Embedding.URL = v
+	}
+	if v := os.Getenv("REASONING_PROVIDER"); v != "" {
+		cfg.AI.Reasoning.Provider = v
+	}
+	if v := os.Getenv("REASONING_MODEL"); v != "" {
+		cfg.AI.Reasoning.Model = v
+	}
+
+	// Legacy fallback migration
+	if len(cfg.GeminiKeys) > 0 && len(cfg.AI.Reasoning.Keys) == 0 {
+		cfg.AI.Reasoning.Keys = cfg.GeminiKeys
+	} else if len(cfg.AI.Reasoning.Keys) > 0 && len(cfg.GeminiKeys) == 0 {
+		cfg.GeminiKeys = cfg.AI.Reasoning.Keys
 	}
 
 	// Redmine

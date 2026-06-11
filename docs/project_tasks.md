@@ -24,6 +24,12 @@
 - [x] Stabilize and synchronize the full test suite (config, batch, schema) <!-- id: 29 -->
 - [x] Add MCP tool `redmine_search_issues_advanced` with structured filters and pagination <!-- id: 30 -->
 - [x] Add MCP tool `redmine_search_my_issues` (`assigned_to_id=me`) for personal triage workflows <!-- id: 31 -->
-- [x] Extend MCP tool `redmine_update_issue` to support safe field updates (status/priority/assignee/version) <!-- id: 32 -->
+- [x] Add MCP tool `redmine_update_issue` to support safe field updates (status/priority/assignee/version) <!-- id: 32 -->
 - [x] Return structured JSON payloads for Redmine search tools with optional compact text rendering <!-- id: 33 -->
 - [x] Add tests for advanced Redmine query filters, sorting, pagination, and MCP argument validation <!-- id: 34 -->
+- [x] Abstract AI interfaces for decoupled Embedding and Reasoning providers <!-- id: 35 -->
+- [x] Implement local Ollama Provider for embedding generation <!-- id: 36 -->
+- [x] Implement Ollama Runner with automatic background start and log redirection <!-- id: 37 -->
+- [x] Implement on-demand download of Ollama binary/installer and model (`nomic-embed-text`) <!-- id: 38 -->
+- [x] Maintain full backward compatibility for legacy Gemini configuration variables <!-- id: 39 -->
+- [x] Verify complete system test suite and execution-ready clean config <!-- id: 40 -->

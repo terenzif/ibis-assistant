@@ -42,7 +42,7 @@ func BenchmarkExcessiveDBUpdates(b *testing.B) {
 
 	mockDB := &CountingMockDB{}
 	// High limits to avoid rate limiting during benchmark
-	client := NewClient([]KeyConfig{
+	gemini := NewGeminiProvider([]KeyConfig{
 		{
 			Key:           "benchKey",
 			RPM:           100000,
@@ -51,6 +51,7 @@ func BenchmarkExcessiveDBUpdates(b *testing.B) {
 			FlushInterval: 100 * time.Millisecond,
 		},
 	}, mockDB)
+	client := NewClient(gemini, gemini, nil)
 
 	ctx := context.Background()
 
@@ -93,7 +94,7 @@ func TestDBUpdateBatching(t *testing.T) {
 	defer func() { BaseURL = originalBaseURL }()
 
 	mockDB := &CountingMockDB{}
-	client := NewClient([]KeyConfig{
+	gemini := NewGeminiProvider([]KeyConfig{
 		{
 			Key:           "testKey",
 			RPM:           10000,
@@ -102,6 +103,7 @@ func TestDBUpdateBatching(t *testing.T) {
 			FlushInterval: 100 * time.Millisecond,
 		},
 	}, mockDB)
+	client := NewClient(gemini, gemini, nil)
 
 	ctx := context.Background()
 	count := 50

@@ -47,39 +47,40 @@ func (m *MockAIClient) BatchEmbedText(ctx context.Context, texts []string) ([][]
 	return embeddings, nil
 }
 
-// createTestClient creates a minimal Client for testing that has IsFunctional() returning true
-// and BatchEmbedText that returns mock embeddings. It also starts a goroutine that handles
-// embed jobs by returning mock embeddings.
-func createTestClient() *Client {
-	ctx, cancel := context.WithCancel(context.Background())
-	client := &Client{
-		jobQueue:      make(chan EmbedJob, 10),
-		generateQueue: make(chan GenerateJob, 10),
-		ctx:           ctx,
-		cancel:        cancel,
-	}
+type MockEmbeddingProviderForBatch struct{}
 
-	// Start a goroutine that handles embedding jobs for testing
-	go func() {
-		for {
-			select {
-			case job := <-client.jobQueue:
-				// Respond with mock embeddings
-				embeddings := make([][]float32, len(job.Texts))
-				for i := range job.Texts {
-					embeddings[i] = make([]float32, 768)
-					for j := range embeddings[i] {
-						embeddings[i][j] = float32(j) / 768.0
-					}
-				}
-				job.ResultChan <- EmbedResult{Embeddings: embeddings}
-			case <-ctx.Done():
-				return
-			}
+func (m *MockEmbeddingProviderForBatch) Name() string         { return "mock" }
+func (m *MockEmbeddingProviderForBatch) IsFunctional() bool   { return true }
+func (m *MockEmbeddingProviderForBatch) Stop()                 {}
+func (m *MockEmbeddingProviderForBatch) EmbedText(ctx context.Context, text string) ([]float32, error) {
+	return nil, nil
+}
+func (m *MockEmbeddingProviderForBatch) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
+	embeddings := make([][]float32, len(texts))
+	for i := range texts {
+		embeddings[i] = make([]float32, 768)
+		for j := range embeddings[i] {
+			embeddings[i][j] = float32(j) / 768.0
 		}
-	}()
+	}
+	return embeddings, nil
+}
 
-	return client
+type MockReasoningProviderForBatch struct{}
+
+func (m *MockReasoningProviderForBatch) Name() string       { return "mock-reasoning" }
+func (m *MockReasoningProviderForBatch) IsFunctional() bool { return true }
+func (m *MockReasoningProviderForBatch) Stop()               {}
+func (m *MockReasoningProviderForBatch) GenerateContent(ctx context.Context, contents []Content, config GenerationConfig) (Candidate, error) {
+	return Candidate{}, nil
+}
+
+// createTestClient creates a minimal Client for testing that has IsFunctional() returning true
+// and BatchEmbedText that returns mock embeddings.
+func createTestClient() *Client {
+	mockEmb := &MockEmbeddingProviderForBatch{}
+	mockReas := &MockReasoningProviderForBatch{}
+	return NewClient(mockEmb, mockReas, nil)
 }
 
 func TestBatchManager_ProcessPendingChunks_Parsing(t *testing.T) {

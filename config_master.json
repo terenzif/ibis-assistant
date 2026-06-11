@@ -8,51 +8,42 @@
   "db_password": "root",
   "db_data_path": "./db",
   "db_auto_update": true,
-  "gemini_keys": [
-    {
-      "key": "",
-      "rpm": 3000,
-      "tpm": 1000000,
-      "rpd": 10000,
-      "owner": "Fabbio"
+  "ai": {
+    "embedding": {
+      "provider": "ollama",
+      "model": "nomic-embed-text",
+      "url": "http://127.0.0.1:11434",
+      "auto_start": true,
+      "auto_update": true
     },
-    {
-      "key": "",
-      "rpm": 100,
-      "tpm": 30000,
-      "rpd": 1000,
-      "owner": "Fatter"
-    },
-    {
-      "key": "",
-      "rpm": 100,
-      "tpm": 30000,
-      "rpd": 1000,
-      "owner": "Luca"
-    },
-    {
-      "key": "",
-      "rpm": 100,
-      "tpm": 30000,
-      "rpd": 1000,
-      "owner": "NicolaL"
+    "reasoning": {
+      "provider": "gemini",
+      "model": "gemini-2.5-pro",
+      "keys": [
+        {
+          "key": "",
+          "rpm": 15,
+          "tpm": 30000,
+          "rpd": 1500,
+          "owner": "default"
+        }
+      ]
     }
-  ],
-  "gemini_rpm": 100,
-  "redmine_url": "https://redmine.users.noreply.github.com/",
+  },
+  "redmine_url": "",
   "redmine_key": "",
   "discovery_root": "./repos",
   "logs_root": "./logs",
   "smtp": {
-    "enabled": true,
-    "host": "shout01.ot-mail.it",
-    "port": 25,
-    "user": "1258935.out.ot-mail.it",
+    "enabled": false,
+    "host": "",
+    "port": 587,
+    "user": "",
     "password": "",
-    "from": "ibis-arc@users.noreply.github.com",
-    "to": "terenzif@users.noreply.github.com"
+    "from": "",
+    "to": ""
   },
-  "auto_scan": true,
+  "auto_scan": false,
   "git_repos": [],
   "git_tokens": {"default": ""},
   "log_file": "./server.log",

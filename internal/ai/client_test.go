@@ -51,10 +51,11 @@ func TestClientWorkerPool(t *testing.T) {
 	defer func() { BaseURL = originalBaseURL }()
 
 	// Create Client with 2 keys
-	client := NewClient([]KeyConfig{
+	gemini := NewGeminiProvider([]KeyConfig{
 		{Key: "key1", RPM: 600, TPM: 1000, RPD: 1000},
 		{Key: "key2", RPM: 600, TPM: 1000, RPD: 1000},
 	}, &MockDB{})
+	client := NewClient(gemini, gemini, nil)
 
 	// Submit 10 requests
 	count := 10
@@ -99,9 +100,10 @@ func TestClientRateLimitingPacing(t *testing.T) {
 	defer func() { BaseURL = originalBaseURL }()
 
 	// RPM = 60 => 1 req/sec per worker
-	client := NewClient([]KeyConfig{
+	gemini := NewGeminiProvider([]KeyConfig{
 		{Key: "key1", RPM: 60},
 	}, &MockDB{})
+	client := NewClient(gemini, gemini, nil)
 
 	start := time.Now()
 	// 1st call: Should be immediate (or very fast)
@@ -141,9 +143,10 @@ func TestTPMTokenBucket(t *testing.T) {
 	// 60 chars -> 20 tokens.
 	text60 := strings.Repeat("a", 60)
 
-	client := NewClient([]KeyConfig{
+	gemini := NewGeminiProvider([]KeyConfig{
 		{Key: "keyTPM", RPM: 600, TPM: 600}, // RPM is high (10/s), TPM is limiter (10 tok/s)
 	}, &MockDB{})
+	client := NewClient(gemini, gemini, nil)
 
 	// Allow the bucket to fill (it starts full usually).
 	// Current impl: Fixed window. Starts at 0 used.
@@ -186,9 +189,10 @@ func TestTPMTokenBucket(t *testing.T) {
 	// We use TPM = 134.
 	// Internal logic applies 0.9 safety factor -> Limit = ~120.6.
 	// Refill Rate = 120.6 / 60 = 2.01 tok/sec.
-	client2 := NewClient([]KeyConfig{
+	gemini2 := NewGeminiProvider([]KeyConfig{
 		{Key: "keyLowTPM", RPM: 1000, TPM: 134},
 	}, &MockDB{})
+	client2 := NewClient(gemini2, gemini2, nil)
 
 	// Helper to eat tokens
 	eatTokens := func(n int) {
@@ -248,9 +252,10 @@ func TestGenerateContent(t *testing.T) {
 	BaseURL = server.URL
 	defer func() { BaseURL = originalBaseURL }()
 
-	client := NewClient([]KeyConfig{
+	gemini := NewGeminiProvider([]KeyConfig{
 		{Key: "keyGen", RPM: 60},
 	}, &MockDB{})
+	client := NewClient(gemini, gemini, nil)
 
 	ctx := context.Background()
 	resp, err := client.GenerateContent(ctx, []Content{{Parts: []Part{{Text: "Hi"}}}}, GenerationConfig{})

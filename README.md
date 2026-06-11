@@ -21,11 +21,13 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
 
 * **Go** 1.22 o superiore
 * **SurrealDB**: Il database backend.
-  * *Opzione Automatica (Consigliata)*: Il server gestisce automaticamente SurrealDB. Se `surreal.exe` non è presente, verrà scaricato l'ultimo rilascio da GitHub. Se è presente, verrà mantenuto aggiornato (comportamento esplicitamente controllabile tramite `db_auto_update` in `config.json`).
-  * *Opzione Manuale*: SurrealDB pre-installato e in esecuzione esternamente. Configura `db_url` di conseguenza.
+  * *Opzione Automatica (Consigliata)*: Il server gestisce automaticamente SurrealDB. Se `surreal.exe` non è presente, viene scaricato on-demand da GitHub.
+* **Ollama (AI Embedding locale)**:
+  * *Gestione Automatica (Consigliata)*: Se `auto_start` è abilitato in `config.json` e Ollama non è in esecuzione, il server rileva l'installazione locale. Se non è presente, **scarica l'installer o il binario ed esegue l'installazione in background**. Inoltre scarica on-demand il modello specificato (es. `nomic-embed-text`).
 * **Git**: Installato e accessibile da terminale.
-* **Gemini API Keys**: È possibile specificare una lista di chiavi API nel file di configurazione (`gemini_keys`, formato oggetto con `key`, `rpm`, `tpm`, `rpd` e `owner`) o via env (`GEMINI_API_KEY` separati da virgola, che useranno il `gemini_rpm` di default).
-  * *Comportamento Multi-Key*: Se vengono fornite più chiavi, il server le utilizzerà in modalità **Priority/Failover**. Il server proverà ad utilizzare la prima chiave disponibile che non ha superato i limiti (RPM, TPM, RPD). Se la prima chiave è limitata (o esaurita per il giorno), passerà alla successiva. Questo permette di definire una chiave "principale" (es. Free Tier) e usare le altre come backup.
+* **Chiavi API AI**:
+  * **Embedding**: Gestito localmente via Ollama (default) o configurato per usare Gemini.
+  * **Reasoning**: Gestito tramite Gemini con supporto Multi-Key (Priority/Failover) inserendo le chiavi in `ai.reasoning.keys` (con supporto di retrocompatibilità per il vecchio campo `gemini_keys` a livello root).
 
 ### Setup
 
@@ -43,35 +45,47 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
    ```
 
 3. **Configurazione**:
-   Il server cerca un file `config.json` nella directory di esecuzione. Un file di esempio è stato creato.
+   Il server cerca un file `config.json` nella directory di esecuzione. Un file di esempio è `config_master.json`.
    Modifica `config.json` con le tue chiavi e preferenze:
    
    ```json
    {
-     "port": 3030,
+     "port": 3333,
      "mode": "sse",
+     "db_url": "ws://127.0.0.1:8000/rpc",
      "db_user": "root",
      "db_password": "root",
-     "gemini_keys": [
-       { "key": "", "rpm": 15, "tpm": 30000, "rpd": 1500, "owner": "User A" },
-       { "key": "", "rpm": 100, "tpm": 100000, "rpd": 10000, "owner": "Project Budget" }
-     ],
-     "gemini_rpm": 100,
-      "redmine_url": "https://redmine.tuodominio.com",
-      "redmine_key": "",
-      "db_auto_update": true,
-      "auto_scan": true,
-      "logs_root": "./_logs",
-      "smtp": {
-        "enabled": true,
-        "host": "your.smtp.server.com",
-        "port": 587,
-        "user": "username",
-        "password": "",
-        "from": "alerts@ibis-arc.com",
-        "to": "admin@example.com"
-      }
-    }
+     "ai": {
+       "embedding": {
+         "provider": "ollama",
+         "model": "nomic-embed-text",
+         "url": "http://127.0.0.1:11434",
+         "auto_start": true,
+         "auto_update": true
+       },
+       "reasoning": {
+         "provider": "gemini",
+         "model": "gemini-2.5-pro",
+         "keys": [
+           { "key": "", "rpm": 15, "tpm": 30000, "rpd": 1500, "owner": "default" }
+         ]
+       }
+     },
+     "redmine_url": "https://redmine.tuodominio.com",
+     "redmine_key": "",
+     "db_auto_update": true,
+     "auto_scan": true,
+     "logs_root": "./logs",
+     "smtp": {
+       "enabled": false,
+       "host": "your.smtp.server.com",
+       "port": 587,
+       "user": "username",
+       "password": "",
+       "from": "alerts@ibis-arc.com",
+       "to": "admin@example.com"
+     }
+   }
    ```
    
    > **Nota Ticketing**: La configurazione operativa provider-aware è in `config/ticketing_config.json` (template: `config/ticketing_config.example.json`). Le credenziali utente possono essere passate anche via header HTTP per singola request.

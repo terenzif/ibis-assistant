@@ -25,33 +25,8 @@ const (
 
 var BaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-// EmbedJob represents a work item for the AI workers
-type EmbedJob struct {
-	Texts      []string
-	ResultChan chan EmbedResult
-}
-
-// EmbedResult represents the outcome of an embedding job
-type EmbedResult struct {
-	Embeddings [][]float32
-	Error      error
-}
-
-// GenerateJob represents a work item for content generation
-type GenerateJob struct {
-	Contents   []Content
-	Config     GenerationConfig
-	ResultChan chan GenerateResult
-}
-
-// GenerateResult represents the outcome of a generation job
-type GenerateResult struct {
-	Response Candidate
-	Error    error
-}
-
-// Client manages interactions with the Gemini AI Provider using a robust worker pool for load balancing and rate limiting.
-type Client struct {
+// GeminiProvider manages interactions with the Gemini AI Provider using a robust worker pool for load balancing and rate limiting.
+type GeminiProvider struct {
 	jobQueue      chan EmbedJob
 	generateQueue chan GenerateJob
 	dbClient      db.Executor
@@ -59,16 +34,6 @@ type Client struct {
 	wg            sync.WaitGroup
 	ctx           context.Context
 	cancel        context.CancelFunc
-}
-
-type KeyConfig struct {
-	Key           string
-	RPM           int
-	TPM           int
-	RPD           int
-	Owner         string
-	FlushInterval time.Duration
-	AllowOverage  bool
 }
 
 // worker holds the state for a single API key
@@ -103,9 +68,9 @@ type worker struct {
 	allowOverage  bool
 }
 
-func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
+func NewGeminiProvider(apiKeys []KeyConfig, dbClient db.Executor) *GeminiProvider {
 	if len(apiKeys) == 0 {
-		return &Client{}
+		return &GeminiProvider{}
 	}
 
 	// Create a buffered channel to hold pending jobs
@@ -115,7 +80,7 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	c := &Client{
+	p := &GeminiProvider{
 		jobQueue:      jobQueue,
 		generateQueue: generateQueue,
 		dbClient:      dbClient,
@@ -126,40 +91,44 @@ func NewClient(apiKeys []KeyConfig, dbClient db.Executor) *Client {
 
 	for _, cfg := range apiKeys {
 		w := newWorker(ctx, cfg, dbClient)
-		c.workers = append(c.workers, w)
-		c.wg.Add(1)
+		p.workers = append(p.workers, w)
+		p.wg.Add(1)
 		go func(w *worker) {
-			defer c.wg.Done()
-			w.startLoop(jobQueue, generateQueue, c.ctx)
+			defer p.wg.Done()
+			w.startLoop(jobQueue, generateQueue, p.ctx)
 		}(w)
 	}
 
-	return c
+	return p
 }
 
-func (c *Client) IsFunctional() bool {
-	return c.jobQueue != nil
+func (p *GeminiProvider) Name() string {
+	return "gemini"
+}
+
+func (p *GeminiProvider) IsFunctional() bool {
+	return p.jobQueue != nil
 }
 
 // Stop gracefully shuts down the AI client and waits for workers to finish
-func (c *Client) Stop() {
-	if c.cancel != nil {
-		c.cancel()
+func (p *GeminiProvider) Stop() {
+	if p.cancel != nil {
+		p.cancel()
 	}
-	if c.jobQueue != nil {
-		close(c.jobQueue)
-		c.jobQueue = nil
+	if p.jobQueue != nil {
+		close(p.jobQueue)
+		p.jobQueue = nil
 	}
-	if c.generateQueue != nil {
-		close(c.generateQueue)
-		c.generateQueue = nil
+	if p.generateQueue != nil {
+		close(p.generateQueue)
+		p.generateQueue = nil
 	}
-	c.wg.Wait()
+	p.wg.Wait()
 }
 
 // EmbedText generates a vector embedding for the given text
-func (c *Client) EmbedText(ctx context.Context, text string) ([]float32, error) {
-	res, err := c.BatchEmbedText(ctx, []string{text})
+func (p *GeminiProvider) EmbedText(ctx context.Context, text string) ([]float32, error) {
+	res, err := p.BatchEmbedText(ctx, []string{text})
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +139,8 @@ func (c *Client) EmbedText(ctx context.Context, text string) ([]float32, error) 
 }
 
 // BatchEmbedText submits a batch of texts to the worker pool and waits for the result
-func (c *Client) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
-	if c.jobQueue == nil {
+func (p *GeminiProvider) BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error) {
+	if p.jobQueue == nil {
 		return nil, fmt.Errorf("AI client not initialized or no keys available")
 	}
 
@@ -187,11 +156,11 @@ func (c *Client) BatchEmbedText(ctx context.Context, texts []string) ([][]float3
 
 	// Submit job
 	select {
-	case c.jobQueue <- job:
+	case p.jobQueue <- job:
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-c.ctx.Done():
-		return nil, c.ctx.Err()
+	case <-p.ctx.Done():
+		return nil, p.ctx.Err()
 	}
 
 	// Wait for result
@@ -200,14 +169,14 @@ func (c *Client) BatchEmbedText(ctx context.Context, texts []string) ([][]float3
 		return result.Embeddings, result.Error
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-c.ctx.Done():
-		return nil, c.ctx.Err()
+	case <-p.ctx.Done():
+		return nil, p.ctx.Err()
 	}
 }
 
 // GenerateContent generates text content using the AI model
-func (c *Client) GenerateContent(ctx context.Context, contents []Content, config GenerationConfig) (Candidate, error) {
-	if c.generateQueue == nil {
+func (p *GeminiProvider) GenerateContent(ctx context.Context, contents []Content, config GenerationConfig) (Candidate, error) {
+	if p.generateQueue == nil {
 		return Candidate{}, fmt.Errorf("AI client not initialized or no keys available")
 	}
 
@@ -219,11 +188,11 @@ func (c *Client) GenerateContent(ctx context.Context, contents []Content, config
 	}
 
 	select {
-	case c.generateQueue <- job:
+	case p.generateQueue <- job:
 	case <-ctx.Done():
 		return Candidate{}, ctx.Err()
-	case <-c.ctx.Done():
-		return Candidate{}, c.ctx.Err()
+	case <-p.ctx.Done():
+		return Candidate{}, p.ctx.Err()
 	}
 
 	select {
@@ -231,39 +200,39 @@ func (c *Client) GenerateContent(ctx context.Context, contents []Content, config
 		return result.Response, result.Error
 	case <-ctx.Done():
 		return Candidate{}, ctx.Err()
-	case <-c.ctx.Done():
-		return Candidate{}, c.ctx.Err()
+	case <-p.ctx.Done():
+		return Candidate{}, p.ctx.Err()
 	}
 }
 
 // --- Async Batch API Methods ---
 
 // CreateBatchEmbedJob initiates an asynchronous batch embedding process via the Gemini v1beta API.
-func (c *Client) CreateBatchEmbedJob(ctx context.Context, texts []string) (string, error) {
-	if len(c.workers) == 0 {
+func (p *GeminiProvider) CreateBatchEmbedJob(ctx context.Context, texts []string) (string, error) {
+	if len(p.workers) == 0 {
 		return "", fmt.Errorf("no active workers")
 	}
 	// Use the first worker for now (assuming all keys are valid for batch ops)
 	// Ideally we should load balance or use a specific key for batch operations
-	w := c.workers[0]
+	w := p.workers[0]
 	return w.createBatchEmbedJob(ctx, texts)
 }
 
 // CreateBatchGenerateJob submits an asynchronous batch content generation job
-func (c *Client) CreateBatchGenerateJob(ctx context.Context, model string, contents [][]Content, config GenerationConfig) (string, error) {
-	if len(c.workers) == 0 {
+func (p *GeminiProvider) CreateBatchGenerateJob(ctx context.Context, model string, contents [][]Content, config GenerationConfig) (string, error) {
+	if len(p.workers) == 0 {
 		return "", fmt.Errorf("no active workers")
 	}
-	w := c.workers[0]
+	w := p.workers[0]
 	return w.createBatchGenerateJob(ctx, model, contents, config)
 }
 
 // GetBatchJob retrieves the status of a batch job
-func (c *Client) GetBatchJob(ctx context.Context, name string) (*BatchJobStatus, error) {
-	if len(c.workers) == 0 {
+func (p *GeminiProvider) GetBatchJob(ctx context.Context, name string) (*BatchJobStatus, error) {
+	if len(p.workers) == 0 {
 		return nil, fmt.Errorf("no active workers")
 	}
-	w := c.workers[0]
+	w := p.workers[0]
 	return w.getBatchJob(ctx, name)
 }
 
@@ -271,7 +240,7 @@ func (c *Client) GetBatchJob(ctx context.Context, name string) (*BatchJobStatus,
 // Since the output is likely a file URI or inline responses, we need to handle that.
 // The current implementation assumes inline responses or simple file reading if applicable.
 // However, based on API docs, it might return a file URI.
-func (c *Client) GetBatchResults(ctx context.Context, outputURI string) ([][]float32, error) {
+func (p *GeminiProvider) GetBatchResults(ctx context.Context, outputURI string) ([][]float32, error) {
 	// Not implemented fully as it depends on whether we get a file URI or inline response.
 	// For inline responses in the batch status, we extract them there.
 	// If the output is a file, we need a separate method to download/read it.
@@ -937,13 +906,7 @@ type EmbeddingRequest struct {
 	Model   string  `json:"model"`
 	Content Content `json:"content"`
 }
-type Content struct {
-	Role  string `json:"role,omitempty"`
-	Parts []Part `json:"parts"`
-}
-type Part struct {
-	Text string `json:"text"`
-}
+
 
 type BatchEmbedRequest struct {
 	Requests []EmbedRequestItem `json:"requests"`
@@ -964,27 +927,14 @@ type GenerateContentRequest struct {
 	GenerationConfig GenerationConfig `json:"generationConfig,omitempty"`
 }
 
-type GenerationConfig struct {
-	Temperature     float64 `json:"temperature,omitempty"`
-	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-}
+
 
 type GenerateContentResponse struct {
 	Candidates    []Candidate    `json:"candidates"`
 	UsageMetadata *UsageMetadata `json:"usageMetadata,omitempty"`
 }
 
-type Candidate struct {
-	Content       Content        `json:"content"`
-	FinishReason  string         `json:"finishReason"`
-	UsageMetadata *UsageMetadata `json:"-"`
-}
 
-type UsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
-}
 
 type ErrorResponse struct {
 	Error struct {
@@ -1012,13 +962,7 @@ type Operation struct {
 	Response map[string]interface{} `json:"response,omitempty"`
 }
 
-type BatchJobStatus struct {
-	Name       string
-	Done       bool
-	Error      error
-	Embeddings [][]float32
-	Candidates []Candidate
-}
+
 
 type BatchGenerateRequest struct {
 	Requests []GenerateContentRequest `json:"requests"`
