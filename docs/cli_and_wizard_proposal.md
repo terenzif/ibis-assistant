@@ -2,16 +2,16 @@
 
 > [!NOTE]
 > **Stato della proposta: IN VALUTAZIONE (Giugno 2026)**
-> Questo documento descrive la proposta architetturale per l'integrazione di un'interfaccia a riga di comando (CLI) in `ibis-arc` per l'invio dei comandi MCP, di un assistente testuale (wizard Q&A) per la prima inizializzazione guidata del prodotto e di un meccanismo di auto-discovery per facilitare l'integrazione dei client AI esterni.
+> Questo documento descrive la proposta architetturale per l'integrazione di un'interfaccia a riga di comando (CLI) in `ibis-assistant` per l'invio dei comandi MCP, di un assistente testuale (wizard Q&A) per la prima inizializzazione guidata del prodotto e di un meccanismo di auto-discovery per facilitare l'integrazione dei client AI esterni.
 
 ---
 
 ## 1. Analisi del Contesto e Motivazioni
 
-Attualmente, `ibis-arc` funziona principalmente come un server MCP centralizzato che attende connessioni da client esterni (quali Claude Desktop o estensioni IDE) tramite canali SSE o stdio. Questa modalità presenta alcuni limiti operativi:
+Attualmente, `ibis-assistant` funziona principalmente come un server MCP centralizzato che attende connessioni da client esterni (quali Claude Desktop o estensioni IDE) tramite canali SSE o stdio. Questa modalità presenta alcuni limiti operativi:
 1. **Inizializzazione complessa**: La prima configurazione del file `config.json` richiede la compilazione manuale di diversi campi complessi (porte, credenziali DB SurrealDB, API Key Gemini, parametri SMTP), aumentando la barriera d'ingresso per i nuovi sviluppatori.
 2. **Assenza di un client locale**: Per interrogare la base di conoscenza, analizzare i log o interagire con i ticket da riga di comando, l'utente è costretto a ricorrere a un client grafico MCP o a effettuare chiamate HTTP raw, perdendo l'immediatezza della shell.
-3. **Mancanza di auto-configurazione per gli agenti AI**: Se un'IA (come Copilot o un altro assistente locale) viene istruita ad aggiungere il server `ibis-arc` indicando solo l'IP o l'host (es. `http://localhost:3030/`), non ha un punto di ingresso standard per scoprire gli endpoint attivi (`/sse`, `/mcp`), i tool esposti e come configurare se stessa per usarli.
+3. **Mancanza di auto-configurazione per gli agenti AI**: Se un'IA (come Copilot o un altro assistente locale) viene istruita ad aggiungere il server `ibis-assistant` indicando solo l'IP o l'host (es. `http://localhost:3030/`), non ha un punto di ingresso standard per scoprire gli endpoint attivi (`/sse`, `/mcp`), i tool esposti e come configurare se stessa per usarli.
 
 ---
 
@@ -21,7 +21,7 @@ Per migliorare l'esperienza di onboarding (primo avvio dopo il download dell'ese
 
 ```
 +-------------------------------------------------------------+
-|               Avvio di ibis-arc (senza config.json)          |
+|               Avvio di ibis-assistant (senza config.json)          |
 +-------------------------------------------------------------+
                                |
                                v
@@ -50,7 +50,7 @@ Per migliorare l'esperienza di onboarding (primo avvio dopo il download dell'ese
 ```
 
 *   **Avvio Automatico**: Se l'eseguibile viene avviato senza argomenti e non viene individuato alcun file `config.json` nella directory corrente o in quella dell'eseguibile, il server non si arresterà, ma lancerà automaticamente il wizard testuale.
-*   **Avvio Esplicito**: Il wizard potrà essere invocato in qualsiasi momento lanciando il comando `ibis-arc config`.
+*   **Avvio Esplicito**: Il wizard potrà essere invocato in qualsiasi momento lanciando il comando `ibis-assistant config`.
 *   **Modalità Veloce (Fast)**: Consente di rendere operativo il sistema in 5 domande essenziali, impostando i valori di default per SurrealDB ed Ollama locale.
 *   **Modalità Dettagliata (Detailed)**: Consente di personalizzare ogni singola opzione (percorso del database remoto, impostazioni dei modelli locali/remoti, credenziali Git di default, configurazioni SMTP e server Redmine).
 
@@ -66,15 +66,15 @@ Il server in esecuzione esporrà i comandi MCP. La CLI interpreterà i sotto-com
                   +--------------------------+
                   |  Terminale / Utente      |
                   +--------------------------+
-                    | (es. ibis-arc ask "...")
+                    | (es. ibis-assistant ask "...")
                     v
                   +--------------------------+
-                  |  ibis-arc CLI (Client)   |
+                  |  ibis-assistant CLI (Client)   |
                   +--------------------------+
                     | (POST /mcp con JSON-RPC)
                     v
                   +--------------------------+
-                  |  ibis-arc Server         |
+                  |  ibis-assistant Server         |
                   +--------------------------+
                     | (Esegue ask_project)
                     v
@@ -85,8 +85,8 @@ Il server in esecuzione esporrà i comandi MCP. La CLI interpreterà i sotto-com
 
 ### Controllo Ciclo di Vita (Daemon Mode)
 Per consentire alla CLI di funzionare in modo agevole, il server potrà essere gestito in background senza richiedere un terminale dedicato:
-*   `ibis-arc start` / `ibis-arc run --daemon`: Avvia l'eseguibile in background, scrive il PID nel file `ibis-arc.pid` nella directory di lavoro, devia lo standard output nel file `server.log` e ritorna immediatamente il controllo al prompt dei comandi.
-*   `ibis-arc stop`: Legge il PID da `ibis-arc.pid`, invia un segnale `SIGTERM` per arrestare in modo pulito il server, i log watcher e i processi embedded del database, e rimuove il file PID.
+*   `ibis-assistant start` / `ibis-assistant run --daemon`: Avvia l'eseguibile in background, scrive il PID nel file `ibis-assistant.pid` nella directory di lavoro, devia lo standard output nel file `server.log` e ritorna immediatamente il controllo al prompt dei comandi.
+*   `ibis-assistant stop`: Legge il PID da `ibis-assistant.pid`, invia un segnale `SIGTERM` per arrestare in modo pulito il server, i log watcher e i processi embedded del database, e rimuove il file PID.
 
 ---
 

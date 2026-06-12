@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-arc/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 type MockDBBatch struct {

@@ -1,6 +1,6 @@
-# Ibis Arc (MCP)
+# Ibis Assistant (MCP)
 
-**Ibis Arc** è un server MCP (Model Context Protocol) avanzato progettato per agire come una "memoria vivente" del progetto. Integra l'analisi strutturale del codice (Git), la comprensione semantica (RAG vettoriale) e l'intento gestionale (ticketing multi-provider: Redmine/Jira/Azure DevOps) in un unico grafo della conoscenza interrogabile.
+**Ibis Assistant** è un server MCP (Model Context Protocol) avanzato progettato per agire come una "memoria vivente" del progetto. Integra l'analisi strutturale del codice (Git), la comprensione semantica (RAG vettoriale) e l'intento gestionale (ticketing multi-provider: Redmine/Jira/Azure DevOps) in un unico grafo della conoscenza interrogabile.
 
 Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini) un contesto profondo che va oltre la semplice lettura dei file attuali, permettendo risposte basate su *storia*, *evoluzione* e *ragionamento*.
 
@@ -35,13 +35,13 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
    
    ```bash
    git clone <tuo-repo>
-   cd ibis-arc
+   cd ibis-assistant
    ```
 
 2. **Compila il server**:
    
    ```bash
-   go build -o ibis-arc.exe ./cmd/server
+   go build -o ibis-assistant.exe ./cmd/server
    ```
 
 3. **Configurazione**:
@@ -82,7 +82,7 @@ Il suo scopo principale è fornire agli agenti AI (come Claude, Copilot o Gemini
        "port": 587,
        "user": "username",
        "password": "",
-       "from": "alerts@ibis-arc.com",
+       "from": "alerts@ibis-assistant.com",
        "to": "admin@example.com"
      }
    }
@@ -107,83 +107,83 @@ Include:
    Il server avvierà automaticamente SurrealDB se configurato per l'uso locale (default). L'avvio standard è:
    
    ```bash
-   ./ibis-arc.exe /run
+   ./ibis-assistant.exe /run
    ```
    
-   Eseguendo `ibis-arc.exe` senza parametri verrà mostrata la guida rapida ai comandi.
+   Eseguendo `ibis-assistant.exe` senza parametri verrà mostrata la guida rapida ai comandi.
 
 5. **Installazione come Servizio Windows**:
    È possibile installare il server come servizio di sistema per un avvio automatico:
 
    ```bash
    # Installa il servizio (Richiede privilegi di Amministratore)
-   ./ibis-arc.exe /install
+   ./ibis-assistant.exe /install
 
    # Disinstalla il servizio
-   ./ibis-arc.exe /uninstall
+   ./ibis-assistant.exe /uninstall
    ```
-   Il servizio verrà configurato con il nome "ibis-arc" e descrizione appropriata.
+   Il servizio verrà configurato con il nome "ibis-assistant" e descrizione appropriata.
 
 ## 🚀 Utilizzo
 
 ### Esecuzione del Server e Controllo Demone
 
-Ibis Arc può essere avviato in modalità interattiva, come servizio Windows, o come demone/processo in background:
+Ibis Assistant può essere avviato in modalità interattiva, come servizio Windows, o come demone/processo in background:
 
 *   **`run` (o `-run`)**: Avvia il server interattivamente (comportamento standard MCP).
     ```bash
-    ./ibis-arc.exe run -port 3030 -mode sse
+    ./ibis-assistant.exe run -port 3030 -mode sse
     ```
-*   **`start`**: Avvia il server in background come demone. I log del server vengono scritti in `server.log` ed il PID viene salvato in `ibis-arc.pid`.
+*   **`start`**: Avvia il server in background come demone. I log del server vengono scritti in `server.log` ed il PID viene salvato in `ibis-assistant.pid`.
     ```bash
-    ./ibis-arc.exe start
+    ./ibis-assistant.exe start
     ```
-*   **`stop`**: Ferma in modo controllato il server in background (legge il PID da `ibis-arc.pid` ed arresta il processo).
+*   **`stop`**: Ferma in modo controllato il server in background (legge il PID da `ibis-assistant.pid` ed arresta il processo).
     ```bash
-    ./ibis-arc.exe stop
+    ./ibis-assistant.exe stop
     ```
 *   **`config`**: Avvia il wizard testuale interattivo per la configurazione iniziale guidata (Fast o Detailed) generandola in `config.json` e `config/ticketing_config.json`.
     ```bash
-    ./ibis-arc.exe config
+    ./ibis-assistant.exe config
     ```
-*   **`/install` / `/uninstall`**: Installa/disinstalla Ibis Arc come Servizio Windows permanente (richiede privilegi di amministratore).
+*   **`/install` / `/uninstall`**: Installa/disinstalla Ibis Assistant come Servizio Windows permanente (richiede privilegi di amministratore).
 
 > 💡 **Auto-Wizard**: Se `config.json` non è presente all'avvio dell'applicazione, il Wizard interattivo si avvierà automaticamente per guidarti nella configurazione prima di lanciare il server.
 
 ### 🖥️ Client CLI (Inoltro Comandi MCP)
 
-L'eseguibile `ibis-arc` include un client CLI completo che comunica tramite chiamate HTTP REST sicure all'endpoint locale `/api/v1/cli/call`. Questo ti permette di invocare direttamente dal terminale gli strumenti MCP esposti dal server attivo:
+L'eseguibile `ibis-assistant` include un client CLI completo che comunica tramite chiamate HTTP REST sicure all'endpoint locale `/api/v1/cli/call`. Questo ti permette di invocare direttamente dal terminale gli strumenti MCP esposti dal server attivo:
 
 *   **Ask (Domande sul Progetto)**:
     ```bash
-    ./ibis-arc.exe ask "Spiega la logica di autenticazione" --branch main
+    ./ibis-assistant.exe ask "Spiega la logica di autenticazione" --branch main
     ```
 *   **Ingestion (Codice e Git)**:
     ```bash
     # Indicizza codice locale
-    ./ibis-arc.exe ingest code --path ./percorso/progetto
+    ./ibis-assistant.exe ingest code --path ./percorso/progetto
     # Inizializza sessione Git
-    ./ibis-arc.exe ingest git --name ProgettoA --url https://github.com/org/repo --branch main
+    ./ibis-assistant.exe ingest git --name ProgettoA --url https://github.com/org/repo --branch main
     ```
 *   **Gestione Ticket**:
     ```bash
-    ./ibis-arc.exe ticket search --query "bug login" --provider jira
-    ./ibis-arc.exe ticket get 1042 --provider redmine
-    ./ibis-arc.exe ticket create --project KEY --title "Nuovo Bug" --desc "Descrizione..."
+    ./ibis-assistant.exe ticket search --query "bug login" --provider jira
+    ./ibis-assistant.exe ticket get 1042 --provider redmine
+    ./ibis-assistant.exe ticket create --project KEY --title "Nuovo Bug" --desc "Descrizione..."
     ```
 *   **Gestione Pull Request**:
     ```bash
-    ./ibis-arc.exe pr create --source feature/nuova --target main --title "Aggiunta feature"
+    ./ibis-assistant.exe pr create --source feature/nuova --target main --title "Aggiunta feature"
     ```
 *   **Analisi Log e Ingestion**:
     ```bash
-    ./ibis-arc.exe logs analyze --project ProgettoA --text "Error: NullReferenceException at..."
+    ./ibis-assistant.exe logs analyze --project ProgettoA --text "Error: NullReferenceException at..."
     ```
 *   **Altro (Memorie, Credenziali, Ottimizzazione)**:
     ```bash
-    ./ibis-arc.exe credentials add --target github.com --token MY_PAT
-    ./ibis-arc.exe memory add --project ProgettoA --text "Usa Go 1.26"
-    ./ibis-arc.exe optimize --iterations 5
+    ./ibis-assistant.exe credentials add --target github.com --token MY_PAT
+    ./ibis-assistant.exe memory add --project ProgettoA --text "Usa Go 1.26"
+    ./ibis-assistant.exe optimize --iterations 5
     ```
 
 ### 🌐 Auto-Discovery HTTP (GET /)
@@ -242,7 +242,7 @@ L'agente client intercetta questa risposta, richiede il PAT all'utente in modo i
 
 ### 🔌 Integrazione Client (Centralizzata)
 
-Il Ibis Arc è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.
+Il Ibis Assistant è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.
 
 **Endpoint Pubblico:** `http://localhost:3030/sse`
 
@@ -322,7 +322,7 @@ Non esiste ancora un supporto nativo *ufficiale* per MCP in SSMS.
 Gli agenti automatici (o Antigravity) configurati nella rete aziendale possono contattare direttamente l'endpoint.
 
 * **Discovery**: `http://localhost:3030`
-* **Vantaggio**: L'agente non deve clonare il repo per capirlo; chiede al Ibis Arc centrale che ha già "digerito" tutto il codice e la storia.
+* **Vantaggio**: L'agente non deve clonare il repo per capirlo; chiede al Ibis Assistant centrale che ha già "digerito" tutto il codice e la storia.
 
 > **Nota Troubleshooting**: Essendo il server su `win-dev`, assicuratevi che il firewall di Windows su quella macchina permetta il traffico in ingresso sulla porta **3030**.
 
@@ -332,7 +332,7 @@ Gli agenti automatici (o Antigravity) configurati nella rete aziendale possono c
 
 ## 💡 Casi d'Uso Concreti
 
-Ecco alcuni scenari reali in cui il Ibis Arc fa la differenza:
+Ecco alcuni scenari reali in cui il Ibis Assistant fa la differenza:
 
 1. **Onboarding su Codice Legacy**:
    
@@ -379,7 +379,7 @@ Per dettagli tecnici sulle recenti evoluzioni del sistema, consulta:
 
 ## 🤖 Istruzioni per AI/Copilot (Sviluppo Server)
 
-Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo sviluppo del Ibis Arc stesso**.
+Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo sviluppo del Ibis Assistant stesso**.
 
 ### Convenzioni Operative
 - Trattare `cmd/server/main.go` e `internal/ingest/redmine/ingest.go` come source of truth dei tool MCP.

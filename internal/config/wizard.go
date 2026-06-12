@@ -12,7 +12,7 @@ import (
 
 // RunWizard avvia il prompt interattivo da terminale per generare config.json e config/ticketing_config.json
 func RunWizard() error {
-	fmt.Println("\n=== Ibis Arc - Wizard di Prima Configurazione ===")
+	fmt.Println("\n=== Ibis Assistant - Wizard di Prima Configurazione ===")
 	fmt.Println("Questo wizard ti aiuterà a configurare l'applicazione generando il file config.json.")
 	fmt.Println("Lasciando il campo vuoto, verrà applicato il valore predefinito mostrato tra parentesi quadre.")
 
@@ -52,7 +52,7 @@ func RunWizard() error {
 	fmt.Println("\n[OK] File config.json salvato con successo!")
 
 	// Chiedi se si desidera avviare il server ora
-	fmt.Print("\nVuoi avviare il server Ibis Arc adesso? (S/N) [S]: ")
+	fmt.Print("\nVuoi avviare il server Ibis Assistant adesso? (S/N) [S]: ")
 	scanner.Scan()
 	startChoice := strings.ToLower(strings.TrimSpace(scanner.Text()))
 	if startChoice == "" || startChoice == "s" || startChoice == "si" {
@@ -60,7 +60,7 @@ func RunWizard() error {
 		return nil
 	}
 
-	fmt.Println("Configurazione completata. Puoi avviare il server lanciando: ibis-arc run")
+	fmt.Println("Configurazione completata. Puoi avviare il server lanciando: ibis-assistant run")
 	os.Exit(0)
 	return nil
 }

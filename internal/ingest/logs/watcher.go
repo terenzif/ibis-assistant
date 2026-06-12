@@ -8,10 +8,10 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/terenzif/ibis-arc/internal/ai"
-	"github.com/terenzif/ibis-arc/internal/config"
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type Watcher struct {

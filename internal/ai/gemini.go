@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/logger"
-	"github.com/terenzif/ibis-arc/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 const (

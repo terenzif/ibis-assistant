@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/ai"
 )
 
 // TestAskProjectAgentic_QueryParsing checks edge cases for query extraction

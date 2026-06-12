@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-arc/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 func TestIngestRepo_JiraReferenceUsesProviderScopedIssueID(t *testing.T) {

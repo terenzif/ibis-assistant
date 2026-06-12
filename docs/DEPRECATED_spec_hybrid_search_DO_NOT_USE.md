@@ -1,7 +1,7 @@
-# Implementation Plan: Ibis Arc Hybrid Search
+# Implementation Plan: Ibis Assistant Hybrid Search
 **Target Developer:** Jules
 **Status:** Ingestion is COMPLETE. Retrieval is PENDING.
-**Objective:** Implement "AskProject" functionality combining Vector Search with Graph Traversal in `ibis-arc`.
+**Objective:** Implement "AskProject" functionality combining Vector Search with Graph Traversal in `ibis-assistant`.
 
 ## 1. Confirmed Codebase State
 -   **Ingestion (`internal/ingest/`)**:

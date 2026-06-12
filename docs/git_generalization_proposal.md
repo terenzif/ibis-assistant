@@ -6,14 +6,14 @@
 
 ---
 
-Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai repository Git all'interno del codebase `ibis-arc`, introducendo la persistenza delle credenziali in SurrealDB, il supporto per override runtime tramite header HTTP e la risoluzione dello scenario "primo utilizzo non configurato" in un server centralizzato per team di sviluppo.
+Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai repository Git all'interno del codebase `ibis-assistant`, introducendo la persistenza delle credenziali in SurrealDB, il supporto per override runtime tramite header HTTP e la risoluzione dello scenario "primo utilizzo non configurato" in un server centralizzato per team di sviluppo.
 
 ---
 
 ## 1. Analisi del Contesto e Decisioni di Design
 
 ### Nota 1: Server di Team e Checkout Condivisi
-> **Scenario:** Ibis Arc è un server centrale a disposizione di un intero team di sviluppo (`localhost`). Gli sviluppatori lavorano sugli stessi repository privati ma possiedono credenziali personali distinte (es. Token PAT Azure DevOps o GitHub).
+> **Scenario:** Ibis Assistant è un server centrale a disposizione di un intero team di sviluppo (`localhost`). Gli sviluppatori lavorano sugli stessi repository privati ma possiedono credenziali personali distinte (es. Token PAT Azure DevOps o GitHub).
 
 **Soluzione Proposta:**
 1. **Repository Unico sul Server:** Poiché il server esegue l'indicizzazione del codice e la costruzione del grafo di conoscenza in SurrealDB in modo centralizzato, sul server esiste *una sola copia locale* del repository (salvata sotto `discovery_root/dynamic`).

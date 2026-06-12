@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-assistant/internal/auth"
 )
 
 var (

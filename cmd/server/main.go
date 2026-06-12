@@ -16,26 +16,26 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/ai"
-	"github.com/terenzif/ibis-arc/internal/auth"
-	"github.com/terenzif/ibis-arc/internal/cli"
-	"github.com/terenzif/ibis-arc/internal/config"
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/discovery"
-	"github.com/terenzif/ibis-arc/internal/ingest/code"
-	"github.com/terenzif/ibis-arc/internal/ingest/dynamic"
-	"github.com/terenzif/ibis-arc/internal/ingest/git"
-	"github.com/terenzif/ibis-arc/internal/ingest/logs"
-	"github.com/terenzif/ibis-arc/internal/logger"
-	"github.com/terenzif/ibis-arc/internal/optimization"
-	"github.com/terenzif/ibis-arc/internal/repopr"
-	repoprado "github.com/terenzif/ibis-arc/internal/repopr/providers/azuredevops"
-	"github.com/terenzif/ibis-arc/internal/search"
-	"github.com/terenzif/ibis-arc/internal/ticketing"
-	ticketado "github.com/terenzif/ibis-arc/internal/ticketing/providers/azuredevops"
-	ticketjira "github.com/terenzif/ibis-arc/internal/ticketing/providers/jira"
-	ticketredmine "github.com/terenzif/ibis-arc/internal/ticketing/providers/redmine"
-	"github.com/terenzif/ibis-arc/internal/gitrepo"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/auth"
+	"github.com/terenzif/ibis-assistant/internal/cli"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/discovery"
+	"github.com/terenzif/ibis-assistant/internal/ingest/code"
+	"github.com/terenzif/ibis-assistant/internal/ingest/dynamic"
+	"github.com/terenzif/ibis-assistant/internal/ingest/git"
+	"github.com/terenzif/ibis-assistant/internal/ingest/logs"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/optimization"
+	"github.com/terenzif/ibis-assistant/internal/repopr"
+	repoprado "github.com/terenzif/ibis-assistant/internal/repopr/providers/azuredevops"
+	"github.com/terenzif/ibis-assistant/internal/search"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
+	ticketado "github.com/terenzif/ibis-assistant/internal/ticketing/providers/azuredevops"
+	ticketjira "github.com/terenzif/ibis-assistant/internal/ticketing/providers/jira"
+	ticketredmine "github.com/terenzif/ibis-assistant/internal/ticketing/providers/redmine"
+	"github.com/terenzif/ibis-assistant/internal/gitrepo"
 	"errors"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -139,7 +139,7 @@ func main() {
 
 func printHelp() {
 	binName := filepath.Base(os.Args[0])
-	fmt.Println("Ibis Arc - MCP Knowledge Graph & Search Engine")
+	fmt.Println("Ibis Assistant - MCP Knowledge Graph & Search Engine")
 	fmt.Println("\nUso:")
 	fmt.Printf("  %s <comando> [opzioni]\n", binName)
 	fmt.Println("\nComandi del Server:")
@@ -147,7 +147,7 @@ func printHelp() {
 	fmt.Println("  start       Avvia il server in background come demone")
 	fmt.Println("  stop        Ferma il server avviato in background")
 	fmt.Println("  config      Avvia il wizard interattivo di configurazione")
-	fmt.Println("  install     Installa Ibis Arc come Servizio Windows ('ibis-arc')")
+	fmt.Println("  install     Installa Ibis Assistant come Servizio Windows ('ibis-assistant')")
 	fmt.Println("  uninstall   Disinstalla il Servizio Windows")
 	fmt.Println("\nComandi del Client CLI:")
 	fmt.Println("  ask          Invia una domanda di reasoning sul codice")
@@ -256,7 +256,7 @@ func runServer(ctx context.Context) {
 	}
 
 	// 3. Discovery Logic
-	logger.Info("Starting Ibis Arc (Mode: %s)...", cfg.Mode)
+	logger.Info("Starting Ibis Assistant (Mode: %s)...", cfg.Mode)
 	var activeRepos []string
 
 	if cfg.AutoScan {
@@ -1605,7 +1605,7 @@ func runServer(ctx context.Context) {
 		}()
 
 		// Block until a shutdown signal or context cancellation is received.
-		logger.Info("Ibis Arc is operational. Press Ctrl+C to stop.")
+		logger.Info("Ibis Assistant is operational. Press Ctrl+C to stop.")
 		select {
 		case <-sigChan:
 			logger.Info("Shutdown signal received.")

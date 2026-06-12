@@ -1,7 +1,7 @@
 # Implementation Plan - Knowledge Graph MCP Server
 
 ## [Goal] The "Universal Senior Engineer" Context Server
-Build **Ibis Arc**: a **Graph + RAG + Timeline** server that gives *any* AI (Claude, Copilot, Gemini) deep, structural, and historical understanding of the codebase.
+Build **Ibis Assistant**: a **Graph + RAG + Timeline** server that gives *any* AI (Claude, Copilot, Gemini) deep, structural, and historical understanding of the codebase.
 **Key Philosophy**:
 -   **Graph**: Deterministic facts (Commits, Branches, File Dependencies).
 -   **RAG**: Semantic content (Code meaning, Documentation).
@@ -27,7 +27,7 @@ Build **Ibis Arc**: a **Graph + RAG + Timeline** server that gives *any* AI (Cla
 
 
 ### 1. Project Restructuring
--   **Completed**: `ibis-arc` established.
+-   **Completed**: `ibis-assistant` established.
 -   **Completed**: Analyze `redmine_mcp` (Integrated into `internal/ingest/redmine`).
 -   **Completed**: Redmine User-Specific Authentication (Privacy & Permissions).
 -   **Scope**: Support **Multi-Repo** ingestion + **Redmine** integration.
@@ -35,7 +35,7 @@ Build **Ibis Arc**: a **Graph + RAG + Timeline** server that gives *any* AI (Cla
 ### 2. Service Architecture (Go + SurrealDB)
 **Library**: `mark3labs/mcp-go`.
 
-#### [NEW] `ibis-arc/`
+#### [NEW] `ibis-assistant/`
 -   `cmd/server/`: Flags: `-mode sse`, `-repos "..."`.
 -   `internal/schema/`: Defines the "Graph + Time + Intent" model.
     -   **Nodes**: `repo`, `branch`, `commit`, `author`, `file`, `issue` (Redmine), `tracker` (Epic/Feature).

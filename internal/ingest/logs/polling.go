@@ -13,10 +13,10 @@ import (
 	"github.com/hirochachacha/go-smb2"
 	"github.com/jlaffaye/ftp"
 	"github.com/pkg/sftp"
-	"github.com/terenzif/ibis-arc/internal/ai"
-	"github.com/terenzif/ibis-arc/internal/config"
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 	"golang.org/x/crypto/ssh"
 )
 

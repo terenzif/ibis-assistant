@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kardianos/service"
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type program struct {
@@ -22,13 +22,13 @@ func (p *program) Start(s service.Service) error {
 }
 
 func (p *program) run(ctx context.Context) {
-	logger.Info("Ibis Arc Service started.")
+	logger.Info("Ibis Assistant Service started.")
 	// Here we will call the main server logic, passing the context
 	runServer(ctx)
 }
 
 func (p *program) Stop(s service.Service) error {
-	logger.Info("Ibis Arc Service stopping.")
+	logger.Info("Ibis Assistant Service stopping.")
 	// Signal the server to stop
 	if p.cancel != nil {
 		p.cancel()
@@ -38,9 +38,9 @@ func (p *program) Stop(s service.Service) error {
 
 func handleService(cmd string) {
 	svcConfig := &service.Config{
-		Name:        "ibis-arc",
-		DisplayName: "Ibis Arc",
-		Description: "MCP Ibis Arc for Codebase and Git Analysis",
+		Name:        "ibis-assistant",
+		DisplayName: "Ibis Assistant",
+		Description: "MCP Ibis Assistant for Codebase and Git Analysis",
 		Arguments:   []string{"/run"}, // When running as service, use /run
 	}
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/auth"
+	"github.com/terenzif/ibis-assistant/internal/auth"
 )
 
 func TestGetIssue(t *testing.T) {

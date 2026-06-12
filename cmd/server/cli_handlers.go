@@ -10,7 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/config"
 )
 
 type mcpServerWrapper struct {
@@ -106,7 +106,7 @@ func serveJSONDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
 
 	discovery := map[string]interface{}{
 		"status":      "online",
-		"name":        "Ibis Arc MCP Server",
+		"name":        "Ibis Assistant MCP Server",
 		"version":     "1.1.0",
 		"environment": "production",
 		"endpoints": map[string]string{
@@ -118,7 +118,7 @@ func serveJSONDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
 		"documentation": map[string]interface{}{
 			"claude_desktop_config": map[string]interface{}{
 				"mcpServers": map[string]interface{}{
-					"ibis-arc": map[string]interface{}{
+					"ibis-assistant": map[string]interface{}{
 						"command": "npx",
 						"args": []string{
 							"-y",
@@ -168,8 +168,8 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ibis Arc - MCP Discovery & Integrazione</title>
-    <meta name="description" content="Dashboard di integrazione e auto-discovery per il server MCP Ibis Arc. Scopri gli endpoint, i tool disponibili e le istruzioni di configurazione.">
+    <title>Ibis Assistant - MCP Discovery & Integrazione</title>
+    <meta name="description" content="Dashboard di integrazione e auto-discovery per il server MCP Ibis Assistant. Scopri gli endpoint, i tool disponibili e le istruzioni di configurazione.">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -395,7 +395,7 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
 <body>
     <div class="container">
         <header>
-            <h1>Ibis Arc</h1>
+            <h1>Ibis Assistant</h1>
             <div class="subtitle">Discovery &amp; Integrazione Server MCP</div>
             <div class="status-badge" id="statusBadge">
                 <span class="pulse"></span>
@@ -406,7 +406,7 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
         <div class="grid">
             <div class="card">
                 <h2>Endpoint Attivi</h2>
-                <p>Ibis Arc espone due canali standard per la comunicazione MCP (Model Context Protocol) e due endpoint interni per le utilità:</p>
+                <p>Ibis Assistant espone due canali standard per la comunicazione MCP (Model Context Protocol) e due endpoint interni per le utilità:</p>
                 <div style="display: flex; flex-direction: column; gap: 0.8rem;">
                     <div>
                         <strong>SSE Endpoint:</strong> 
@@ -434,7 +434,7 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
                     <p>Inserisci questa configurazione nel tuo file <code>claude_desktop_config.json</code>:</p>
                     <pre><button class="copy-btn" onclick="copyText('claudeConfig')">Copia</button><code id="claudeConfig">{
   "mcpServers": {
-    "ibis-arc": {
+    "ibis-assistant": {
       "command": "npx",
       "args": [
         "-y",
@@ -447,10 +447,10 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
                 </div>
                 
                 <div id="tab-cursor" class="tab-content">
-                    <p>Per integrare Ibis Arc in Cursor o Windsurf:</p>
+                    <p>Per integrare Ibis Assistant in Cursor o Windsurf:</p>
                     <ol style="margin-left: 1.5rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 0.5rem;">
                         <li>Apri le impostazioni del tuo editor (Settings &gt; Features &gt; MCP).</li>
-                        <li>Aggiungi un nuovo server chiamandolo <strong>Ibis Arc</strong>.</li>
+                        <li>Aggiungi un nuovo server chiamandolo <strong>Ibis Assistant</strong>.</li>
                         <li>Imposta il tipo di trasporto su <strong>SSE</strong>.</li>
                         <li>Usa l'URL dell'endpoint: <code style="color: var(--accent);">http://localhost:%d/sse</code></li>
                     </ol>
@@ -462,13 +462,13 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
             <h2>Comandi CLI Locali</h2>
             <p>Puoi interagire con il server direttamente dalla tua shell locale lanciando comandi sull'eseguibile:</p>
             <pre><code># Fai domande sul codice del progetto indicizzato
-ibis-arc ask "Spiega la logica di autenticazione" --branch main
+ibis-assistant ask "Spiega la logica di autenticazione" --branch main
 
 # Indicizza una cartella di codice locale
-ibis-arc ingest code --path ./percorso/progetto
+ibis-assistant ingest code --path ./percorso/progetto
 
 # Cerca ticket associati su Redmine
-ibis-arc ticket search --query "login" --status open</code></pre>
+ibis-assistant ticket search --query "login" --status open</code></pre>
         </div>
 
         <div class="card">

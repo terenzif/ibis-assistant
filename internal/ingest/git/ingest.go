@@ -12,10 +12,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/logger"
-	"github.com/terenzif/ibis-arc/internal/schema"
-	"github.com/terenzif/ibis-arc/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 // IngestRepo analyzes the Git history and structure of a repository, populating the Knowledge Graph with commits, authors, and file relationships.

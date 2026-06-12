@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type GitHubRelease struct {

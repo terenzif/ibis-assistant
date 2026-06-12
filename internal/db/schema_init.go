@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/terenzif/ibis-arc/internal/logger"
-	"github.com/terenzif/ibis-arc/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 // InitSchema initializes the database schema by defining tables and indexes.

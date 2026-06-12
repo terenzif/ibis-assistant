@@ -144,7 +144,7 @@ func Load(paths ...string) *Config {
 		Port:               3030,
 		Mode:               "sse",
 		DBUrl:              "ws://localhost:8000/rpc",
-		DBNamespace:        "ibisarc",
+		DBNamespace:        "ibisassistant",
 		DBDatabase:         "analysis",
 		DBUser:             "root",
 		DBPassword:         "root",

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 // Reusing MockDB and MockRedmine from git_test.go (same package)

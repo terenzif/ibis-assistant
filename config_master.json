@@ -2,7 +2,7 @@
   "port": 3333,
   "mode": "sse",
   "db_url": "ws://127.0.0.1:8000/rpc",
-  "db_namespace": "ibisarc",
+  "db_namespace": "ibisassistant",
   "db_database": "analysis",
   "db_user": "root",
   "db_password": "root",

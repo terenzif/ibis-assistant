@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const pidFileName = "ibis-arc.pid"
+const pidFileName = "ibis-assistant.pid"
 
 func startBackgroundServer() {
 	// Trova percorso file PID

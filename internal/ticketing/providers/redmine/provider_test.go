@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/terenzif/ibis-arc/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 func TestProviderGetIssueUsesHeaderOverride(t *testing.T) {

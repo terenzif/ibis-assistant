@@ -1,6 +1,6 @@
 # Copilot Instructions — Ticketing + PR + Git MCP Client
 
-> Copia/incolla questa sezione nel progetto client che consuma il Ibis Arc.
+> Copia/incolla questa sezione nel progetto client che consuma il Ibis Assistant.
 
 ### Configurazione MCP client
 

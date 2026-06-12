@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/terenzif/ibis-arc/internal/auth"
-	"github.com/terenzif/ibis-arc/internal/config"
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/gitrepo"
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/auth"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/gitrepo"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 // SyncWorkspace assicura che il repo sia aggiornato usando il runner generalizzato.

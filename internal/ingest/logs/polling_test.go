@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/config"
 )
 
 type MockPollingDB struct {

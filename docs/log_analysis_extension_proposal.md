@@ -2,13 +2,13 @@
 
 > [!NOTE]
 > **Stato della proposta: IN VALUTAZIONE (Giugno 2026)**
-> Questo documento descrive la proposta architetturale per superare le limitazioni correnti del modulo di Log Analysis di `ibis-arc`, introducendo canali di ricezione di terze parti (Push API, Polling FTP/SFTP/SMB, MCP) e risolvendo i bug storici legati all'invio di notifiche e-mail.
+> Questo documento descrive la proposta architetturale per superare le limitazioni correnti del modulo di Log Analysis di `ibis-assistant`, introducendo canali di ricezione di terze parti (Push API, Polling FTP/SFTP/SMB, MCP) e risolvendo i bug storici legati all'invio di notifiche e-mail.
 
 ---
 
 ## 1. Analisi del Contesto e Limitazioni Attuali
 
-Il modulo di log analysis integrato in `ibis-arc` è stato inizialmente progettato ipotizzando che il servizio girasse sulla stessa macchina del produttore di log (Log Producer), eseguendo il monitoraggio locale "rolling" tramite `fsnotify` e `nxadm/tail`.
+Il modulo di log analysis integrato in `ibis-assistant` è stato inizialmente progettato ipotizzando che il servizio girasse sulla stessa macchina del produttore di log (Log Producer), eseguendo il monitoraggio locale "rolling" tramite `fsnotify` e `nxadm/tail`.
 
 Tuttavia, nell'uso reale (server centralizzato su rete aziendale), questo approccio presenta i seguenti limiti fondamentali:
 1. **Accoppiamento Fisico**: Il server non ha accesso diretto ai file system locali delle macchine o dei container in cui girano le applicazioni da monitorare.
@@ -33,7 +33,7 @@ flowchart TD
         E[Client / IDE Agent] -->|MCP Tool Call| F[MCP Server]
     end
 
-    subgraph Ibis Arc Server
+    subgraph Ibis Assistant Server
         B --> G[Log Pipeline Manager]
         D --> G
         F -->|analyze_log_stream| G
@@ -54,7 +54,7 @@ flowchart TD
 ---
 
 ### A. Modello Push: HTTP API & Webhook
-Verrà implementato un endpoint HTTP dedicato all'interno del server web di `ibis-arc` per ricevere i log.
+Verrà implementato un endpoint HTTP dedicato all'interno del server web di `ibis-assistant` per ricevere i log.
 
 * **Endpoint**: `POST /api/v1/logs/upload`
 * **Autenticazione**: API Key passata tramite header `X-API-Key` o Bearer Token.
@@ -176,7 +176,7 @@ Verranno introdotte le seguenti nuove sezioni in `config.json`:
     "encryption": "ssl_tls", 
     "user": "noreply@company.com",
     "password": "",
-    "from": "Ibis Arc <noreply@company.com>",
+    "from": "Ibis Assistant <noreply@company.com>",
     "to": "dev-team@company.com",
     "aggregation_window": "1h",
     "emergency_severity_threshold": 9
@@ -193,8 +193,8 @@ package logs
 import (
 	"context"
 	"time"
-	"github.com/terenzif/ibis-arc/internal/config"
-	"github.com/terenzif/ibis-arc/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
 )
 
 type PollingSource struct {

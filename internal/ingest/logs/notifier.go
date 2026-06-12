@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/config"
-	"github.com/terenzif/ibis-arc/internal/db"
-	"github.com/terenzif/ibis-arc/internal/logger"
-	"github.com/terenzif/ibis-arc/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 type Notifier struct {
@@ -37,7 +37,7 @@ func (n *Notifier) SendEmail(reportPath string) error {
 
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
-		"Subject: Ibis Arc - Log Report\r\n"+
+		"Subject: Ibis Assistant - Log Report\r\n"+
 		"Content-Type: text/plain; charset=\"UTF-8\"\r\n"+
 		"\r\n"+
 		"%s\r\n", n.Cfg.SMTP.To, n.Cfg.SMTP.From, string(content)))
@@ -75,7 +75,7 @@ func (n *Notifier) QueueNotification(ctx context.Context, project, logFile strin
 
 	// Send immediately if no aggregation window is configured
 	if n.Cfg.SMTP.AggregationWindow == "" || n.Cfg.SMTP.AggregationWindow == "none" {
-		subject := fmt.Sprintf("Ibis Arc: %s - Log Report", project)
+		subject := fmt.Sprintf("Ibis Assistant: %s - Log Report", project)
 		msg := []byte(fmt.Sprintf("To: %s\r\n"+
 			"From: %s\r\n"+
 			"Subject: %s\r\n"+
@@ -90,7 +90,7 @@ func (n *Notifier) QueueNotification(ctx context.Context, project, logFile strin
 
 	if n.DB == nil {
 		logger.Warn("DB is nil, sending log report immediately.")
-		subject := fmt.Sprintf("Ibis Arc: %s - Log Report (No DB Fallback)", project)
+		subject := fmt.Sprintf("Ibis Assistant: %s - Log Report (No DB Fallback)", project)
 		msg := []byte(fmt.Sprintf("To: %s\r\n"+
 			"From: %s\r\n"+
 			"Subject: %s\r\n"+
@@ -130,7 +130,7 @@ func (n *Notifier) ProcessPendingNotifications(ctx context.Context) error {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("# Ibis Arc - Aggregated Log Digest\r\n\r\n")
+	sb.WriteString("# Ibis Assistant - Aggregated Log Digest\r\n\r\n")
 	sb.WriteString(fmt.Sprintf("Report Date: %s\r\n\r\n", time.Now().Format(time.RFC822)))
 	sb.WriteString("The following errors were captured and aggregated during the monitoring window:\r\n\r\n")
 
@@ -162,7 +162,7 @@ func (n *Notifier) ProcessPendingNotifications(ctx context.Context) error {
 
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
-		"Subject: Ibis Arc - Log Digest (%d errors)\r\n"+
+		"Subject: Ibis Assistant - Log Digest (%d errors)\r\n"+
 		"Content-Type: text/plain; charset=\"UTF-8\"\r\n"+
 		"\r\n"+
 		"%s\r\n", n.Cfg.SMTP.To, n.Cfg.SMTP.From, len(rows), sb.String()))

@@ -1,13 +1,13 @@
-# Evaluation: Adapting "Why Similarity Isn’t Enough for Memory" to Ibis Arc
+# Evaluation: Adapting "Why Similarity Isn’t Enough for Memory" to Ibis Assistant
 
 ## Executive Summary
 The article "Why Similarity Isn’t Enough for Memory" argues that simple vector-based retrieval (RAG) is insufficient for robust agentic memory because it lacks **temporal awareness**, **conflict resolution**, and **structured relationships**. 
 
-The current `ibis-arc` implementation has the **structural foundation** (a Knowledge Graph in SurrealDB and Git/Redmine ingestion) but currently relies almost exclusively on stateless **vector similarity** for retrieval.
+The current `ibis-assistant` implementation has the **structural foundation** (a Knowledge Graph in SurrealDB and Git/Redmine ingestion) but currently relies almost exclusively on stateless **vector similarity** for retrieval.
 
 ## Gap Analysis
 
-| Feature | Article Requirement | Current `ibis-arc` Status | Gap |
+| Feature | Article Requirement | Current `ibis-assistant` Status | Gap |
 | :--- | :--- | :--- | :--- |
 | **Retrieval** | Hybrid (Vector + Graph) | Vector Only (`internal/search/search.go` performs cosine similarity on `file_chunk`) | **High**: Graph connections (Commit, Issue, Author) are ignored during search. |
 | **Short-term Memory** | Session Context (Current conversation) | None (Stateless API) | **High**: No concept of "Session" or "Conversation History". |
@@ -17,7 +17,7 @@ The current `ibis-arc` implementation has the **structural foundation** (a Knowl
 
 ## Proposed Implementation Roadmap
 
-To apply the arguments from the article, we propose the following evolutionary steps for the Ibis Arc:
+To apply the arguments from the article, we propose the following evolutionary steps for the Ibis Assistant:
 
 ### Phase 1: Activate the Graph (The "Cognify" Step)
 *Goal: Move from "Vector Search" to "Graph-Augmented Search".*
@@ -50,4 +50,4 @@ To apply the arguments from the article, we propose the following evolutionary s
     *   Store positive retrieval paths (Query -> File -> Issue) to reinforce them (Simple "Hebbian" learning).
 
 ## Conclusion
-The `ibis-arc` is well-positioned to implement the "Cognee" approach described in the article because it already uses **SurrealDB**, which natively supports both Vectors and Graph traversals. The missing piece is the **application logic** in `internal/search` to leverage the graph data that `internal/ingest` is already populating.
+The `ibis-assistant` is well-positioned to implement the "Cognee" approach described in the article because it already uses **SurrealDB**, which natively supports both Vectors and Graph traversals. The missing piece is the **application logic** in `internal/search` to leverage the graph data that `internal/ingest` is already populating.

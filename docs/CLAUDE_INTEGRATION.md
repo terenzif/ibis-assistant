@@ -1,19 +1,19 @@
 # Claude Desktop Integration Guide
 
-This guide describes how to connect **Claude Desktop** to the **Ibis Arc** using a local bridge.
+This guide describes how to connect **Claude Desktop** to the **Ibis Assistant** using a local bridge.
 
 ## 🌉 Why a Bridge?
 
-Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. However, the Ibis Arc runs as a remote HTTP/SSE (Server-Sent Events) service to allow multiple users to share the same knowledge graph.
+Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. However, the Ibis Assistant runs as a remote HTTP/SSE (Server-Sent Events) service to allow multiple users to share the same knowledge graph.
 
-To connect them, we use a lightweight **MCP Bridge** that runs locally on your machine, talks "Stdio" to Claude, and forwards messages to the remote Ibis Arc.
+To connect them, we use a lightweight **MCP Bridge** that runs locally on your machine, talks "Stdio" to Claude, and forwards messages to the remote Ibis Assistant.
 
 ---
 
 ## 🛠️ Installation & Setup
 
-### 1. Prerequisite: The Ibis Arc
-Ensure the Ibis Arc is running (e.g., on a shared dev server like `http://localhost:3030`).
+### 1. Prerequisite: The Ibis Assistant
+Ensure the Ibis Assistant is running (e.g., on a shared dev server like `http://localhost:3030`).
 
 ### 2. Build the Bridge Tool
 If you haven't already, compile the bridge tool included in this repository.
@@ -54,7 +54,7 @@ Restart Claude Desktop. You should see a green connection icon for "knowledge-gr
 
 ## 📚 Available Tools Reference
 
-The Ibis Arc exposes the following tools to Claude:
+The Ibis Assistant exposes the following tools to Claude:
 
 ### 🧠 Knowledge & Search
 *   **`ask_project(query)`**: The primary entry point. Asks a natural language question about the codebase, history, or logic. It uses agentic reasoning to explore the graph.

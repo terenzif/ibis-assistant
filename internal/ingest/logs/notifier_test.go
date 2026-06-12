@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/config"
 )
 
 func startMockSMTPServer(t *testing.T) (net.Listener, chan string) {

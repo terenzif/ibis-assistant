@@ -4,7 +4,7 @@ import (
 	"context"
 	"os/exec"
 
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 // Client is the unified AI client orchestrator.

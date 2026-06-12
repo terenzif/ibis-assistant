@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/terenzif/ibis-arc/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/ai"
 )
 
 func TestAskProjectAgentic_MultilineQuery(t *testing.T) {

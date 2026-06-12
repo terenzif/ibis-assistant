@@ -10,7 +10,7 @@ import (
 	"github.com/surrealdb/surrealdb.go" // Standard driver
 	"github.com/surrealdb/surrealdb.go/pkg/connection"
 	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
-	"github.com/terenzif/ibis-arc/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type Executor interface {

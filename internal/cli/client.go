@@ -72,8 +72,8 @@ func ExecuteCLI(args []string) {
 
 // PrintCLIHelp stampa la guida all'uso dei comandi CLI
 func PrintCLIHelp() {
-	fmt.Println("Uso dei comandi CLI di Ibis Arc:")
-	fmt.Println("  ibis-arc <comando> [opzioni]")
+	fmt.Println("Uso dei comandi CLI di Ibis Assistant:")
+	fmt.Println("  ibis-assistant <comando> [opzioni]")
 	fmt.Println("\nComandi disponibili:")
 	fmt.Println("  ask          Invia una domanda di reasoning sul codice del progetto")
 	fmt.Println("  ingest       Sincronizza/indicizza codice o cronologia Git")
@@ -84,7 +84,7 @@ func PrintCLIHelp() {
 	fmt.Println("  memory       Aggiunge memorie collaborative sul progetto")
 	fmt.Println("  outcome      Salva deduzioni/conclusioni di reasoning")
 	fmt.Println("  optimize     Avvia il ciclo di auto-ottimizzazione RAFT")
-	fmt.Println("\nUsa 'ibis-arc <comando> --help' per visualizzare i dettagli di ciascun comando.")
+	fmt.Println("\nUsa 'ibis-assistant <comando> --help' per visualizzare i dettagli di ciascun comando.")
 }
 
 func handleAsk(args []string) {
@@ -94,7 +94,7 @@ func handleAsk(args []string) {
 
 	if len(fs.Args()) == 0 {
 		fmt.Println("Errore: specifica la domanda da porre all'IA.")
-		fmt.Println("Uso: ibis-arc ask \"tua domanda\" [--branch <branch>]")
+		fmt.Println("Uso: ibis-assistant ask \"tua domanda\" [--branch <branch>]")
 		os.Exit(1)
 	}
 
@@ -116,8 +116,8 @@ func handleIngest(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Errore: specifica cosa indicizzare (code o git).")
 		fmt.Println("Uso:")
-		fmt.Println("  ibis-arc ingest code [--path <percorso>]")
-		fmt.Println("  ibis-arc ingest git --name <progetto> --url <url_git> --branch <branch> [--commit <hash>]")
+		fmt.Println("  ibis-assistant ingest code [--path <percorso>]")
+		fmt.Println("  ibis-assistant ingest git --name <progetto> --url <url_git> --branch <branch> [--commit <hash>]")
 		os.Exit(1)
 	}
 
@@ -325,7 +325,7 @@ func handleTicket(args []string) {
 	case "comment":
 		if len(subArgs) < 2 {
 			fmt.Println("Errore: ID ticket e commento richiesti.")
-			fmt.Println("Uso: ibis-arc ticket comment <id> \"commento\" [--provider <p>] [--project <k>]")
+			fmt.Println("Uso: ibis-assistant ticket comment <id> \"commento\" [--provider <p>] [--project <k>]")
 			os.Exit(1)
 		}
 		id := subArgs[0]
@@ -353,7 +353,7 @@ func handleTicket(args []string) {
 	case "assign":
 		if len(subArgs) < 2 {
 			fmt.Println("Errore: ID ticket e assegnatario richiesti.")
-			fmt.Println("Uso: ibis-arc ticket assign <id> <assegnatario> [--provider <p>] [--project <k>]")
+			fmt.Println("Uso: ibis-assistant ticket assign <id> <assegnatario> [--provider <p>] [--project <k>]")
 			os.Exit(1)
 		}
 		id := subArgs[0]
@@ -381,7 +381,7 @@ func handleTicket(args []string) {
 	case "transition":
 		if len(subArgs) < 2 {
 			fmt.Println("Errore: ID ticket e stato/transizione richiesti.")
-			fmt.Println("Uso: ibis-arc ticket transition <id> <transizione> [--provider <p>] [--project <k>]")
+			fmt.Println("Uso: ibis-assistant ticket transition <id> <transizione> [--provider <p>] [--project <k>]")
 			os.Exit(1)
 		}
 		id := subArgs[0]
@@ -802,7 +802,7 @@ func handleOptimize(args []string) {
 	callServerTool(payload)
 }
 
-// callServerTool inoltra la chiamata all'endpoint del server Ibis Arc locale
+// callServerTool inoltra la chiamata all'endpoint del server Ibis Assistant locale
 var callServerTool = func(payload ToolCallPayload) {
 	// Carica config locale per leggere la porta del server
 	serverPort := 3030
@@ -827,7 +827,7 @@ var callServerTool = func(payload ToolCallPayload) {
 	client := &http.Client{Timeout: 5 * time.Minute} // Timeout lungo per operazioni AI
 	resp, err := client.Post(serverURL, "application/json", bytes.NewBuffer(reqBytes))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Errore di connessione al server: %v\nAssicurati che il server sia avviato (es. con 'ibis-arc start' o 'ibis-arc run').\n", err)
+		fmt.Fprintf(os.Stderr, "Errore di connessione al server: %v\nAssicurati che il server sia avviato (es. con 'ibis-assistant start' o 'ibis-assistant run').\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()

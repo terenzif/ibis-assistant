@@ -6,7 +6,7 @@
 
 ---
 
-Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai modelli di Intelligenza Artificiale per la generazione di **Embedding** e per il **Reasoning (Completamento/LLM)** all'interno del codebase `ibis-arc`, impostando come default un **Ollama Runner locale gestito on-demand**.
+Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai modelli di Intelligenza Artificiale per la generazione di **Embedding** e per il **Reasoning (Completamento/LLM)** all'interno del codebase `ibis-assistant`, impostando come default un **Ollama Runner locale gestito on-demand**.
 
 ---
 

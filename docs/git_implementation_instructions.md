@@ -76,8 +76,8 @@
    import (
        "context"
        "fmt"
-       "github.com/terenzif/ibis-arc/internal/db"
-       "github.com/terenzif/ibis-arc/internal/schema"
+       "github.com/terenzif/ibis-assistant/internal/db"
+       "github.com/terenzif/ibis-assistant/internal/schema"
    )
 
    type CredentialStore struct {

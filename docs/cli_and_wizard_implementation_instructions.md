@@ -66,17 +66,17 @@
 ### Passi operativi:
 1. Implementa in `main.go` la logica di avvio in background:
    * Quando viene lanciato il comando `start` o `run --daemon`:
-     * Controlla se `ibis-arc.pid` esiste già ed è associato a un processo attivo (se sì, fallisci indicando che il server è già in esecuzione).
+     * Controlla se `ibis-assistant.pid` esiste già ed è associato a un processo attivo (se sì, fallisci indicando che il server è già in esecuzione).
      * Esegui l'eseguibile stesso (`os.Executable()`) passando gli argomenti di esecuzione (es. `run`) e reindirizzando `stdout` e `stderr` a un file di log (es. `server.log`).
-     * Scrivi il PID del nuovo processo figlio nel file `ibis-arc.pid` nella directory dell'eseguibile o in quella corrente.
+     * Scrivi il PID del nuovo processo figlio nel file `ibis-assistant.pid` nella directory dell'eseguibile o in quella corrente.
      * Stampa un messaggio del tipo `Server avviato in background con PID <PID>` ed esci immediatamente ritornando il controllo alla shell.
 2. Implementa la logica di stop:
    * Quando viene lanciato il comando `stop`:
-     * Leggi il PID dal file `ibis-arc.pid`.
+     * Leggi il PID dal file `ibis-assistant.pid`.
      * Se il file non esiste, stampa un errore (`Server non in esecuzione`).
      * Trova il processo (`os.FindProcess(pid)`) e invia un segnale di terminazione controllata (`syscall.SIGTERM` o `os.Interrupt` su Windows).
      * Attendi brevemente per verificare che il processo si sia arrestato.
-     * Rimuovi il file `ibis-arc.pid`.
+     * Rimuovi il file `ibis-assistant.pid`.
      * Stampa `Server arrestato correttamente`.
 
 ---
@@ -120,7 +120,7 @@
      ```
    * **Altro (Browser / Client Web)**:
      Restituisce una pagina HTML o Markdown autodescrittiva che:
-     * Spiega l'utilità del server Ibis Arc.
+     * Spiega l'utilità del server Ibis Assistant.
      * Mostra frammenti di configurazione JSON pronti per l'integrazione in Claude Desktop, Cursor e Windsurf.
      * Elenca i comandi della CLI e i tool MCP abilitati nel sistema.
 

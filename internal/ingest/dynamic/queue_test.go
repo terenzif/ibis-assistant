@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/terenzif/ibis-arc/internal/auth"
-	"github.com/terenzif/ibis-arc/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/auth"
+	"github.com/terenzif/ibis-assistant/internal/config"
 )
 
 type mockTokenProvider struct {
