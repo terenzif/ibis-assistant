@@ -21,7 +21,7 @@ import (
 )
 
 type AIClient interface {
-	IsFunctional() bool
+	IsEmbeddingFunctional() bool
 }
 
 // IngestCodebase scans the repository and updates vector embeddings for any modified or new files.
@@ -33,8 +33,8 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 
 	logger.Info("Starting code analysis for: %s", absPath)
 
-	if aiClient == nil || !aiClient.IsFunctional() {
-		return fmt.Errorf("AI vectorization is disabled: no Gemini API keys provided (set GEMINI_API_KEY or gemini_keys in config.json)")
+	if aiClient == nil || !aiClient.IsEmbeddingFunctional() {
+		return fmt.Errorf("AI vectorization is disabled: embedding provider not configured (set embedding.provider and embedding.model in config.json)")
 	}
 
 	// Load Ignore Patterns

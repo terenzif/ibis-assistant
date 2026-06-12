@@ -165,7 +165,21 @@ func EnsureOllamaBinary(ctx context.Context) (string, error) {
 		logger.Info("Executing silent installation of Ollama...")
 		setupCmd := exec.CommandContext(ctx, setupPath, "/VERYSILENT", "/NORESTART")
 		if errRun := setupCmd.Run(); errRun != nil {
-			return "", fmt.Errorf("failed to execute Ollama installation: %w", errRun)
+			// Exit code 740 = ERROR_ELEVATION_REQUIRED on Windows.
+			// Retry via PowerShell Start-Process -Verb RunAs to request UAC elevation.
+			if isElevationRequired(errRun) {
+				logger.Info("Ollama installer requires admin privileges. Requesting UAC elevation via PowerShell...")
+				psCmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-Command",
+					fmt.Sprintf(`Start-Process -FilePath '%s' -ArgumentList '/VERYSILENT','/NORESTART' -Verb RunAs -Wait`, setupPath))
+				if errPS := psCmd.Run(); errPS != nil {
+					return "", fmt.Errorf(
+						"Ollama installation requires administrator privileges. "+
+							"Please run the installer manually from: %s\n(PowerShell error: %w)",
+						setupPath, errPS)
+				}
+			} else {
+				return "", fmt.Errorf("failed to execute Ollama installation: %w", errRun)
+			}
 		}
 
 		// Wait a brief moment for the installer to finish writing files
@@ -381,4 +395,17 @@ func downloadFile(ctx context.Context, url, filepathStr string) error {
 
 	_, err = io.Copy(out, resp.Body)
 	return err
+}
+
+// isElevationRequired returns true if the error indicates that the process
+// requires administrator privileges (Windows ERROR_ELEVATION_REQUIRED = 740).
+func isElevationRequired(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "740") ||
+		strings.Contains(msg, "elevation required") ||
+		strings.Contains(msg, "access is denied") ||
+		strings.Contains(msg, "accesso negato")
 }

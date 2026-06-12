@@ -1,8 +1,13 @@
 # Guida Operativa in Fasi: Interfaccia CLI, Gestione Background e Wizard di Configurazione
 
 > [!NOTE]
-> **Stato dell'implementazione: PIANIFICATO**
-> Questa guida operativa definisce le specifiche di dettaglio per l'implementazione incrementale del wizard di configurazione (veloce/dettagliato), dei comandi di controllo del demone (`start`/`stop`), del client CLI per i tool MCP, e dell'endpoint di auto-discovery sulla radice del server.
+> **Stato dell'implementazione: COMPLETATO** (commit `b139255`)
+> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale.
+>
+> **Rischi residui identificati (post-naming analysis):**
+> - Portabilità PID/log path quando l'eseguibile parte da directory non standard (es. `System32` in modalità service Windows).
+> - Parità di comportamento tra modalità service (`/run`) e run interattivo per gli hook di shutdown.
+> - UX error handling CLI quando server non raggiungibile: attualmente l'errore è generico HTTP.
 
 ---
 

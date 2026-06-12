@@ -277,6 +277,7 @@ func TestProcessPendingNotifications(t *testing.T) {
 			if strings.HasPrefix(sql, "SELECT") {
 				return []interface{}{
 					map[string]interface{}{
+						"id":           "log_pending_notification:abc123",
 						"project":      "my-project",
 						"log_file":     "app.log",
 						"errors_count": float64(5),

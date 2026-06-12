@@ -217,7 +217,19 @@ Log text:
 	}
 
 	var errors []SemanticError
-	cleanJSON := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(candidate.Content.Parts[0].Text), "```"), "```json")
+	cleanJSON := strings.TrimSpace(candidate.Content.Parts[0].Text)
+	// Strip markdown fences if present (handles ``` or ```json with optional trailing newlines)
+	if strings.HasPrefix(cleanJSON, "```") {
+		// Remove opening fence line
+		if idx := strings.Index(cleanJSON, "\n"); idx != -1 {
+			cleanJSON = cleanJSON[idx+1:]
+		}
+	}
+	if strings.HasSuffix(strings.TrimRight(cleanJSON, " \t\r\n"), "```") {
+		cleanJSON = strings.TrimRight(cleanJSON, " \t\r\n")
+		cleanJSON = cleanJSON[:len(cleanJSON)-3]
+	}
+	cleanJSON = strings.TrimSpace(cleanJSON)
 	if err := json.Unmarshal([]byte(cleanJSON), &errors); err != nil {
 		logger.Debug("Failed to parse AI JSON for %s: %v", a.Path, err)
 		return results, fmt.Errorf("failed to parse AI JSON: %w", err)

@@ -30,10 +30,14 @@ func startBackgroundServer() {
 		os.Exit(1)
 	}
 
-	// Apri o crea il file di log
-	logFile, err := os.OpenFile("server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	// Apri o crea il file di log nella stessa directory del PID (exe dir)
+	logPath := "server.log"
+	if exe, err := os.Executable(); err == nil {
+		logPath = filepath.Join(filepath.Dir(exe), "server.log")
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Errore apertura file log server.log: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Errore apertura file log %s: %v\n", logPath, err)
 		os.Exit(1)
 	}
 	defer logFile.Close()

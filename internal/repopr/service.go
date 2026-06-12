@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	jiraPattern    = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
-	redminePattern = regexp.MustCompile(`#\d+`)
+	jiraPattern = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
+	// Redmine: #N deve essere preceduto da spazio, inizio riga, parentesi o virgola.
+	// Evita falsi positivi su URL (#anchor), commenti GitHub e altri tracker.
+	redminePattern = regexp.MustCompile(`(?:^|[\s,(])(#\d+)`)
 	adoPattern     = regexp.MustCompile(`\b[A-Z][A-Z0-9]+#\d+\b`)
 )
 
@@ -142,7 +144,16 @@ func detectTicketIDs(input string) []string {
 	}
 	collect(jiraPattern.FindAllString(input, -1))
 	collect(adoPattern.FindAllString(input, -1))
-	collect(redminePattern.FindAllString(input, -1))
+	// Redmine uses a capturing group: extract group[1] only (the #N part)
+	for _, sub := range redminePattern.FindAllStringSubmatch(input, -1) {
+		if len(sub) > 1 {
+			m := strings.TrimSpace(sub[1])
+			if m != "" && !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
 	sort.Strings(out)
 	return out
 }

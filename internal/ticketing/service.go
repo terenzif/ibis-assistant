@@ -313,19 +313,64 @@ func (s *Service) resolveWorkflowTarget(ctx context.Context, provider ProviderNa
 
 func inferStatusID(action string, statuses []Status) string {
 	action = normalizeWorkflowAction(action)
+
+	// Multilingual keyword sets per workflow action.
+	resolveNames := map[string]bool{
+		// EN
+		"resolved": true, "done": true, "fixed": true, "complete": true, "completed": true, "finished": true, "closed as resolved": true,
+		// IT
+		"risolto": true, "completato": true, "terminato": true,
+		// FR
+		"résolu": true, "terminé": true, "fait": true,
+		// DE
+		"gelöst": true, "erledigt": true, "abgeschlossen": true,
+		// ES
+		"resuelto": true, "completado": true, "terminado": true,
+		// PT
+		"resolvido": true, "concluído": true,
+	}
+	closeNames := map[string]bool{
+		// EN
+		"closed": true, "wont fix": true, "won't fix": true, "invalid": true, "duplicate": true, "rejected": true,
+		// IT
+		"chiuso": true, "rifiutato": true, "duplicato": true,
+		// FR
+		"fermé": true, "rejeté": true,
+		// DE
+		"geschlossen": true, "abgelehnt": true,
+		// ES
+		"cerrado": true, "rechazado": true,
+		// PT
+		"fechado": true, "rejeitado": true,
+	}
+	reopenNames := map[string]bool{
+		// EN
+		"reopened": true, "open": true, "new": true, "in progress": true, "reopen": true,
+		// IT
+		"riaperto": true, "aperto": true, "nuovo": true,
+		// FR
+		"rouvert": true, "ouvert": true, "nouveau": true,
+		// DE
+		"wiedereröffnet": true, "offen": true, "neu": true,
+		// ES
+		"reabierto": true, "abierto": true, "nuevo": true,
+		// PT
+		"reaberto": true, "aberto": true, "novo": true,
+	}
+
 	for _, status := range statuses {
 		name := strings.ToLower(strings.TrimSpace(status.Name))
 		switch action {
 		case WorkflowResolve:
-			if name == "resolved" || name == "risolto" || name == "done" || name == "fixed" {
+			if resolveNames[name] {
 				return status.ID
 			}
 		case WorkflowClose:
-			if name == "closed" || name == "chiuso" {
+			if closeNames[name] {
 				return status.ID
 			}
 		case WorkflowReopen:
-			if name == "reopened" || name == "open" || name == "riaperto" {
+			if reopenNames[name] {
 				return status.ID
 			}
 		}

@@ -199,7 +199,12 @@ func isAuthError(err error, output []byte) bool {
 		strings.Contains(outStr, "could not read username") ||
 		strings.Contains(outStr, "fatal: could not read from remote repository") ||
 		strings.Contains(outStr, "permission denied (publickey)") ||
-		strings.Contains(outStr, "could not read passphrase")
+		strings.Contains(outStr, "could not read passphrase") ||
+		strings.Contains(outStr, "the requested url returned error: 403") ||
+		strings.Contains(outStr, "the requested url returned error: 401") ||
+		strings.Contains(outStr, "invalid username or password") ||
+		strings.Contains(outStr, "repository not found") ||
+		strings.Contains(outStr, "access denied")
 }
 
 func detectProvider(rawURL string) string {

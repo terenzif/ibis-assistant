@@ -134,10 +134,19 @@ func (n *Notifier) ProcessPendingNotifications(ctx context.Context) error {
 	sb.WriteString(fmt.Sprintf("Report Date: %s\r\n\r\n", time.Now().Format(time.RFC822)))
 	sb.WriteString("The following errors were captured and aggregated during the monitoring window:\r\n\r\n")
 
+	// Collect IDs while building the digest body.
+	// We delete BEFORE sending so that if the SMTP connection drops mid-send,
+	// we don't re-send already-processed events on the next run.
+	// Trade-off: at-most-once delivery (no duplicate) vs at-least-once (with retry).
+	// For error digests, duplicates are more annoying than missed events.
+	var collectedIDs []string
 	for _, r := range rows {
 		row, ok := r.(map[string]interface{})
 		if !ok {
 			continue
+		}
+		if id, ok := row["id"].(string); ok && id != "" {
+			collectedIDs = append(collectedIDs, id)
 		}
 		proj, _ := row["project"].(string)
 		logFile, _ := row["log_file"].(string)
@@ -160,6 +169,11 @@ func (n *Notifier) ProcessPendingNotifications(ctx context.Context) error {
 		sb.WriteString("```\r\n\r\n")
 	}
 
+	// Delete records before sending to avoid duplicates on SMTP failure.
+	for _, id := range collectedIDs {
+		n.DB.Execute(ctx, fmt.Sprintf("DELETE %s;", id))
+	}
+
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
 		"Subject: Ibis Assistant - Log Digest (%d errors)\r\n"+
@@ -172,12 +186,7 @@ func (n *Notifier) ProcessPendingNotifications(ctx context.Context) error {
 		return fmt.Errorf("failed to send digest email: %w", err)
 	}
 
-	_, err = n.DB.Execute(ctx, fmt.Sprintf("DELETE %s;", schema.TableLogPendingNotification))
-	if err != nil {
-		logger.Error("Failed to clear pending notifications queue: %v", err)
-	}
-
-	logger.Info("Sent digest email containing %d events and cleared queue", len(rows))
+	logger.Info("Sent digest email containing %d events and cleared queue", len(collectedIDs))
 	return nil
 }
 

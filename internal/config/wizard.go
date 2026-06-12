@@ -26,7 +26,7 @@ func RunWizard() error {
 	}
 
 	// 1. Carica i default di base caricandoli da Load(path non esistente) o instanziandoli direttamente
-	cfg := Load("non_existent_file_to_get_defaults.json")
+	cfg := NewDefaultConfig()
 
 	var err error
 	if choice == "2" {

@@ -1,8 +1,13 @@
 # Guida Operativa in Fasi: Estensione Log Analysis e Riforma SMTP
 
 > [!NOTE]
-> **Stato dell'implementazione: PIANIFICATO**
-> Questa guida operativa definisce il piano di implementazione suddiviso in **fasi incrementali e sequenziali**. Ciascuna fase rappresenta un traguardo autocontenuto con verifiche di compilazione e test intermedi.
+> **Stato dell'implementazione: COMPLETATO** (commit `cf677b3`)
+> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale.
+>
+> **Rischi residui identificati (post-naming analysis):**
+> - Pattern matching polling + archiviazione file in scenari reali (permessi/path share SMB su Windows).
+> - Determinismo parser AI JSON su log rumorosi o non JSON-friendly (dipende dalla qualità del modello).
+> - Comportamento digest su carico alto: crescita della coda e garanzia di delete post-send da verificare in produzione.
 
 ---
 

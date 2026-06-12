@@ -2,6 +2,8 @@ package logs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -141,11 +143,6 @@ func pollFTP(ctx context.Context, source config.PollingSource, dbClient db.Execu
 
 		remotePath := filepath.ToSlash(filepath.Join(source.RemoteDir, entry.Name))
 
-		alreadyProcessed, err := isFileProcessed(ctx, dbClient, remotePath, int64(entry.Size))
-		if err != nil || alreadyProcessed {
-			continue
-		}
-
 		resp, err := conn.Retr(remotePath)
 		if err != nil {
 			logger.Error("FTP retrieve failed for %s: %v", remotePath, err)
@@ -156,6 +153,12 @@ func pollFTP(ctx context.Context, source config.PollingSource, dbClient db.Execu
 		resp.Close()
 		if err != nil {
 			logger.Error("FTP read failed for %s: %v", remotePath, err)
+			continue
+		}
+
+		hash := contentHash(bodyBytes)
+		alreadyProcessed, err := isFileProcessed(ctx, dbClient, hash)
+		if err != nil || alreadyProcessed {
 			continue
 		}
 
@@ -170,7 +173,7 @@ func pollFTP(ctx context.Context, source config.PollingSource, dbClient db.Execu
 			}
 		}
 
-		recordFileProcessed(ctx, dbClient, remotePath, int64(entry.Size))
+		recordFileProcessed(ctx, dbClient, remotePath, hash)
 	}
 
 	return nil
@@ -187,8 +190,20 @@ func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Exec
 		Auth: []ssh.AuthMethod{
 			ssh.Password(source.Password),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		Timeout: 10 * time.Second,
+	}
+
+	if source.KnownHostKey != "" {
+		// Parse the known host key and use a fixed verifier.
+		// Format: "ssh-ed25519 AAAA..." or "ssh-rsa AAAA..."
+		pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(source.KnownHostKey))
+		if err != nil {
+			return fmt.Errorf("SFTP: invalid known_host_key for source %s: %w", source.Name, err)
+		}
+		sshConfig.HostKeyCallback = ssh.FixedHostKey(pk)
+	} else {
+		logger.Warn("SFTP source '%s': known_host_key not configured, host key verification disabled. Set known_host_key in config for production use.", source.Name)
+		sshConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey() //nolint:gosec
 	}
 
 	sshConn, err := ssh.Dial("tcp", addr, sshConfig)
@@ -220,11 +235,6 @@ func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Exec
 
 		remotePath := filepath.ToSlash(filepath.Join(source.RemoteDir, file.Name()))
 
-		alreadyProcessed, err := isFileProcessed(ctx, dbClient, remotePath, file.Size())
-		if err != nil || alreadyProcessed {
-			continue
-		}
-
 		f, err := client.Open(remotePath)
 		if err != nil {
 			logger.Error("SFTP open failed for %s: %v", remotePath, err)
@@ -235,6 +245,12 @@ func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Exec
 		f.Close()
 		if err != nil {
 			logger.Error("SFTP read failed for %s: %v", remotePath, err)
+			continue
+		}
+
+		hash := contentHash(bodyBytes)
+		alreadyProcessed, err := isFileProcessed(ctx, dbClient, hash)
+		if err != nil || alreadyProcessed {
 			continue
 		}
 
@@ -250,7 +266,7 @@ func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Exec
 			}
 		}
 
-		recordFileProcessed(ctx, dbClient, remotePath, file.Size())
+		recordFileProcessed(ctx, dbClient, remotePath, hash)
 	}
 
 	return nil
@@ -316,11 +332,6 @@ func pollSMB(ctx context.Context, source config.PollingSource, dbClient db.Execu
 		remotePath := filepath.ToSlash(filepath.Join(subDir, file.Name()))
 		fullDBPath := fmt.Sprintf("smb://%s/%s/%s", source.Host, shareName, remotePath)
 
-		alreadyProcessed, err := isFileProcessed(ctx, dbClient, fullDBPath, file.Size())
-		if err != nil || alreadyProcessed {
-			continue
-		}
-
 		f, err := fs.Open(remotePath)
 		if err != nil {
 			logger.Error("SMB open failed for %s: %v", remotePath, err)
@@ -334,6 +345,13 @@ func pollSMB(ctx context.Context, source config.PollingSource, dbClient db.Execu
 			continue
 		}
 
+		hash := contentHash(bodyBytes)
+		alreadyProcessed, err := isFileProcessed(ctx, dbClient, hash)
+		if err != nil || alreadyProcessed {
+			continue
+		}
+
+
 		lines := strings.Split(string(bodyBytes), "\n")
 		processLogLines(ctx, source.ProjectName, file.Name(), lines, dbClient, aiClient, cfg)
 
@@ -346,17 +364,25 @@ func pollSMB(ctx context.Context, source config.PollingSource, dbClient db.Execu
 			}
 		}
 
-		recordFileProcessed(ctx, dbClient, fullDBPath, file.Size())
+		recordFileProcessed(ctx, dbClient, fullDBPath, hash)
 	}
 
 	return nil
 }
 
-func isFileProcessed(ctx context.Context, dbClient db.Executor, path string, size int64) (bool, error) {
+// contentHash returns the SHA256 hex digest of the given content.
+// Used to deduplicate log files by content rather than by path+size,
+// so that files with the same name/size but different content are reprocessed.
+func contentHash(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func isFileProcessed(ctx context.Context, dbClient db.Executor, hash string) (bool, error) {
 	if dbClient == nil {
 		return false, nil
 	}
-	res, err := dbClient.Execute(ctx, fmt.Sprintf("SELECT id FROM log_processed_file WHERE path = '%s' AND size = %d;", db.EscapeSQL(path), size))
+	res, err := dbClient.Execute(ctx, fmt.Sprintf("SELECT id FROM log_processed_file WHERE hash = '%s';", hash))
 	if err != nil {
 		return false, err
 	}
@@ -367,14 +393,14 @@ func isFileProcessed(ctx context.Context, dbClient db.Executor, path string, siz
 	return false, nil
 }
 
-func recordFileProcessed(ctx context.Context, dbClient db.Executor, path string, size int64) {
+func recordFileProcessed(ctx context.Context, dbClient db.Executor, path string, hash string) {
 	if dbClient == nil {
 		return
 	}
-	id := fmt.Sprintf("log_processed_file:%s", db.SanitizeID(filepath.Base(path)))
+	id := fmt.Sprintf("log_processed_file:%s", db.SanitizeID(hash))
 	timestamp := time.Now().Format(time.RFC3339)
-	dbClient.Execute(ctx, fmt.Sprintf("UPDATE %s SET path = '%s', size = %d, processed_at = '%s';",
-		id, db.EscapeSQL(path), size, timestamp))
+	dbClient.Execute(ctx, fmt.Sprintf("UPDATE %s SET path = '%s', hash = '%s', processed_at = '%s';",
+		id, db.EscapeSQL(path), hash, timestamp))
 }
 
 func processLogLines(ctx context.Context, project, fileName string, lines []string, dbClient db.Executor, aiClient *ai.Client, cfg *config.Config) {

@@ -42,9 +42,7 @@ type MockAI struct {
 	// No methods needed for async ingestion testing
 }
 
-func (m *MockAI) IsFunctional() bool {
-	return true
-}
+func (m *MockAI) IsEmbeddingFunctional() bool { return true }
 
 func getFileHashHelper(path string) string {
 	f, _ := os.Open(path)

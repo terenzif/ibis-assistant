@@ -163,7 +163,13 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
 		</div>`, info.Tool.Name, info.Tool.Description, schemaEscaped))
 	}
 
-	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
+	replacer := strings.NewReplacer(
+		"{{PORT}}", fmt.Sprintf("%d", cfg.Port),
+		"{{TOOL_COUNT}}", fmt.Sprintf("%d", len(cliHandlers)),
+		"{{TOOLS_HTML}}", toolsHTML.String(),
+	)
+
+	htmlTemplate := `<!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
@@ -399,7 +405,7 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
             <div class="subtitle">Discovery &amp; Integrazione Server MCP</div>
             <div class="status-badge" id="statusBadge">
                 <span class="pulse"></span>
-                Server Online (Porta %d)
+                Server Online (Porta {{PORT}})
             </div>
         </header>
 
@@ -410,15 +416,15 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
                 <div style="display: flex; flex-direction: column; gap: 0.8rem;">
                     <div>
                         <strong>SSE Endpoint:</strong> 
-                        <pre style="padding: 0.5rem; margin: 0.25rem 0;"><code>http://localhost:%d/sse</code></pre>
+                        <pre style="padding: 0.5rem; margin: 0.25rem 0;"><code>http://localhost:{{PORT}}/sse</code></pre>
                     </div>
                     <div>
                         <strong>Streamable HTTP (Standard):</strong> 
-                        <pre style="padding: 0.5rem; margin: 0.25rem 0;"><code>http://localhost:%d/mcp</code></pre>
+                        <pre style="padding: 0.5rem; margin: 0.25rem 0;"><code>http://localhost:{{PORT}}/mcp</code></pre>
                     </div>
                     <div>
                         <strong>CLI Bridge Endpoint:</strong> 
-                        <pre style="padding: 0.5rem; margin: 0.25rem 0;"><code>http://localhost:%d/api/v1/cli/call</code></pre>
+                        <pre style="padding: 0.5rem; margin: 0.25rem 0;"><code>http://localhost:{{PORT}}/api/v1/cli/call</code></pre>
                     </div>
                 </div>
             </div>
@@ -439,7 +445,7 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
       "args": [
         "-y",
         "@modelcontextprotocol/inspector",
-        "http://localhost:%d/sse"
+        "http://localhost:{{PORT}}/sse"
       ]
     }
   }
@@ -452,7 +458,7 @@ func serveHTMLDiscovery(w http.ResponseWriter, r *http.Request, cfg *config.Conf
                         <li>Apri le impostazioni del tuo editor (Settings &gt; Features &gt; MCP).</li>
                         <li>Aggiungi un nuovo server chiamandolo <strong>Ibis Assistant</strong>.</li>
                         <li>Imposta il tipo di trasporto su <strong>SSE</strong>.</li>
-                        <li>Usa l'URL dell'endpoint: <code style="color: var(--accent);">http://localhost:%d/sse</code></li>
+                        <li>Usa l'URL dell'endpoint: <code style="color: var(--accent);">http://localhost:{{PORT}}/sse</code></li>
                     </ol>
                 </div>
             </div>
@@ -472,9 +478,9 @@ ibis-assistant ticket search --query "login" --status open</code></pre>
         </div>
 
         <div class="card">
-            <h2>Strumenti MCP Disponibili (%d)</h2>
+            <h2>Strumenti MCP Disponibili ({{TOOL_COUNT}})</h2>
             <div class="tool-list">
-                %s
+                {{TOOLS_HTML}}
             </div>
         </div>
     </div>
@@ -503,9 +509,9 @@ ibis-assistant ticket search --query "login" --status open</code></pre>
         }
     </script>
 </body>
-</html>`, cfg.Port, cfg.Port, cfg.Port, cfg.Port, cfg.Port, cfg.Port, cfg.Port, len(cliHandlers), toolsHTML.String())
+</html>`
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(htmlContent))
+	_, _ = w.Write([]byte(replacer.Replace(htmlTemplate)))
 }

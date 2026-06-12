@@ -27,7 +27,8 @@ func (r *GitCommandRunner) Run(ctx context.Context, dir string, args ...string) 
 
 	defer func() {
 		if tempKeyFile != "" {
-			os.Remove(tempKeyFile)
+			// Remove the entire isolated temp directory, not just the file.
+			os.RemoveAll(strings.TrimSuffix(tempKeyFile, string(os.PathSeparator)+"id"))
 		}
 	}()
 
@@ -59,15 +60,18 @@ func (r *GitCommandRunner) Run(ctx context.Context, dir string, args ...string) 
 
 		case AuthTypeSSH:
 			if r.cred.SSHPrivateKey != "" {
-				tmpFile, err := os.CreateTemp("", "git-ssh-key-*")
+				// Create an isolated temp directory for the key file.
+				// os.MkdirTemp uses the user-scoped %TEMP% on Windows, which has
+				// restrictive ACLs by default — safer than a bare CreateTemp in /tmp.
+				tmpDir, err := os.MkdirTemp("", "git-ssh-*")
 				if err == nil {
-					tmpFile.WriteString(r.cred.SSHPrivateKey)
-					tmpFile.Close()
-					os.Chmod(tmpFile.Name(), 0600)
-					tempKeyFile = tmpFile.Name()
-
-					sshCmd := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=no", tempKeyFile)
-					env = append(env, fmt.Sprintf("GIT_SSH_COMMAND=%s", sshCmd))
+					tempKeyFile = strings.Join([]string{tmpDir, "id"}, string(os.PathSeparator))
+					if writeErr := os.WriteFile(tempKeyFile, []byte(r.cred.SSHPrivateKey), 0600); writeErr == nil {
+						// accept-new: accept first-time connections but reject changed host keys.
+						// Better than StrictHostKeyChecking=no which silently accepts MITM.
+						sshCmd := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=accept-new", tempKeyFile)
+						env = append(env, fmt.Sprintf("GIT_SSH_COMMAND=%s", sshCmd))
+					}
 				}
 			}
 		}

@@ -83,6 +83,10 @@ type PollingSource struct {
 	ArchiveDir   string `json:"archive_dir"`
 	PollInterval string `json:"poll_interval"` // e.g. "15m"
 	ProjectName  string `json:"project_name"`
+	// KnownHostKey is the expected base64-encoded public key of the SFTP server
+	// (e.g. "ssh-ed25519 AAAA..."). If empty, host key verification is skipped
+	// (InsecureIgnoreHostKey). Set this in production to prevent MITM attacks.
+	KnownHostKey string `json:"known_host_key"`
 }
 
 type GeminiKeyConfig struct {
@@ -367,6 +371,12 @@ func Load(paths ...string) *Config {
 	}
 
 	return cfg
+}
+
+// NewDefaultConfig returns a Config populated with all defaults, without reading any file.
+// Use this instead of Load("non_existent_path") when you only need the default values.
+func NewDefaultConfig() *Config {
+	return Load()
 }
 
 func resolvePath(baseDir, path string) string {

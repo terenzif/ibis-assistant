@@ -1,8 +1,13 @@
 # Guida Operativa in Fasi: Generalizzazione Accesso Git e Gestione Credenziali (Metodologia Top-Down)
 
 > [!NOTE]
-> **Stato dell'implementazione: PIANIFICATO**
-> Questa guida operativa definisce il piano di implementazione suddiviso in **fasi incrementali e sequenziali**. Ciascuna fase rappresenta un traguardo autocontenuto con verifiche di compilazione e test intermedi, studiato per guidare gli agenti di coding ed evitare allucinazioni o perdite di contesto.
+> **Stato dell'implementazione: COMPLETATO** (commit `69868c2`)  
+> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale. Per lo stato di debug operativo vedere `docs/debug/baseline_env_report.md`.
+>
+> **Rischi residui identificati (post-naming analysis):**
+> - Copertura edge-case SSH (chiavi multi-riga, permessi file temporanei su Windows).
+> - Coerenza tra errore reale Git auth e trigger `CredentialsRequiredError` su provider non standard.
+> - Sanitizzazione output su messaggi Git con token URL-encoded o base64 annidato.
 
 ---
 
