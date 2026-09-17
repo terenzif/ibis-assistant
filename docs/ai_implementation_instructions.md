@@ -1,32 +1,32 @@
-# Guida Operativa in Fasi: Generalizzazione delle API AI (Metodologia Top-Down)
+# Phased Implementation Guide: AI API Generalization (Top-Down Methodology)
 
 > [!NOTE]
-> **Stato dell'implementazione: COMPLETATO E VALIDATO (Giugno 2026)**
-> Tutti i passaggi descritti in questo documento sono stati eseguiti con successo. L'architettura generalizzata per gli embedding e reasoning provider, l'Ollama Runner locale e l'installazione automatica on-demand per Windows/Linux/macOS sono stati implementati e integrati.
+> **Implementation status: COMPLETE AND VALIDATED (June 2026)**
+> All steps in this document have been executed successfully. The generalized architecture for embedding and reasoning providers, the local Ollama Runner, and on-demand installation for Windows/Linux/macOS have been implemented and integrated.
 
 ---
 
-Questa guida operativa definisce il piano di implementazione suddiviso in **fasi incrementali e sequenziali**. Ciascuna fase rappresenta un traguardo autocontenuto con verifiche di compilazione e test intermedi, studiato per guidare gli agenti di coding ed evitare allucinazioni o perdite di contesto dovute ai limiti dei modelli.
+This operational guide defines the implementation plan in **incremental, sequential phases**. Each phase is a self-contained milestone with intermediate build and test checks, designed to guide coding agents and avoid hallucinations or context loss caused by model limits.
 
 ---
 
-## Panoramica delle Fasi
-* **Fase 1:** Definizione del Core e Astrazioni (Interfacce & Client Orchestratore)
-* **Fase 2:** Aggiornamento della Configurazione (JSON Schema e Parser Go)
-* **Fase 3:** Migrazione dell'Adapter Gemini (Refactoring del codice esistente)
-* **Fase 4:** Implementazione dell'Adapter Ollama (Richieste API locali)
-* **Fase 5:** Implementazione dell'Ollama Daemon Runner (Lifecycle e Auto-Pull)
-* **Fase 6:** Cablaggio e Inizializzazione (Main Loop e Graceful Shutdown)
-* **Fase 7:** Validazione e Unit Testing
+## Phase Overview
+* **Phase 1:** Core Definition and Abstractions (Interfaces & Orchestrator Client)
+* **Phase 2:** Configuration Update (JSON Schema and Go Parser)
+* **Phase 3:** Gemini Adapter Migration (Refactor existing code)
+* **Phase 4:** Ollama Adapter Implementation (Local API requests)
+* **Phase 5:** Ollama Daemon Runner Implementation (Lifecycle and Auto-Pull)
+* **Phase 6:** Wiring and Initialization (Main Loop and Graceful Shutdown)
+* **Phase 7:** Validation and Unit Testing
 
 ---
 
-## Fase 1: Definizione del Core e Astrazioni
-**Obiettivo:** Creare le astrazioni senza rompere la compilazione del resto dell'app (es. `internal/search` o `BatchManager`).
+## Phase 1: Core Definition and Abstractions
+**Goal:** Create abstractions without breaking compilation of the rest of the app (e.g. `internal/search` or `BatchManager`).
 
-### Passi operativi:
-1. Crea `internal/ai/types.go` e sposta al suo interno le strutture dati necessarie (es. `Content`, `Part`, `GenerationConfig`, `Candidate`, `UsageMetadata`) estratte dall'attuale `gemini.go`.
-2. Dichiara le interfacce `EmbeddingProvider` e `ReasoningProvider` in `types.go`:
+### Operational steps:
+1. Create `internal/ai/types.go` and move required data structures into it (e.g. `Content`, `Part`, `GenerationConfig`, `Candidate`, `UsageMetadata`) extracted from the current `gemini.go`.
+2. Declare the `EmbeddingProvider` and `ReasoningProvider` interfaces in `types.go`:
    ```go
    package ai
 
@@ -43,7 +43,7 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
        GenerateContent(ctx context.Context, contents []Content, config GenerationConfig) (Candidate, error)
    }
    ```
-3. Crea `internal/ai/client.go` e implementa la struct `Client` che farà da orchestratore. Deve fungere da adapter compatibile con l'interfaccia usata attualmente da `search.Service` e `BatchManager`:
+3. Create `internal/ai/client.go` and implement the `Client` struct as orchestrator. It must act as a compatible adapter for the interface currently used by `search.Service` and `BatchManager`:
    ```go
    package ai
 
@@ -52,7 +52,7 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
    type Client struct {
        embedding EmbeddingProvider
        reasoning ReasoningProvider
-       runner    *OllamaRunner // Sarà implementato in Fase 5
+       runner    *OllamaRunner // Implemented in Phase 5
    }
 
    func NewClient(emb EmbeddingProvider, reas ReasoningProvider, runner *OllamaRunner) *Client {
@@ -86,17 +86,17 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
    }
    ```
 
-### Checkpoint di Fase 1:
+### Phase 1 checkpoint:
 > [!NOTE]
-> Esegui `go build ./internal/ai/...` per assicurarti che le nuove interfacce e il client compilino senza errori.
+> Run `go build ./internal/ai/...` to ensure the new interfaces and client compile without errors.
 
 ---
 
-## Fase 2: Aggiornamento della Configurazione
-**Obiettivo:** Estendere le configurazioni per supportare diversi provider.
+## Phase 2: Configuration Update
+**Goal:** Extend configuration to support different providers.
 
-### Passi operativi:
-1. Apri `config_master.json` e sostituisci il blocco `gemini_keys` con la nuova struttura annidata sotto la chiave `ai`:
+### Operational steps:
+1. Open `config_master.json` and replace the `gemini_keys` block with the new nested structure under the `ai` key:
    ```json
    "ai": {
      "embedding": {
@@ -115,13 +115,13 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
            "rpm": 100,
            "tpm": 30000,
            "rpd": 1000,
-           "owner": "Fabbio"
+           "owner": "local"
          }
        ]
      }
    }
    ```
-2. Modifica `config_master.go` (o `config/config.go`) per mappare queste nuove chiavi JSON in struct Go:
+2. Update `config_master.go` (or `config/config.go`) to map these new JSON keys to Go structs:
    ```go
    type AIConfig struct {
        Embedding EmbeddingConfig `json:"embedding"`
@@ -152,38 +152,38 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
        Keys     []KeyConfig `json:"keys"`
    }
    ```
-3. Aggiungi il campo `AI AIConfig` nella struct principale `Config` e aggiorna le logiche di parsing e caricamento delle variabili d'ambiente in `Load()`.
+3. Add the `AI AIConfig` field to the main `Config` struct and update parsing / environment variable loading in `Load()`.
 
-### Checkpoint di Fase 2:
+### Phase 2 checkpoint:
 > [!NOTE]
-> Esegui `go build ./...` per assicurarti che il parsing della configurazione non introduca regressioni.
+> Run `go build ./...` to ensure configuration parsing introduces no regressions.
 
 ---
 
-## Fase 3: Migrazione dell'Adapter Gemini
-**Obiettivo:** Isolare la logica proprietaria di Gemini ereditata dal vecchio client.
+## Phase 3: Gemini Adapter Migration
+**Goal:** Isolate proprietary Gemini logic inherited from the old client.
 
-### Passi operativi:
-1. Rinomina la struct interna `Client` in `GeminiProvider` all'interno di `internal/ai/gemini.go`.
-2. Fai in modo che `GeminiProvider` implementi sia `EmbeddingProvider` e `ReasoningProvider`.
-3. Adatta i costruttori in `gemini.go`:
+### Operational steps:
+1. Rename the internal `Client` struct to `GeminiProvider` inside `internal/ai/gemini.go`.
+2. Make `GeminiProvider` implement both `EmbeddingProvider` and `ReasoningProvider`.
+3. Adapt constructors in `gemini.go`:
    ```go
    func NewGeminiProvider(apiKeys []KeyConfig, dbClient db.Executor) *GeminiProvider
    ```
-4. Assicurati che i metodi delegati (`EmbedText`, `BatchEmbedText`, `GenerateContent`) gestiscano correttamente il worker pool interno.
+4. Ensure delegated methods (`EmbedText`, `BatchEmbedText`, `GenerateContent`) correctly manage the internal worker pool.
 
-### Checkpoint di Fase 3:
+### Phase 3 checkpoint:
 > [!NOTE]
-> Esegui `go test ./internal/ai/...` per verificare che i vecchi test di Gemini compilino ed eventualmente falliscano solo a causa dell'inizializzazione modificata.
+> Run `go test ./internal/ai/...` to verify old Gemini tests compile and only fail due to the changed initialization if at all.
 
 ---
 
-## Fase 4: Implementazione dell'Adapter Ollama
-**Obiettivo:** Scrivere la logica client per connettersi ad Ollama locale.
+## Phase 4: Ollama Adapter Implementation
+**Goal:** Write the client logic to connect to local Ollama.
 
-### Passi operativi:
-1. Crea `internal/ai/ollama.go`.
-2. Implementa `OllamaProvider` con supporto per `/api/embeddings`:
+### Operational steps:
+1. Create `internal/ai/ollama.go`.
+2. Implement `OllamaProvider` with support for `/api/embeddings`:
    ```go
    package ai
 
@@ -212,21 +212,21 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
 
    func (p *OllamaProvider) Name() string { return "ollama" }
    ```
-3. Implementa i metodi `EmbedText(ctx, text)` e `BatchEmbedText(ctx, texts)`. Per il batch, puoi inviare richieste concorrenti limitate o sequenziali a Ollama (Ollama elabora le richieste di embedding velocemente e localmente).
+3. Implement `EmbedText(ctx, text)` and `BatchEmbedText(ctx, texts)`. For batch, you can send limited concurrent or sequential requests to Ollama (Ollama processes embedding requests quickly and locally).
 
-### Checkpoint di Fase 4:
+### Phase 4 checkpoint:
 > [!NOTE]
-> Esegui `go build ./internal/ai/...` per confermare che l'adapter Ollama compili correttamente.
+> Run `go build ./internal/ai/...` to confirm the Ollama adapter compiles correctly.
 
 ---
 
-## Fase 5: Implementazione dell'Ollama Daemon Runner
-**Obiettivo:** Scaricare, avviare e gestire Ollama in background in modo trasparente.
+## Phase 5: Ollama Daemon Runner Implementation
+**Goal:** Download, start, and manage Ollama in the background transparently.
 
-### Passi operativi:
-1. Crea `internal/ai/runner.go`.
-2. Scrivi la logica di download on-demand `EnsureOllama(autoUpdate bool)` leggendo l'API dei rilasci GitHub di Ollama (`https://api.github.com/repos/ollama/ollama/releases/latest`), scaricando il binario e scompattandolo (usa come traccia logica `internal/db/install.go`).
-3. Implementa la struct `OllamaRunner`:
+### Operational steps:
+1. Create `internal/ai/runner.go`.
+2. Write on-demand download logic `EnsureOllama(autoUpdate bool)` by reading the Ollama GitHub releases API (`https://api.github.com/repos/ollama/ollama/releases/latest`), downloading the binary and unpacking it (use `internal/db/install.go` as a logic reference).
+3. Implement the `OllamaRunner` struct:
    ```go
    type OllamaRunner struct {
        cmd *exec.Cmd
@@ -236,39 +236,39 @@ Questa guida operativa definisce il piano di implementazione suddiviso in **fasi
    func (r *OllamaRunner) Start() error
    func (r *OllamaRunner) Stop() error
    ```
-4. Scrivi la logica di auto-pull: prima di completare lo `Start()`, esegui una chiamata `POST /api/pull` con corpo `{"name": "nomic-embed-text"}` se il modello non compare nell'elenco di `GET /api/tags`.
+4. Write auto-pull logic: before completing `Start()`, call `POST /api/pull` with body `{"name": "nomic-embed-text"}` if the model does not appear in `GET /api/tags`.
 
-### Checkpoint di Fase 5:
+### Phase 5 checkpoint:
 > [!NOTE]
-> Esegui `go build ./internal/ai/...` per accertarti che il runner e le chiamate di sistema compilino correttamente.
+> Run `go build ./internal/ai/...` to ensure the runner and system calls compile correctly.
 
 ---
 
-## Fase 6: Cablaggio e Inizializzazione
-**Obiettivo:** Integrare la nuova architettura generalizzata all'avvio dell'applicazione.
+## Phase 6: Wiring and Initialization
+**Goal:** Integrate the new generalized architecture at application startup.
 
-### Passi operativi:
-1. Apri `cmd/server/main.go`.
-2. Individua il punto in cui viene istanziato il vecchio `ai.NewClient`.
-3. Riscrivi la logica di inizializzazione per decifrare il file di configurazione master:
-   - Se il provider di embedding è `ollama`, avvia il runner e istanzia `OllamaProvider`.
-   - Se il provider è `gemini`, istanzia `GeminiProvider` per gli embedding.
-   - Istanzia il provider di reasoning (es. `GeminiProvider` usando le chiavi del blocco reasoning).
-   - Crea il client unificato: `aiClient := ai.NewClient(embProvider, reasProvider, runner)`.
-4. Nel ciclo di shutdown del server, assicurati che venga invocato `aiClient.Stop()` per fermare in modo pulito l'Ollama Runner locale.
+### Operational steps:
+1. Open `cmd/server/main.go`.
+2. Find where the old `ai.NewClient` is instantiated.
+3. Rewrite initialization to decode the master config file:
+   - If the embedding provider is `ollama`, start the runner and instantiate `OllamaProvider`.
+   - If the provider is `gemini`, instantiate `GeminiProvider` for embeddings.
+   - Instantiate the reasoning provider (e.g. `GeminiProvider` using keys from the reasoning block).
+   - Create the unified client: `aiClient := ai.NewClient(embProvider, reasProvider, runner)`.
+4. In the server shutdown cycle, ensure `aiClient.Stop()` is invoked to cleanly stop the local Ollama Runner.
 
-### Checkpoint di Fase 6:
+### Phase 6 checkpoint:
 > [!NOTE]
-> Esegui `go build ./cmd/server` per assicurarti che l'intero server compili correttamente con i nuovi contratti.
+> Run `go build ./cmd/server` to ensure the full server compiles correctly with the new contracts.
 
 ---
 
-## Fase 7: Validazione e Unit Testing
-**Obiettivo:** Assicurare la stabilità globale del sistema.
+## Phase 7: Validation and Unit Testing
+**Goal:** Ensure global system stability.
 
-### Passi operativi:
-1. Esegui la suite di test globale: `go test ./...`.
-2. Avvia il server localmente con il db locale SurrealDB e verifica che all'avvio:
-   * Venga avviato Ollama locale e scaricato il modello di embedding.
-   * Il server logghi correttamente l'avvio di entrambi i sottosistemi.
-3. Effettua una richiesta di test di ingestion dei commit o di ricerca semantica per accertare che i vettori vengano salvati e recuperati correttamente da SurrealDB.
+### Operational steps:
+1. Run the global test suite: `go test ./...`.
+2. Start the server locally with local SurrealDB and verify on startup that:
+   * Local Ollama is started and the embedding model is downloaded.
+   * The server correctly logs startup of both subsystems.
+3. Perform a test commit ingestion or semantic search request to confirm vectors are stored and retrieved correctly from SurrealDB.

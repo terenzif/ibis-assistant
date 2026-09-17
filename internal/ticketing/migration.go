@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/terenzif/ibis-assistant/internal/db"
-	"github.com/terenzif/ibis-assistant/internal/schema"
+	"github.com/terenzif/ibis-server/internal/db"
+	"github.com/terenzif/ibis-server/internal/schema"
 )
 
 // MigrateLegacyIssues backfills provider metadata for pre-ticketing issue records.

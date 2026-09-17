@@ -1,35 +1,35 @@
-# Proposta di Architettura: Generalizzazione Accesso Git e Gestione Credenziali
+# Architecture Proposal: Git Access Generalization and Credential Management
 
 > [!NOTE]
-> **Stato della proposta: APPROVATA (Giugno 2026)**
-> Questa proposta è stata approvata per l'implementazione in fasi incrementali descritte nella guida operativa `docs/git_implementation_instructions.md`.
+> **Proposal status: APPROVED (June 2026)**
+> This proposal has been approved for incremental phased implementation described in the operational guide `docs/git_implementation_instructions.md`.
 
 ---
 
-Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai repository Git all'interno del codebase `ibis-assistant`, introducendo la persistenza delle credenziali in SurrealDB, il supporto per override runtime tramite header HTTP e la risoluzione dello scenario "primo utilizzo non configurato" su un'istanza self-hosted.
+This document describes the architectural proposal to abstract and generalize Git repository access within the Ibis Assistant codebase, introducing credential persistence in SurrealDB, support for runtime overrides via HTTP headers, and resolution of the "first use unconfigured" scenario on a self-hosted instance.
 
 ---
 
-## 1. Analisi del Contesto e Decisioni di Design
+## 1. Context Analysis and Design Decisions
 
-### Nota 1: Istanza self-hosted e checkout locale
-> **Scenario:** Ibis Assistant gira come istanza personale/self-hosted (`localhost` o host dedicato). Si indicizzano repository privati con credenziali proprie (PAT Azure DevOps, GitHub, ecc.).
+### Note 1: Self-hosted instance and local checkout
+> **Scenario:** Ibis Assistant runs as a personal/self-hosted instance (`localhost` or a dedicated host). Private repositories are indexed with the operator's own credentials (Azure DevOps PAT, GitHub, etc.).
 
-**Soluzione Proposta:**
-1. **Repository Unico sul Server:** L'indicizzazione e il grafo SurrealDB usano *una sola copia locale* del repository (sotto `discovery_root/dynamic`).
-2. **Credenziali di Sistema (Default):** Alla prima configurazione si può memorizzare una credenziale di default per repository o provider, riutilizzata per le sincronizzazioni in background.
-3. **Override Runtime:** L'header HTTP `X-Git-Token` (o `X-Git-PAT`) fa override temporaneo della credenziale persistita per la singola operazione (non memorizzato su disco o DB).
+**Proposed solution:**
+1. **Single repository on the server:** Indexing and the SurrealDB graph use *one local copy* of the repository (under `discovery_root/dynamic`).
+2. **System credentials (default):** At first configuration a default credential can be stored per repository or provider, reused for background syncs.
+3. **Runtime override:** The HTTP header `X-Git-Token` (or `X-Git-PAT`) temporarily overrides the persisted credential for the single operation (not stored on disk or in the DB).
 
 ---
 
-### Nota 2: Comportamento al Primo Utilizzo (Unconfigured)
-> **Domanda:** Come si comporta il sistema se un repository privato viene richiesto per la prima volta e non ci sono credenziali configurate nel server?
+### Note 2: Behavior on first use (unconfigured)
+> **Question:** How does the system behave if a private repository is requested for the first time and no credentials are configured on the server?
 
-**Flusso Operativo Proposto (Richiesta Chiave On-Demand):**
-1. Il client (es. estensione IDE o agente di sviluppo) invia un comando come `init_project` per un nuovo repository privato.
-2. Il server tenta l'operazione di `git clone` / `git fetch`. Se rileva la mancanza di credenziali o un fallimento di autenticazione:
-   * Interrompe l'operazione immediatamente.
-   * Ritorna un payload JSON strutturato con un errore specifico:
+**Proposed operational flow (on-demand key request):**
+1. The client (e.g. IDE extension or development agent) sends a command such as `init_project` for a new private repository.
+2. The server attempts `git clone` / `git fetch`. If it detects missing credentials or an authentication failure:
+   * It interrupts the operation immediately.
+   * It returns a structured JSON payload with a specific error:
      ```json
      {
        "status": "credentials_required",
@@ -38,21 +38,21 @@ Questo documento descrive la proposta architetturale per astrarre e generalizzar
        "message": "Git credentials are required to access this repository. Please configure them using the git_configure_credentials tool or provide them via X-Git-Token header."
      }
      ```
-3. L'agente di sviluppo cattura questa risposta e mostra un prompt interattivo all'utente per richiedere il Personal Access Token (PAT).
-4. Una volta inserito, il client invia la configurazione tramite il nuovo tool MCP `git_configure_credentials`, che persiste il token su SurrealDB a livello di server, abilitando l'accesso autonomo da quel momento in poi.
+3. The development agent captures this response and shows an interactive prompt to the user to request a Personal Access Token (PAT).
+4. Once entered, the client sends the configuration via the new MCP tool `git_configure_credentials`, which persists the token in SurrealDB at server level, enabling autonomous access from that point on.
 
 ---
 
-### Nota 3: Prevenzione Leak Credenziali (Log Masking)
-Poiché l'esecuzione di comandi git può stampare in output gli argomenti passati (inclusi eventuali token o URL contenenti credenziali basic-auth), verrà implementato un wrapper `GitCommandRunner`. Questo runner si occuperà di:
-* Intercettare tutti gli output dei comandi eseguiti (stdout e stderr).
-* Rilevare e sostituire stringhe sensibili (es. pattern legati ai token configurati) con `[REDACTED]` prima di inviarli al logger del server (`server.log`) o di ritornarli negli errori.
+### Note 3: Credential leak prevention (log masking)
+Because executing git commands can print passed arguments in output (including tokens or URLs containing basic-auth credentials), a `GitCommandRunner` wrapper will be implemented. This runner will:
+* Intercept all executed command output (stdout and stderr).
+* Detect and replace sensitive strings (e.g. patterns related to configured tokens) with `[REDACTED]` before sending them to the server logger (`server.log`) or returning them in errors.
 
 ---
 
-## 2. Architettura Proposta in Go
+## 2. Proposed Go Architecture
 
-Viene introdotto il nuovo package `internal/gitrepo` per centralizzare la gestione dei repository e delle chiavi:
+The new package `internal/gitrepo` is introduced to centralize repository and key management:
 
 ```mermaid
 classDiagram
@@ -80,7 +80,7 @@ classDiagram
     GitCommandRunner --> Credential
 ```
 
-### Struttura Credenziale (`internal/gitrepo/types.go`)
+### Credential structure (`internal/gitrepo/types.go`)
 ```go
 package gitrepo
 
@@ -102,7 +102,7 @@ const (
 )
 
 type Credential struct {
-	Target        string   `json:"target"` // Dominio (github.com) o repo URL completo
+	Target        string   `json:"target"` // Domain (github.com) or full repo URL
 	Provider      string   `json:"provider"`
 	AuthType      AuthType `json:"auth_type"`
 	Token         string   `json:"token,omitempty"`
@@ -113,9 +113,9 @@ type Credential struct {
 
 ---
 
-## 3. Schema SurrealDB
+## 3. SurrealDB Schema
 
-Le credenziali persistite sul server vengono memorizzate nella tabella `git_credential` definita in `internal/schema/schema.go`:
+Credentials persisted on the server are stored in the `git_credential` table defined in `internal/schema/schema.go`:
 
 ```sql
 DEFINE TABLE git_credential SCHEMALESS;
@@ -124,11 +124,11 @@ DEFINE INDEX credential_target ON TABLE git_credential COLUMNS target UNIQUE;
 
 ---
 
-## 4. Risoluzione della Credenziale durante il Sync
-Quando viene avviato un job di sincronizzazione (`SyncWorkspace`):
-1. Si controlla se nel `context.Context` è presente un token runtime (inserito da `AuthMiddleware` dall'header `X-Git-Token`).
-2. Se non presente, si interroga il `CredentialStore` in SurrealDB usando:
-   * L'URL specifico del repository (es. `https://github.com/myorg/myrepo`).
-   * Il dominio del provider (es. `github.com`) come fallback generale.
-3. Se non presente, si controlla la configurazione legacy in `config.json` (`git_tokens`).
-4. Se non si trova alcuna credenziale e il repository è privato (o il git comando fallisce con errore 128 / Auth error), viene restituito l'errore `CredentialsRequiredError` per innescare la configurazione on-demand.
+## 4. Credential Resolution during Sync
+When a synchronization job is started (`SyncWorkspace`):
+1. Check whether a runtime token is present in `context.Context` (injected by `AuthMiddleware` from the `X-Git-Token` header).
+2. If not present, query the `CredentialStore` in SurrealDB using:
+   * The specific repository URL (e.g. `https://github.com/myorg/myrepo`).
+   * The provider domain (e.g. `github.com`) as a general fallback.
+3. If not present, check the legacy configuration in `config.json` (`git_tokens`).
+4. If no credential is found and the repository is private (or the git command fails with exit code 128 / auth error), return `CredentialsRequiredError` to trigger on-demand configuration.

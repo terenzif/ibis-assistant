@@ -65,10 +65,11 @@ The Ibis Assistant exposes the following tools to Claude:
 *   **`ingest_git(path)`**: Indexes Git commit history.
 *   **`ingest_code(path)`**: Vectorizes source code for semantic search.
 
-### 🐞 Redmine Integration
-*   **`redmine_search_issues(query)`**: Finds tickets by text.
-*   **`redmine_get_issue(id)`**: Retrieves full details of a ticket.
-*   **`redmine_update_issue(id, notes)`**: Adds comments/notes to a ticket.
+### 🐞 Ticketing Integration
+*   **`ticket_search(query)`**: Finds tickets by text (and optional structured filters).
+*   **`ticket_get(id)`**: Retrieves full details of a ticket.
+*   **`ticket_update(id, notes)`**: Adds comments/notes or updates ticket fields.
+*   **`ticket_add_comment(id, comment)`**: Adds a comment to a ticket.
 
 ---
 
@@ -88,7 +89,7 @@ Here are practical examples of how to leverage the system effectively.
 
 > **User**: "Why was the timeout increased in the database connection? Check the commit history."
 >
-> **Claude**: Will use `ask_project` (or explore via graph) to find the commit that changed the timeout, read its message (e.g., "Fixes #452"), and then fetch Redmine Issue #452 to reveal the root cause (e.g., "Production timeouts during nightly batch").
+> **Claude**: Will use `ask_project` (or explore via graph) to find the commit that changed the timeout, read its message (e.g., "Fixes #452"), and then fetch Issue #452 to reveal the root cause (e.g., "Production timeouts during nightly batch").
 
 ### Scenario 3: Task Execution (The "Senior Engineer" Loop)
 *For planning and executing complex changes.*
@@ -98,7 +99,7 @@ Here are practical examples of how to leverage the system effectively.
 > **Claude**:
 > 1.  Uses `ask_project` to find the `User` struct/class.
 > 2.  Identifies dependencies (DB schema, API DTOs, Frontend Types).
-> 3.  Checks for related Redmine tickets (e.g., "Feature: Loyalty Program").
+> 3.  Checks for related tickets (e.g., "Feature: Loyalty Program").
 > 4.  Generates a step-by-step implementation plan warning you about specific files to touch.
 
 ### Scenario 4: Managing Work
@@ -107,8 +108,8 @@ Here are practical examples of how to leverage the system effectively.
 > **User**: "Find the ticket about 'Slow Startup' and add a note that I've found the bottleneck in the logger initialization."
 >
 > **Claude**:
-> 1.  Calls `redmine_search_issues("Slow Startup")` -> Returns Issue #905.
-> 2.  Calls `redmine_update_issue("905", "Investigated: Root cause is synchronous logger init. Fixing now.")`.
+> 1.  Calls `ticket_search("Slow Startup")` -> Returns Issue #905.
+> 2.  Calls `ticket_update("905", "Investigated: Root cause is synchronous logger init. Fixing now.")`.
 
 ### Scenario 5: Teaching the System
 *For improving future answers.*

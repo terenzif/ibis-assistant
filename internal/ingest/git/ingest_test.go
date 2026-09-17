@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/terenzif/ibis-assistant/internal/db"
-	"github.com/terenzif/ibis-assistant/internal/schema"
+	"github.com/terenzif/ibis-server/internal/db"
+	"github.com/terenzif/ibis-server/internal/schema"
 )
 
 // TestIngestRepoIntegration creates a real temporary git repo and runs the ingestion logic against a Mock DB.

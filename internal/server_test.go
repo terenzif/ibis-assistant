@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/terenzif/ibis-assistant/internal/schema"
+	"github.com/terenzif/ibis-server/internal/schema"
 )
 
 // MockClient simulates database interactions for testing

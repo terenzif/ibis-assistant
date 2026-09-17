@@ -1,47 +1,47 @@
-# Proposta di Architettura: Generalizzazione delle API AI (Embedding & Reasoning)
+# Architecture Proposal: AI API Generalization (Embedding & Reasoning)
 
 > [!NOTE]
-> **Stato della proposta: APPROVATA E IMPLEMENTATA (Giugno 2026)**
-> Questa proposta è stata interamente tradotta in codice funzionante nel modulo `internal/ai` e nel cablaggio globale dell'applicazione.
+> **Proposal status: APPROVED AND IMPLEMENTED (June 2026)**
+> This proposal has been fully translated into working code in the `internal/ai` module and the application-wide wiring.
 
 ---
 
-Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai modelli di Intelligenza Artificiale per la generazione di **Embedding** e per il **Reasoning (Completamento/LLM)** all'interno del codebase `ibis-assistant`, impostando come default un **Ollama Runner locale gestito on-demand**.
+This document describes the architectural proposal to abstract and generalize access to Artificial Intelligence models for **Embedding** generation and **Reasoning (Completion/LLM)** within the `ibis-assistant` codebase, defaulting to a **local Ollama Runner managed on-demand**.
 
 ---
 
-## 1. Risposta ai Dubbi Principali
+## 1. Answers to Main Questions
 
-### Nota 1: Calcolo degli Embedding Local/Custom e Reasoning su LLM Closed
-> **Domanda:** È possibile affidare gli embedding a modelli custom/locali e usare LLM potenti/closed per il reasoning? Come impatta la portabilità e il riuso degli embedding?
+### Note 1: Local/Custom Embeddings with Closed LLM Reasoning
+> **Question:** Can embeddings use custom/local models while reasoning uses powerful/closed LLMs? How does that affect portability and embedding reuse?
 
-**Sì, è assolutamente possibile ed è una delle configurazioni RAG (Retrieval-Augmented Generation) più efficienti ed economiche.**
+**Yes — this is absolutely possible and is one of the most efficient and cost-effective RAG (Retrieval-Augmented Generation) configurations.**
 
-Il flusso RAG scollega nativamente i due passaggi:
-1. **Fase di Embedding (Ricerca Semantica):** Si convertono i frammenti di codice, commit o issue in vettori usando un modello locale (es. `nomic-embed-text` o `bge-large-en` su Ollama). Il database vettoriale (SurrealDB nel nostro caso) memorizza questi vettori. Quando l'utente fa una domanda, la domanda viene convertita in vettore dallo *stesso* modello locale e viene eseguita la ricerca di similarità.
-2. **Fase di Reasoning (Generazione della Risposta):** Il testo in chiaro dei frammenti più rilevanti trovati viene inserito come contesto nel prompt inviato al modello di reasoning closed (es. Gemini 2.5 Pro o GPT-4o). Il modello closed riceve solo testo e non ha alcuna consapevolezza di come quel testo sia stato recuperato.
+The RAG flow natively decouples the two stages:
+1. **Embedding phase (Semantic Search):** Convert code fragments, commits, or issues into vectors using a local model (e.g. `nomic-embed-text` or `bge-large-en` on Ollama). The vector database (SurrealDB in our case) stores these vectors. When the user asks a question, the question is converted to a vector by the *same* local model and similarity search runs.
+2. **Reasoning phase (Answer Generation):** The plain text of the most relevant fragments is inserted as context into the prompt sent to a closed reasoning model (e.g. Gemini 2.5 Pro or GPT-4o). The closed model receives only text and has no awareness of how that text was retrieved.
 
-#### Portabilità e Riuso degli Embedding:
-* **Vincolo Fondamentale (Lo Spazio Vettoriale):** Gli embedding sono legati in modo indissolubile al modello che li ha generati. Non è possibile confrontare un vettore generato da `nomic-embed-text` con uno generato da `text-embedding-004` di Gemini. Hanno dimensioni diverse (es. 768 vs 1536) e una diversa distribuzione semantica dello spazio.
-* **Strategia di Riuso:** Se mantieni stabile il tuo modello di embedding (anche locale), **non dovrai mai ricalcolare gli embedding nel database**, indipendentemente da quanti LLM di reasoning deciderai di cambiare (puoi passare da Gemini a OpenAI, a Claude o a Llama locale in qualsiasi momento).
-* **Migrazione del Modello di Embedding:** Se decidi di cambiare il modello di embedding (es. per passare a uno più preciso), dovrai forzare una ricalcolazione totale (re-indexing) degli embedding per tutti i chunk presenti nel database. Con il `BatchManager` implementato, questo processo può essere automatizzato impostando lo stato dei chunk su `pending`.
-
----
-
-### Nota 2: Interoperabilità e Mix di API Key di diversi Provider
-> **Domanda:** Che tipo di interoperabilità posso ottenere? Posso mischiare API key di diversi provider (es. Gemini, OpenAI, Anthropic, Ollama) o devo affidarmi ad un unico LLM?
-
-**Puoi ottenere una completa interoperabilità, mischiando liberamente provider e API key.**
-
-Generalizzando l'interfaccia, l'applicazione non saprà (né le interesserà) quale provider esterno risponda, a patto che rispetti il contratto definito in Go. Potrai configurare:
-* Un provider locale (es. **Ollama** senza necessità di API key) per gli embedding di massa dei sorgenti e dei commit (risparmiando sui costi delle API e garantendo la privacy del codice sorgente).
-* Più provider commerciali (es. **Gemini** e **OpenAI**) con le rispettive API Key per il reasoning, magari assegnando compiti diversi in base alla potenza del modello (es. Gemini Flash per compiti di classificazione veloci ed economici, Gemini Pro o GPT-4o per la risoluzione dei bug).
+#### Embedding Portability and Reuse:
+* **Fundamental Constraint (Vector Space):** Embeddings are inseparably tied to the model that generated them. You cannot compare a vector from `nomic-embed-text` with one from Gemini's `text-embedding-004`. They have different dimensions (e.g. 768 vs 1536) and a different semantic distribution of the space.
+* **Reuse Strategy:** If you keep your embedding model stable (even local), **you never need to recalculate embeddings in the database**, no matter how often you switch reasoning LLMs (Gemini, OpenAI, Claude, or local Llama at any time).
+* **Embedding Model Migration:** If you change the embedding model (e.g. for higher precision), you must force a full re-indexing of embeddings for all chunks in the database. With the implemented `BatchManager`, this can be automated by setting chunk state to `pending`.
 
 ---
 
-## 2. Architettura Proposta in Go
+### Note 2: Interoperability and Mixing API Keys Across Providers
+> **Question:** What interoperability can I get? Can I mix API keys from different providers (e.g. Gemini, OpenAI, Anthropic, Ollama), or must I rely on a single LLM?
 
-Attualmente il client AI (`internal/ai/gemini.go`) è monolitico e accoppiato a Gemini. Proponiamo di ristrutturare il package `internal/ai` introducendo due interfacce distinte per separare le responsabilità:
+**You can achieve full interoperability, freely mixing providers and API keys.**
+
+By generalizing the interface, the application will not know (nor care) which external provider responds, as long as it respects the Go contract. You can configure:
+* A local provider (e.g. **Ollama**, no API key required) for bulk embeddings of sources and commits (saving API costs and keeping source code private).
+* Multiple commercial providers (e.g. **Gemini** and **OpenAI**) with their respective API keys for reasoning, optionally assigning different tasks by model strength (e.g. Gemini Flash for fast/cheap classification, Gemini Pro or GPT-4o for bug resolution).
+
+---
+
+## 2. Proposed Go Architecture
+
+Currently the AI client (`internal/ai/gemini.go`) is monolithic and coupled to Gemini. We propose restructuring the `internal/ai` package with two distinct interfaces to separate responsibilities:
 
 ```mermaid
 classDiagram
@@ -89,28 +89,28 @@ classDiagram
     Client --> ReasoningProvider
 ```
 
-### Le Nuove Interfacce (`internal/ai/types.go`)
+### New Interfaces (`internal/ai/types.go`)
 
 ```go
 package ai
 
 import "context"
 
-// EmbeddingProvider definisce il contratto per i modelli di embedding
+// EmbeddingProvider defines the contract for embedding models
 type EmbeddingProvider interface {
 	Name() string
 	EmbedText(ctx context.Context, text string) ([]float32, error)
 	BatchEmbedText(ctx context.Context, texts []string) ([][]float32, error)
 }
 
-// ReasoningProvider definisce il contratto per i modelli di generazione e reasoning
+// ReasoningProvider defines the contract for generation and reasoning models
 type ReasoningProvider interface {
 	Name() string
 	GenerateContent(ctx context.Context, contents []Content, config GenerationConfig) (Candidate, error)
 }
 ```
 
-Il `Client` principale farà da orchestratore, esponendo i metodi richiesti dal resto del sistema e delegando le chiamate al provider corretto:
+The main `Client` acts as orchestrator, exposing methods required by the rest of the system and delegating calls to the correct provider:
 
 ```go
 type Client struct {
@@ -133,9 +133,9 @@ func (c *Client) GenerateContent(ctx context.Context, contents []Content, config
 
 ---
 
-## 3. Gestione della Configurazione
+## 3. Configuration Management
 
-Modificheremo la struttura di configurazione globale (`config_master.json`) per impostare di default il runner locale Ollama per gli embedding e Gemini per il reasoning:
+We will update the global configuration structure (`config_master.json`) to default to the local Ollama runner for embeddings and Gemini for reasoning:
 
 ```json
 {
@@ -157,7 +157,7 @@ Modificheremo la struttura di configurazione globale (`config_master.json`) per 
           "rpm": 100,
           "tpm": 30000,
           "rpd": 1000,
-          "owner": "Fabbio"
+          "owner": "local"
         }
       ]
     }
@@ -167,32 +167,32 @@ Modificheremo la struttura di configurazione globale (`config_master.json`) per 
 
 ---
 
-## 4. Ollama Runner: Gestione del Processo e Autoinizializzazione
+## 4. Ollama Runner: Process Management and Auto-Initialization
 
-Per garantire un'esperienza utente fluida e zero-config (esattamente come avviene per SurrealDB tramite `db.ProcessManager`), implementeremo un gestore del ciclo di vita di Ollama in `internal/ai/runner.go`:
+To ensure a smooth zero-config user experience (exactly as SurrealDB via `db.ProcessManager`), we will implement an Ollama lifecycle manager in `internal/ai/runner.go`:
 
-### 1. Download on-demand di Ollama
-Se `"auto_start"` è attivo e Ollama non è installato nel sistema:
-* Il codice Go rileverà il sistema operativo (Windows/Linux/macOS) e l'architettura.
-* Scaricherà il binario leggero ufficiale di Ollama (o archivio tar/zip) direttamente da GitHub Releases o dalla CDN ufficiale di Ollama.
-* Salverà l'eseguibile nella cartella dell'applicazione (es. `ollama.exe` su Windows).
+### 1. On-demand Ollama download
+If `"auto_start"` is enabled and Ollama is not installed:
+* The Go code detects the OS (Windows/Linux/macOS) and architecture.
+* It downloads the official lightweight Ollama binary (or tar/zip archive) from GitHub Releases or the official Ollama CDN.
+* It saves the executable in the application folder (e.g. `ollama.exe` on Windows).
 
-### 2. Gestione del Processo Background
-* All'avvio dell'applicazione, se la porta `11434` non risponde, Go avvia il processo `ollama serve` in background reindirizzando l'output su `ollama.log`.
-* Il runner attende che la porta risponda (timeout di 30 secondi).
+### 2. Background process management
+* On application startup, if port `11434` does not respond, Go starts `ollama serve` in the background, redirecting output to `ollama.log`.
+* The runner waits for the port to respond (30-second timeout).
 
-### 3. Autoinizializzazione del Modello (Auto-Pull)
-* Prima di servire le prime richieste di embedding, Go effettua una chiamata a `GET /api/tags` per verificare se il modello configurato (es. `nomic-embed-text`) è già presente localmente.
-* Se il modello manca, Go effettua una chiamata a `POST /api/pull` con il payload `{"name": "nomic-embed-text"}`.
-* Il runner rimane in attesa del completamento del download del modello, loggando lo stato di avanzamento. Essendo un modello di circa 280MB, il download si completa rapidamente.
-* Una volta confermata la presenza del modello, il provider è pronto.
+### 3. Model auto-initialization (Auto-Pull)
+* Before serving the first embedding requests, Go calls `GET /api/tags` to check whether the configured model (e.g. `nomic-embed-text`) is already present locally.
+* If the model is missing, Go calls `POST /api/pull` with payload `{"name": "nomic-embed-text"}`.
+* The runner waits for the model download to complete, logging progress. At roughly 280MB, the download finishes quickly.
+* Once the model is confirmed present, the provider is ready.
 
 ---
 
-## 5. Piano di Migrazione Graduale
+## 5. Gradual Migration Plan
 
-Per evitare di rompere il codice esistente in `internal/search` e `BatchManager`:
-1. **Mantenere la firma di `search.AIProvider`**: L'interfaccia attualmente usata da `search.Service` esposta dal pacchetto `search` rimarrà compatibile.
-2. **Spostare l'attuale codice Gemini in un adapter**: L'attuale implementazione dei worker pool e delle chiamate HTTP a Gemini verrà isolata in `internal/ai/providers/gemini/`.
-3. **Creare l'adapter Ollama**: Implementeremo `internal/ai/providers/ollama/` per gestire le chiamate a `/api/embeddings` di Ollama.
-4. **Inizializzazione**: All'avvio dell'applicazione (`main.go`), leggeremo la nuova sezione di configurazione, avvieremo l'Ollama Runner se necessario, e istanzieremo i due provider selezionati, passandoli al costruttore del client AI generalizzato.
+To avoid breaking existing code in `internal/search` and `BatchManager`:
+1. **Keep the `search.AIProvider` signature**: The interface currently used by `search.Service` from the `search` package remains compatible.
+2. **Move current Gemini code into an adapter**: The existing worker-pool implementation and Gemini HTTP calls will be isolated in `internal/ai/providers/gemini/`.
+3. **Create the Ollama adapter**: Implement `internal/ai/providers/ollama/` for calls to Ollama's `/api/embeddings`.
+4. **Initialization**: On application startup (`main.go`), read the new configuration section, start the Ollama Runner if needed, and instantiate the two selected providers, passing them to the generalized AI client constructor.

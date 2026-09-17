@@ -1,16 +1,16 @@
 # Ticketing + PR Client Guide
 
-Questa guida descrive il nuovo flusso operativo del Ibis Assistant per ticketing multi-provider e automazione PR.
+Operational guide for Ibis Assistant multi-provider ticketing and PR automation.
 
-## 1) Configurazione server
+## 1) Server configuration
 
-Il server legge la configurazione ticketing da:
+Ticketing config file:
 
 - `config/ticketing_config.json`
 
-Usa `config/ticketing_config.example.json` come riferimento completo.
+Use `config/ticketing_config.example.json` as the full template.
 
-Parametri principali:
+Main knobs:
 
 - `default_provider`
 - `project_provider_map`
@@ -20,32 +20,32 @@ Parametri principali:
 - `default_create_type`
 - `pr.default_target_branch`, `pr.project_target_branch`
 
-## 2) Header runtime client (override credenziali)
+## 2) Runtime credential headers
 
-Il server usa credenziali di default dal file config, ma puoi fare override per-request via header:
+The server uses defaults from config; override per request with:
 
 - Redmine: `X-Redmine-API-Key`
 - Jira: `X-Jira-Email`, `X-Jira-API-Token`
 - Azure DevOps: `X-Azure-DevOps-PAT`
 
-Header ADO opzionali di routing:
+Optional Azure DevOps routing headers:
 
 - `X-Azure-DevOps-Org`
 - `X-Azure-DevOps-Project`
 - `X-Azure-DevOps-Repo`
 
-Policy sicurezza:
+Security policy:
 
-- credenziali request non persistite
-- masking nei log
+- request credentials are not persisted
+- secrets are masked in logs
 
-## 3) Tool MCP Ticketing
+## 3) MCP ticketing tools
 
 ### Discovery
 
 - `ticket_get_capabilities`
 
-### Ricerca e lettura
+### Search and read
 
 - `ticket_search`
 - `ticket_search_my`
@@ -54,10 +54,10 @@ Policy sicurezza:
 - `ticket_search_users`
 - `ticket_list_projects`
 
-### Scrittura e workflow
+### Write and workflow
 
 - `ticket_create`
-- `ticket_update` (supporta `workflow_action=resolve|close|reopen`)
+- `ticket_update` (supports `workflow_action=resolve|close|reopen`)
 - `ticket_add_comment`
 - `ticket_assign`
 - `ticket_transition`
@@ -65,40 +65,35 @@ Policy sicurezza:
 - `ticket_mark_closed`
 - `ticket_reopen`
 
-## 4) Flusso operativo consigliato (Dev -> Tester)
+## 4) Suggested Dev → Tester flow
 
 ### Developer
 
-1. Cerca ticket: `ticket_search` o `ticket_search_my`
-2. Esegui fix su branch feature
-3. Aggiorna ticket come risolto:
-   - `ticket_mark_resolved`
-   - opzionale nota tecnica `notes`
-4. Crea PR:
-   - `repo_pr_create`
+1. Find a ticket: `ticket_search` or `ticket_search_my`
+2. Implement the fix on a feature branch
+3. Mark resolved: `ticket_mark_resolved` (optional technical `notes`)
+4. Open a PR: `repo_pr_create`
 
 ### Tester
 
-1. Verifica PR / build
-2. Se fix confermato, chiude ticket:
-   - `ticket_mark_closed`
-3. Se fix non valido, riapre ticket:
-   - `ticket_reopen`
+1. Verify PR / build
+2. If OK, close: `ticket_mark_closed`
+3. If not OK, reopen: `ticket_reopen`
 
-## 5) Tool MCP PR Automation
+## 5) MCP PR tools
 
 - `repo_pr_create`
 - `repo_pr_complete`
 
-Comportamenti principali:
+Behavior:
 
-- provider routing come ticketing (`provider > project map > default`)
-- fallback a sessione `init_project` per `project_name/origin_url/source_branch`
-- `ticket_ids` opzionale + auto-detect da branch/titolo/descrizione
-- `title/description` auto-generated con override possibile
-- reviewer opzionali in create
+- provider routing matches ticketing (`provider` > project map > default)
+- can fall back to an `init_project` session for `project_name` / `origin_url` / `source_branch`
+- optional `ticket_ids` plus auto-detect from branch/title/description
+- auto-generated title/description with overrides
+- optional reviewers on create
 
-## 6) Esempio rapido
+## 6) Quick examples
 
 ### Mark resolved
 
@@ -107,7 +102,7 @@ Comportamenti principali:
   "provider": "redmine",
   "id": "123",
   "project_key": "core",
-  "notes": "Fix applicata, in attesa QA"
+  "notes": "Fix applied, waiting for QA"
 }
 ```
 
@@ -123,8 +118,8 @@ Comportamenti principali:
 }
 ```
 
-## 7) Note di compatibilità
+## 7) Compatibility
 
-- I vecchi tool `redmine_*` sono stati rimossi.
-- Usa esclusivamente i nuovi tool `ticket_*`.
-- Modello grafo issue unificato con metadata provider (`provider`, `external_id`, `external_key`).
+- Legacy `redmine_*` tools are removed.
+- Use `ticket_*` only.
+- Unified issue graph nodes include provider metadata (`provider`, `external_id`, `external_key`).

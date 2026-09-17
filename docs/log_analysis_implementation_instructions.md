@@ -1,38 +1,38 @@
-# Guida Operativa in Fasi: Estensione Log Analysis e Riforma SMTP
+# Phased Implementation Guide: Log Analysis Extension and SMTP Reform
 
 > [!NOTE]
-> **Stato dell'implementazione: COMPLETATO** (commit `cf677b3`)
-> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale.
+> **Implementation status: COMPLETED** (commit `cf677b3`)
+> All phases have been implemented and verified with green tests. This document is kept as an architectural reference.
 >
-> **Rischi residui identificati (post-naming analysis):**
-> - Pattern matching polling + archiviazione file in scenari reali (permessi/path share SMB su Windows).
-> - Determinismo parser AI JSON su log rumorosi o non JSON-friendly (dipende dalla qualità del modello).
-> - Comportamento digest su carico alto: crescita della coda e garanzia di delete post-send da verificare in produzione.
+> **Residual risks identified (post-naming analysis):**
+> - Polling pattern matching + file archival in real scenarios (permissions/path of SMB shares on Windows).
+> - Determinism of AI JSON parsing on noisy or non-JSON-friendly logs (depends on model quality).
+> - Digest behavior under high load: queue growth and post-send delete guarantee to verify in production.
 
 ---
 
-## Panoramica delle Fasi
-* **Fase 1:** Configurazione & Schema Database (SMTP, HTTP API, Polling)
-* **Fase 2:** Riforma Client SMTP (`internal/ingest/logs/notifier.go`)
-* **Fase 3:** Throttling e Aggregazione Notifiche (Daily Digest)
-* **Fase 4:** Ingestione Sincrona & Endpoint HTTP POST `/api/v1/logs/upload`
-* **Fase 5:** Aggiunta del Tool MCP Sincrono `analyze_log_stream`
-* **Fase 6:** Scheduler e Polling Client (FTP / SFTP / SMB)
-* **Fase 7:** Validazione e Unit Testing
+## Phase Overview
+* **Phase 1:** Configuration & Database Schema (SMTP, HTTP API, Polling)
+* **Phase 2:** SMTP Client Reform (`internal/ingest/logs/notifier.go`)
+* **Phase 3:** Notification Throttling and Aggregation (Daily Digest)
+* **Phase 4:** Synchronous Ingestion & HTTP POST Endpoint `/api/v1/logs/upload`
+* **Phase 5:** Add Synchronous MCP Tool `analyze_log_stream`
+* **Phase 6:** Scheduler and Polling Client (FTP / SFTP / SMB)
+* **Phase 7:** Validation and Unit Testing
 
 ---
 
-## Fase 1: Configurazione & Schema Database
-**Obiettivo:** Estendere la struct `config.Config` e lo schema SurrealDB per accogliere le nuove opzioni.
+## Phase 1: Configuration & Database Schema
+**Goal:** Extend the `config.Config` struct and SurrealDB schema to accept the new options.
 
-### Passi operativi:
-1. Apri `internal/config/config.go` e aggiungi i seguenti campi a `SMTPConfig`:
+### Operational steps:
+1. Open `internal/config/config.go` and add the following fields to `SMTPConfig`:
    ```go
    Encryption                 string `json:"encryption"` // ssl_tls, starttls, none
-   AggregationWindow          string `json:"aggregation_window"` // es. "1h", "24h"
+   AggregationWindow          string `json:"aggregation_window"` // e.g. "1h", "24h"
    EmergencySeverityThreshold int    `json:"emergency_severity_threshold"`
    ```
-2. Definisci le struct per il Polling dei log remoti in `internal/config/config.go`:
+2. Define structs for remote log polling in `internal/config/config.go`:
    ```go
    type LogIngestionConfig struct {
        HTTP    HTTPIngestionConfig `json:"http"`
@@ -55,72 +55,72 @@
        RemoteDir    string `json:"remote_dir"`
        FilePattern  string `json:"file_pattern"`
        ArchiveDir   string `json:"archive_dir"`
-       PollInterval string `json:"poll_interval"` // es. "15m"
+       PollInterval string `json:"poll_interval"` // e.g. "15m"
        ProjectName  string `json:"project_name"`
    }
    ```
-   Aggiungi il campo `LogIngestion LogIngestionConfig json:"log_ingestion"` alla struct principale `Config`.
-3. In `internal/schema/schema.go`, aggiungi le definizioni delle tabelle necessarie:
+   Add the field `LogIngestion LogIngestionConfig json:"log_ingestion"` to the main `Config` struct.
+3. In `internal/schema/schema.go`, add the required table definitions:
    ```go
    TableLogProcessedFile     = "log_processed_file"
    TableLogPendingNotification = "log_pending_notification"
    ```
-   Aggiungile alla lista delle definizioni per inizializzare il DB.
+   Add them to the definition list to initialize the DB.
 
 ---
 
-## Fase 2: Riforma Client SMTP
-**Obiettivo:** Supportare connessioni SSL/TLS implicite su porta 465, STARTTLS e l'invio senza credenziali.
+## Phase 2: SMTP Client Reform
+**Goal:** Support implicit SSL/TLS connections on port 465, STARTTLS, and sending without credentials.
 
-### Passi operativi:
-1. Apri `internal/ingest/logs/notifier.go` e sostituisci la logica di `SendEmail`.
-2. Implementa la scelta del protocollo di cifratura basato su `Cfg.SMTP.Encryption`.
-3. Consenti l'invio senza credenziali (auth = nil) se `Cfg.SMTP.User` e `Cfg.SMTP.Password` sono vuoti.
-
----
-
-## Fase 3: Throttling e Aggregazione Notifiche
-**Obiettivo:** Invece di inviare e-mail per ogni errore, accumulare i record su `log_pending_notification` e inviarli periodicamente in un e-mail aggregata (Digest). Gli errori urgenti (severity superiore alla soglia) aggirano l'accumulatore.
-
-### Passi operativi:
-1. In `internal/ingest/logs/notifier.go`, implementa una funzione `QueueNotification` che memorizza in SurrealDB l'anomalia.
-2. Implementa la funzione `ProcessPendingNotifications` che legge tutte le notifiche pendenti, le raggruppa in un report markdown consolidato e le invia via email, dopodiché svuota la coda.
+### Operational steps:
+1. Open `internal/ingest/logs/notifier.go` and replace the `SendEmail` logic.
+2. Implement encryption protocol selection based on `Cfg.SMTP.Encryption`.
+3. Allow sending without credentials (auth = nil) if `Cfg.SMTP.User` and `Cfg.SMTP.Password` are empty.
 
 ---
 
-## Fase 4: Ingestione Sincrona & Endpoint HTTP POST
-**Obiettivo:** Consentire l'analisi di stream di log testuali direttamente tramite chiamata HTTP protetta da API Key.
+## Phase 3: Notification Throttling and Aggregation
+**Goal:** Instead of sending an email for every error, accumulate records on `log_pending_notification` and send them periodically in an aggregated email (Digest). Urgent errors (severity above the threshold) bypass the accumulator.
 
-### Passi operativi:
-1. In `internal/ingest/logs/analyzer.go`, rendi la funzione `ProcessBatch` flessibile per accettare stringhe esterne e restituire gli errori rilevati.
-2. In `cmd/server/main.go`, registra la rotta `POST /api/v1/logs/upload`:
-   - Verifica l'header `X-API-Key`.
-   - Legge il payload JSON o multipart.
-   - Chiama sincronicamente `LogAnalyzer.ProcessBatch` e risponde con l'array degli errori e lo stato dell'elaborazione.
+### Operational steps:
+1. In `internal/ingest/logs/notifier.go`, implement a `QueueNotification` function that stores the anomaly in SurrealDB.
+2. Implement `ProcessPendingNotifications` that reads all pending notifications, groups them into a consolidated markdown report, sends them via email, then clears the queue.
 
 ---
 
-## Fase 5: Aggiunta del Tool MCP Sincrono `analyze_log_stream`
-**Obiettivo:** Aggiungere lo strumento MCP sincrono per consentire ad agenti remoti di analizzare spezzoni di log in tempo reale.
+## Phase 4: Synchronous Ingestion & HTTP POST Endpoint
+**Goal:** Allow analysis of textual log streams directly via an HTTP call protected by API Key.
 
-### Passi operativi:
-1. Apri `cmd/server/main.go`.
-2. Aggiungi il tool MCP `analyze_log_stream`.
-3. Gestisci la chiamata eseguendo sincronicamente l'analisi dei log tramite `LogAnalyzer` e restituisci in output un report JSON contenente gli errori identificati.
+### Operational steps:
+1. In `internal/ingest/logs/analyzer.go`, make `ProcessBatch` flexible enough to accept external strings and return detected errors.
+2. In `cmd/server/main.go`, register the route `POST /api/v1/logs/upload`:
+   - Verify the `X-API-Key` header.
+   - Read the JSON or multipart payload.
+   - Synchronously call `LogAnalyzer.ProcessBatch` and respond with the error array and processing status.
 
 ---
 
-## Fase 6: Scheduler e Polling Client (FTP / SFTP / SMB)
-**Obiettivo:** Implementare il polling scheduler periodico che si collega, scarica, analizza e archivia i log remoti.
+## Phase 5: Add Synchronous MCP Tool `analyze_log_stream`
+**Goal:** Add the synchronous MCP tool so remote agents can analyze log snippets in real time.
 
-### Passi operativi:
-1. Installa i pacchetti necessari (se non già presenti):
+### Operational steps:
+1. Open `cmd/server/main.go`.
+2. Add the MCP tool `analyze_log_stream`.
+3. Handle the call by synchronously running log analysis via `LogAnalyzer` and return a JSON report containing the identified errors.
+
+---
+
+## Phase 6: Scheduler and Polling Client (FTP / SFTP / SMB)
+**Goal:** Implement the periodic polling scheduler that connects, downloads, analyzes, and archives remote logs.
+
+### Operational steps:
+1. Install the required packages (if not already present):
    - `github.com/jlaffaye/ftp`
    - `github.com/pkg/sftp`
    - `github.com/hirochachacha/go-smb2`
-2. Crea `internal/ingest/logs/polling.go` con lo scheduler e l'interfaccia `LogClient` per scansionare, scaricare e spostare i file in `/archive`.
+2. Create `internal/ingest/logs/polling.go` with the scheduler and a `LogClient` interface to scan, download, and move files into `/archive`.
 
 ---
 
-## Fase 7: Validazione e Unit Testing
-**Obiettivo:** Aggiungere test completi per ciascun componente modificato.
+## Phase 7: Validation and Unit Testing
+**Goal:** Add complete tests for each modified component.

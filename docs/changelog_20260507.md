@@ -1,27 +1,27 @@
-# Changelog - 07 Maggio 2026
+# Changelog - May 7, 2026
 
-Questo documento riassume tutte le implementazioni, i refactoring architetturali e i miglioramenti introdotti tra il 6 e il 7 Maggio 2026. Tutte queste funzionalità consolidano il Ibis Assistant per un utilizzo in produzione stabile, multi-linguaggio e altamente affidabile su Windows.
+This document summarizes all implementations, architectural refactorings, and improvements introduced between May 6 and May 7, 2026. These features consolidate Ibis Assistant for stable, multi-language, production-ready use on Windows.
 
-## 1. Gestione Dinamica dei Workspace e Code Ingestion
-- **Code Ingestion Dinamica**: Aggiunti `internal/ingest/dynamic/queue.go` e `workspace.go` per orchestrare l'aggiornamento dei repository in tempo reale tramite `ProjectIngestionManager`. La sincronizzazione (fetch/checkout) è separata dalla vettorializzazione asincrona.
-- **Scoperta File con `git ls-tree`**: Refactoring massiccio di `internal/ingest/code/ingest.go`. Ora l'albero di Git (HEAD) è la vera Single Source of Truth per la ricerca dei file, abbandonando l'attraversamento ricorsivo obsoleto.
-- **Smart Pruning**: La rimozione dei file obsoleti sfrutta direttamente l'`activeFilesMap` estratta da Git, permettendo di rimuovere in automatico dal database tutti i chunk associati a file non più presenti nell'albero di commit corrente.
+## 1. Dynamic Workspace Management and Code Ingestion
+- **Dynamic Code Ingestion**: Added `internal/ingest/dynamic/queue.go` and `workspace.go` to orchestrate real-time repository updates via `ProjectIngestionManager`. Synchronization (fetch/checkout) is separated from asynchronous vectorization.
+- **File Discovery with `git ls-tree`**: Major refactor of `internal/ingest/code/ingest.go`. The Git tree (HEAD) is now the true Single Source of Truth for file discovery, replacing obsolete recursive filesystem traversal.
+- **Smart Pruning**: Obsolete file removal uses the `activeFilesMap` extracted from Git, automatically removing from the database all chunks associated with files no longer present in the current commit tree.
 
-## 2. Analisi Determinica dei Log (LogAlign) e Smart Chunking
-- **LogAlign Methodology**: Modificato `internal/ingest/logs/analyzer.go` per intercettare i log usando template statici estratti dal codice. Questo bypassa le costose e imprevedibili analisi basate su IA (LLM) ogni volta che un log combacia con una firma nota.
-- **Batch Manager Esteso**: Aggiornato `internal/ai/batch_manager.go` per ottimizzare le finestre di contesto e gestire l'AI-assisted Smart Chunking senza spezzare stack trace.
-- **Schema Database**: Introdotti nuovi nodi ed edge in `internal/schema/schema.go` (`TableLogTemplate` e `EdgeEmitsLog`) per relazionare direttamente e deterministicamente la riga di log alla riga di codice esatta che l'ha generato.
+## 2. Deterministic Log Analysis (LogAlign) and Smart Chunking
+- **LogAlign Methodology**: Updated `internal/ingest/logs/analyzer.go` to intercept logs using static templates extracted from code. This bypasses costly and unpredictable LLM-based analysis whenever a log matches a known signature.
+- **Extended Batch Manager**: Updated `internal/ai/batch_manager.go` to optimize context windows and manage AI-assisted Smart Chunking without splitting stack traces.
+- **Database Schema**: Introduced new nodes and edges in `internal/schema/schema.go` (`TableLogTemplate` and `EdgeEmitsLog`) to relate log lines deterministically to the exact source lines that emitted them.
 
-## 3. Integrazione Ast-Grep Sidecar
-- **Motore Sidecar**: Creato `internal/ingest/code/ast_chunker.go` per orchestrare l'estrazione sintattica del codice delegandola all'eseguibile Rust `sg.exe` (ast-grep), evitando dipendenze native.
-- **Regole Multi-Linguaggio in YAML**: La logica di chunking per C#, Go, JS, TS, Java, Python, C++ è ora codificata nei file `rules/*.yml` insieme alla configurazione `sgconfig.yml`. Questo rende l'estensione del parser immediata senza necessitare ricompilazioni.
+## 3. Ast-Grep Sidecar Integration
+- **Sidecar Engine**: Created `internal/ingest/code/ast_chunker.go` to orchestrate syntactic code extraction delegated to the Rust executable `sg.exe` (ast-grep), avoiding native dependencies.
+- **Multi-Language YAML Rules**: Chunking logic for C#, Go, JS, TS, Java, Python, and C++ is now encoded in `rules/*.yml` together with `sgconfig.yml`. Extending the parser no longer requires recompilation.
 
-## 4. Pulizia del Motore di Ricerca e Agentic
-- **Deprecazione Modelli Sperimentali**: Rimossi `internal/optimization/raft_test.go`, `internal/search/reinforce_test.go` e moduli sperimentali fallimentari in favore di una solida implementazione Agentic multi-modale.
-- **Agentic Search**: Refactoring in `internal/search/agentic.go` e `search.go` per irrobustire l'agentic search, affiancato da svariati unit test (parsing, regex, robustness, multiline).
+## 4. Search Engine and Agentic Cleanup
+- **Deprecation of Experimental Models**: Removed `internal/optimization/raft_test.go`, `internal/search/reinforce_test.go`, and failed experimental modules in favor of a solid multi-modal Agentic implementation.
+- **Agentic Search**: Refactor in `internal/search/agentic.go` and `search.go` to harden agentic search, backed by multiple unit tests (parsing, regex, robustness, multiline).
 
-## 5. Deployment e Configurazione Unificata (`dist/`)
-- **Master Config**: Eletto `config_master.json` come l'unico file di configurazione in controllo di versione. Rimossi i leak accidentali di chiavi nel vecchio `config.json`.
-- **Target `make dist`**: Il `Makefile` ora assembla automaticamente l'intero ambiente di produzione in una directory `dist/`.
-- **Nuove Path di Sistema**: Uniformate e rinominate le directory di processo rimuovendo gli underscore: ora si usano `dist/db`, `dist/logs`, e `dist/repos`.
-- **Pulizia Root**: Eliminati dalla root decine di file temporanei (`patch.diff`, `temp.go`, `test.cs`, vecchi file `.bat` ed esportazioni di Copilot).
+## 5. Unified Deployment and Configuration (`dist/`)
+- **Master Config**: Elected `config_master.json` as the single version-controlled configuration file. Removed accidental key leaks from the old `config.json`.
+- **`make dist` Target**: The `Makefile` now automatically assembles the full production environment into a `dist/` directory.
+- **New System Paths**: Process directories were unified and renamed without underscores: now `dist/db`, `dist/logs`, and `dist/repos`.
+- **Root Cleanup**: Removed dozens of temporary files from the root (`patch.diff`, `temp.go`, `test.cs`, old `.bat` files, and Copilot exports).

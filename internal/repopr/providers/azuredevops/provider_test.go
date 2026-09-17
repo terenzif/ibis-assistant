@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-assistant/internal/repopr"
+	"github.com/terenzif/ibis-server/internal/repopr"
 )
 
 func TestCreatePR(t *testing.T) {

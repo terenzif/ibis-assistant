@@ -10,7 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-server/internal/config"
 )
 
 type mcpServerWrapper struct {

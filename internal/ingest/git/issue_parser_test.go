@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/terenzif/ibis-assistant/internal/ticketing"
+	"github.com/terenzif/ibis-server/internal/ticketing"
 )
 
 func TestExtractIssueRefs(t *testing.T) {

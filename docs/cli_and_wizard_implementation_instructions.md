@@ -1,117 +1,117 @@
-# Guida Operativa in Fasi: Interfaccia CLI, Gestione Background e Wizard di Configurazione
+# Phased Implementation Guide: CLI Interface, Background Management, and Configuration Wizard
 
 > [!NOTE]
-> **Stato dell'implementazione: COMPLETATO** (commit `b139255`)
-> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale.
+> **Implementation status: COMPLETED** (commit `b139255`)
+> All phases have been implemented and verified with green tests. This document is kept as an architectural reference.
 >
-> **Rischi residui identificati (post-naming analysis):**
-> - Portabilità PID/log path quando l'eseguibile parte da directory non standard (es. `System32` in modalità service Windows).
-> - Parità di comportamento tra modalità service (`/run`) e run interattivo per gli hook di shutdown.
-> - UX error handling CLI quando server non raggiungibile: attualmente l'errore è generico HTTP.
+> **Residual risks identified (post-naming analysis):**
+> - PID/log path portability when the executable starts from a non-standard directory (e.g. `System32` in Windows service mode).
+> - Behavior parity between service mode (`/run`) and interactive run for shutdown hooks.
+> - CLI UX error handling when the server is unreachable: currently the error is a generic HTTP error.
 
 ---
 
-## Panoramica delle Fasi
-* **Fase 1:** Wizard di Configurazione Interattivo (`internal/config/wizard.go`)
-* **Fase 2:** Client HTTP CLI per i Tool MCP (`internal/cli/client.go`)
-* **Fase 3:** Gestione Demone & Controllo Ciclo di Vita (`start` / `stop` via PID file)
-* **Fase 4:** Routing e Integrazione nel file Principale (`cmd/server/main.go`)
-* **Fase 5:** Endpoint di Auto-Discovery (`GET /`)
-* **Fase 6:** Test di Validazione
+## Phase Overview
+* **Phase 1:** Interactive Configuration Wizard (`internal/config/wizard.go`)
+* **Phase 2:** HTTP CLI Client for MCP Tools (`internal/cli/client.go`)
+* **Phase 3:** Daemon Management & Lifecycle Control (`start` / `stop` via PID file)
+* **Phase 4:** Routing and Integration in the Main File (`cmd/server/main.go`)
+* **Phase 5:** Auto-Discovery Endpoint (`GET /`)
+* **Phase 6:** Validation Tests
 
 ---
 
-## Fase 1: Wizard di Configurazione Interattivo
-**Obiettivo:** Creare un'interfaccia interattiva da console che guidi l'utente nella creazione del file `config.json`.
+## Phase 1: Interactive Configuration Wizard
+**Goal:** Create an interactive console interface that guides the user in creating `config.json`.
 
-### Passi operativi:
-1. Crea il file `internal/config/wizard.go`.
-2. Implementa la funzione `RunWizard()` che legge da `stdin` (utilizzando `bufio.NewScanner(os.Stdin)`):
-   * Chiedi la scelta della modalità: `1) Veloce (Fast)` o `2) Dettagliata (Detailed)`.
-   * **In modalità Veloce**:
-     * Porta del server (default: `3030`).
-     * Abilitazione AI Reasoning (Gemini) (S/N, default S).
-     * Se abilitata, chiedi la chiave API (controlla se `GEMINI_API_KEY` è presente in ambiente e proponila come default).
-     * Cartella Discovery Root (default: `./repos`).
-     * Cartella Logs Root (default: `./logs`).
-   * **In modalità Dettagliata**:
-     * Porta (default: `3030`) e Modalità (`sse` / `stdio`, default: `sse`).
-     * Database: Scelta tra `1) Embedded SurrealDB` o `2) Remote SurrealDB`.
-       * Se Embedded: Data Path (default: `./db`), Auto-update (S/N, default: S).
-       * Se Remote: URL (default: `ws://localhost:8000/rpc`), Namespace, Database, User, Password.
-     * AI Embedding: Provider (`ollama` o `gemini`). Se Ollama, chiedi URL, Modello (default `nomic-embed-text`), Auto-start (S/N, default S), Auto-update (S/N, default S).
-     * AI Reasoning: Provider (`gemini` o `none`). Se Gemini, chiedi le chiavi Gemini (supporta input multiplo separato da virgola) e RPM di default.
-     * Discovery Root e Auto-scan (S/N).
-     * Ingestion Log: Logs Root, HTTP log ingestion (S/N). Se abilitata, chiedi o autogenera API Key.
-     * SMTP: Abilitazione ed eventuali credenziali/host (se abilitato).
-     * Ticketing: Configura Redmine (S/N). Se sì, chiedi Redmine URL e Redmine API Key.
-3. Serializza la configurazione risultante in un file `config.json` strutturato. Se configurato Redmine, genera anche `config/ticketing_config.json`.
-
----
-
-## Fase 2: Client HTTP CLI per i Tool MCP
-**Obiettivo:** Permettere alla CLI di inviare i comandi al server e formattare i risultati.
-
-### Passi operativi:
-1. Crea il file `internal/cli/client.go`.
-2. Implementa la funzione `ExecuteToolCall(cmd string, args []string)`:
-   * Leggi il file `config.json` per ricavare la porta e l'indirizzo del server (default: `http://localhost:3030`).
-   * Costruisci la richiesta MCP JSON-RPC per la chiamata del tool (es. `{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "...", "arguments": { ... } }, "id": 1 }`).
-   * Invia la richiesta all'endpoint `/mcp` o `/mcp/` tramite una richiesta HTTP POST.
-   * Ricevi la risposta JSON e formattala a console:
-     * Se il risultato è testo normale, stampalo.
-     * Se è JSON strutturato, formattalo con indentazione.
-     * Se è un errore, stampalo su `os.Stderr` ed esci con codice non zero.
+### Operational steps:
+1. Create the file `internal/config/wizard.go`.
+2. Implement `RunWizard()` that reads from `stdin` (using `bufio.NewScanner(os.Stdin)`):
+   * Ask for mode choice: `1) Fast` or `2) Detailed`.
+   * **In Fast mode**:
+     * Server port (default: `3030`).
+     * Enable AI Reasoning (Gemini) (Y/N, default Y).
+     * If enabled, ask for the API key (check whether `GEMINI_API_KEY` is present in the environment and propose it as default).
+     * Discovery Root folder (default: `./repos`).
+     * Logs Root folder (default: `./logs`).
+   * **In Detailed mode**:
+     * Port (default: `3030`) and Mode (`sse` / `stdio`, default: `sse`).
+     * Database: Choice between `1) Embedded SurrealDB` or `2) Remote SurrealDB`.
+       * If Embedded: Data Path (default: `./db`), Auto-update (Y/N, default: Y).
+       * If Remote: URL (default: `ws://localhost:8000/rpc`), Namespace, Database, User, Password.
+     * AI Embedding: Provider (`ollama` or `gemini`). If Ollama, ask for URL, Model (default `nomic-embed-text`), Auto-start (Y/N, default Y), Auto-update (Y/N, default Y).
+     * AI Reasoning: Provider (`gemini` or `none`). If Gemini, ask for Gemini keys (supports multiple comma-separated input) and default RPM.
+     * Discovery Root and Auto-scan (Y/N).
+     * Log ingestion: Logs Root, HTTP log ingestion (Y/N). If enabled, ask for or auto-generate an API Key.
+     * SMTP: Enable and optional credentials/host (if enabled).
+     * Ticketing: Configure Redmine (Y/N). If yes, ask for Redmine URL and Redmine API Key.
+3. Serialize the resulting configuration into a structured `config.json` file. If Redmine is configured, also generate `config/ticketing_config.json`.
 
 ---
 
-## Fase 3: Gestione Demone & Controllo Ciclo di Vita
-**Obiettivo:** Permettere al server di girare in background in modalità demone ed essere controllato da terminale tramite file PID.
+## Phase 2: HTTP CLI Client for MCP Tools
+**Goal:** Allow the CLI to send commands to the server and format the results.
 
-### Passi operativi:
-1. Implementa in `main.go` la logica di avvio in background:
-   * Quando viene lanciato il comando `start` o `run --daemon`:
-     * Controlla se `ibis-assistant.pid` esiste già ed è associato a un processo attivo (se sì, fallisci indicando che il server è già in esecuzione).
-     * Esegui l'eseguibile stesso (`os.Executable()`) passando gli argomenti di esecuzione (es. `run`) e reindirizzando `stdout` e `stderr` a un file di log (es. `server.log`).
-     * Scrivi il PID del nuovo processo figlio nel file `ibis-assistant.pid` nella directory dell'eseguibile o in quella corrente.
-     * Stampa un messaggio del tipo `Server avviato in background con PID <PID>` ed esci immediatamente ritornando il controllo alla shell.
-2. Implementa la logica di stop:
-   * Quando viene lanciato il comando `stop`:
-     * Leggi il PID dal file `ibis-assistant.pid`.
-     * Se il file non esiste, stampa un errore (`Server non in esecuzione`).
-     * Trova il processo (`os.FindProcess(pid)`) e invia un segnale di terminazione controllata (`syscall.SIGTERM` o `os.Interrupt` su Windows).
-     * Attendi brevemente per verificare che il processo si sia arrestato.
-     * Rimuovi il file `ibis-assistant.pid`.
-     * Stampa `Server arrestato correttamente`.
+### Operational steps:
+1. Create the file `internal/cli/client.go`.
+2. Implement `ExecuteToolCall(cmd string, args []string)`:
+   * Read `config.json` to obtain the server port and address (default: `http://localhost:3030`).
+   * Build the MCP JSON-RPC request for the tool call (e.g. `{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "...", "arguments": { ... } }, "id": 1 }`).
+   * Send the request to the `/mcp` or `/mcp/` endpoint via HTTP POST.
+   * Receive the JSON response and format it for the console:
+     * If the result is plain text, print it.
+     * If it is structured JSON, format it with indentation.
+     * If it is an error, print it to `os.Stderr` and exit with a non-zero code.
 
 ---
 
-## Fase 4: Routing e Integrazione nel file Principale
-**Obiettivo:** Agganciare i nuovi flussi al switch delle opzioni CLI in `cmd/server/main.go`.
+## Phase 3: Daemon Management & Lifecycle Control
+**Goal:** Allow the server to run in the background in daemon mode and be controlled from the terminal via a PID file.
 
-### Passi operativi:
-1. In `cmd/server/main.go`, modifica la funzione `main()`:
-   * **Controllo Configurazione**: Se la configurazione non esiste, lancia automaticamente il wizard `wizard.RunWizard()`.
-   * **Switch dei Comandi**:
-     * Aggiungi `case "config":` per lanciare il wizard manualmente.
-     * Aggiungi `case "start", "run --daemon":` per il bootstrap in background.
-     * Aggiungi `case "stop":` per la terminazione controllata.
-     * Aggiungi i case per i comandi CLI (`ask`, `ticket`, `pr`, `ingest`, `logs`, `credentials`, `memory`, `outcome`, `optimize`). Deferisci la gestione della chiamata a `internal/cli.ExecuteToolCall()`.
-2. Estendi `printHelp()` per documentare in italiano la sintassi di tutti i comandi CLI e i comandi di controllo del demone.
+### Operational steps:
+1. Implement background start logic in `main.go`:
+   * When `start` or `run --daemon` is launched:
+     * Check whether `ibis-assistant.pid` already exists and is associated with an active process (if so, fail indicating the server is already running).
+     * Execute the same executable (`os.Executable()`) with the run arguments (e.g. `run`) and redirect `stdout` and `stderr` to a log file (e.g. `server.log`).
+     * Write the child process PID to `ibis-assistant.pid` in the executable directory or the current directory.
+     * Print a message such as `Server started in background with PID <PID>` and exit immediately, returning control to the shell.
+2. Implement stop logic:
+   * When `stop` is launched:
+     * Read the PID from `ibis-assistant.pid`.
+     * If the file does not exist, print an error (`Server not running`).
+     * Find the process (`os.FindProcess(pid)`) and send a controlled termination signal (`syscall.SIGTERM` or `os.Interrupt` on Windows).
+     * Wait briefly to verify the process has stopped.
+     * Remove `ibis-assistant.pid`.
+     * Print `Server stopped successfully`.
 
 ---
 
-## Fase 5: Endpoint di Auto-Discovery (`GET /`)
-**Obiettivo:** Implementare l'endpoint informativo sulla rotta `/` del server per agevolare l'integrazione con client AI esterni.
+## Phase 4: Routing and Integration in the Main File
+**Goal:** Hook the new flows into the CLI option switch in `cmd/server/main.go`.
 
-### Passi operativi:
-1. Registra un handler HTTP sulla rotta `/` in `cmd/server/main.go`:
+### Operational steps:
+1. In `cmd/server/main.go`, modify `main()`:
+   * **Configuration check**: If configuration does not exist, automatically launch `wizard.RunWizard()`.
+   * **Command switch**:
+     * Add `case "config":` to launch the wizard manually.
+     * Add `case "start", "run --daemon":` for background bootstrap.
+     * Add `case "stop":` for controlled termination.
+     * Add cases for CLI commands (`ask`, `ticket`, `pr`, `ingest`, `logs`, `credentials`, `memory`, `outcome`, `optimize`). Defer call handling to `internal/cli.ExecuteToolCall()`.
+2. Extend `printHelp()` to document the syntax of all CLI commands and daemon control commands in English.
+
+---
+
+## Phase 5: Auto-Discovery Endpoint (`GET /`)
+**Goal:** Implement the informational endpoint on the server `/` route to ease integration with external AI clients.
+
+### Operational steps:
+1. Register an HTTP handler on the `/` route in `cmd/server/main.go`:
    ```go
    mux.HandleFunc("/", autoDiscoveryHandler(cfg, s))
    ```
-2. La funzione deve rispondere distinguendo gli header `Accept`:
+2. The function must respond by distinguishing `Accept` headers:
    * **`Accept: application/json`**:
-     Restituisce un JSON strutturato con i metadati del server:
+     Returns structured JSON with server metadata:
      ```json
      {
        "status": "online",
@@ -123,18 +123,18 @@
        "tools": [ ... ]
      }
      ```
-   * **Altro (Browser / Client Web)**:
-     Restituisce una pagina HTML o Markdown autodescrittiva che:
-     * Spiega l'utilità del server Ibis Assistant.
-     * Mostra frammenti di configurazione JSON pronti per l'integrazione in Claude Desktop, Cursor e Windsurf.
-     * Elenca i comandi della CLI e i tool MCP abilitati nel sistema.
+   * **Other (Browser / Web Client)**:
+     Returns a self-describing HTML or Markdown page that:
+     * Explains the usefulness of the Ibis Assistant server.
+     * Shows ready-to-use JSON configuration snippets for Claude Desktop, Cursor, and Windsurf.
+     * Lists CLI commands and MCP tools enabled in the system.
 
 ---
 
-## Fase 6: Test di Validazione
-**Obiettivo:** Scrivere test unitari per validare il parsing CLI e il wizard di scrittura.
+## Phase 6: Validation Tests
+**Goal:** Write unit tests to validate CLI parsing and the wizard write path.
 
-### Passi operativi:
-1. Crea `internal/cli/client_test.go` per testare la corretta costruzione dei JSON RPC payload a partire dai parametri passati da riga di comando.
-2. Esegui la compilazione con `go build` per verificare che non ci siano errori di sintassi.
-3. Esegui la suite di test completa tramite `go test ./...` per assicurare che le modifiche non abbiano introdotto regressioni.
+### Operational steps:
+1. Create `internal/cli/client_test.go` to test correct construction of JSON-RPC payloads from command-line parameters.
+2. Run a build with `go build` to verify there are no syntax errors.
+3. Run the full test suite with `go test ./...` to ensure the changes have not introduced regressions.

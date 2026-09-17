@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-server/internal/logger"
 )
 
 // StartOllamaDaemon launches the local Ollama process in the background.

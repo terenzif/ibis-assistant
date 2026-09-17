@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/terenzif/ibis-assistant/internal/repopr"
+	"github.com/terenzif/ibis-server/internal/repopr"
 )
 
 type Config struct {

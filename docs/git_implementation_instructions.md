@@ -1,50 +1,50 @@
-# Guida Operativa in Fasi: Generalizzazione Accesso Git e Gestione Credenziali (Metodologia Top-Down)
+# Phased Implementation Guide: Git Access Generalization and Credential Management (Top-Down Methodology)
 
 > [!NOTE]
-> **Stato dell'implementazione: COMPLETATO** (commit `69868c2`)  
-> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale.
+> **Implementation status: COMPLETED** (commit `69868c2`)  
+> All phases have been implemented and verified with green tests. This document is kept as an architectural reference.
 >
-> **Rischi residui identificati (post-naming analysis):**
-> - Copertura edge-case SSH (chiavi multi-riga, permessi file temporanei su Windows).
-> - Coerenza tra errore reale Git auth e trigger `CredentialsRequiredError` su provider non standard.
-> - Sanitizzazione output su messaggi Git con token URL-encoded o base64 annidato.
+> **Residual risks identified (post-naming analysis):**
+> - SSH edge-case coverage (multi-line keys, temporary file permissions on Windows).
+> - Consistency between real Git auth errors and `CredentialsRequiredError` trigger on non-standard providers.
+> - Output sanitization for Git messages with URL-encoded tokens or nested base64.
 
 ---
 
-## Panoramica delle Fasi
-* **Fase 1:** Aggiornamento dello Schema del Database (SurrealDB Schema per `git_credential`)
-* **Fase 2:** Core Credential Store (`internal/gitrepo` - Types & Store)
-* **Fase 3:** Git Command Runner con Log Masking (`internal/gitrepo` - Runner)
-* **Fase 4:** Integrazione Context e Config (Lettura header `X-Git-Token`)
-* **Fase 5:** Rifattorizzazione Sincronizzazione Workspace (`internal/ingest/dynamic/workspace.go`)
-* **Fase 6:** Implementazione Tool MCP (`git_configure_credentials` & Gestione `init_project`)
-* **Fase 7:** Validazione e Unit Testing
+## Phase Overview
+* **Phase 1:** Database Schema Update (SurrealDB Schema for `git_credential`)
+* **Phase 2:** Core Credential Store (`internal/gitrepo` - Types & Store)
+* **Phase 3:** Git Command Runner with Log Masking (`internal/gitrepo` - Runner)
+* **Phase 4:** Context and Config Integration (Reading `X-Git-Token` header)
+* **Phase 5:** Workspace Sync Refactor (`internal/ingest/dynamic/workspace.go`)
+* **Phase 6:** MCP Tool Implementation (`git_configure_credentials` & `init_project` handling)
+* **Phase 7:** Validation and Unit Testing
 
 ---
 
-## Fase 1: Aggiornamento dello Schema del Database
-**Obiettivo:** Definire la tabella `git_credential` e il suo indice unico in SurrealDB.
+## Phase 1: Database Schema Update
+**Goal:** Define the `git_credential` table and its unique index in SurrealDB.
 
-### Passi operativi:
-1. Apri `internal/schema/schema.go`.
-2. Aggiungi la costante `TableGitCredential` per identificare la tabella:
+### Operational steps:
+1. Open `internal/schema/schema.go`.
+2. Add the `TableGitCredential` constant to identify the table:
    ```go
    TableGitCredential = "git_credential"
    ```
-3. Aggiungi le seguenti definizioni e indici all'array `Definition`:
+3. Add the following definitions and indexes to the `Definition` array:
    ```go
    fmt.Sprintf("DEFINE TABLE %s SCHEMALESS;", TableGitCredential),
    fmt.Sprintf("DEFINE INDEX credential_target ON TABLE %s COLUMNS target UNIQUE;", TableGitCredential),
    ```
-4. Esegui la build per verificare la sintassi.
+4. Run the build to verify syntax.
 
 ---
 
-## Fase 2: Core Credential Store (`internal/gitrepo` - Types & Store)
-**Obiettivo:** Creare le struct per rappresentare le credenziali e la logica per salvarle/leggerle da SurrealDB.
+## Phase 2: Core Credential Store (`internal/gitrepo` - Types & Store)
+**Goal:** Create structs to represent credentials and the logic to save/read them from SurrealDB.
 
-### Passi operativi:
-1. Crea `internal/gitrepo/types.go` e dichiara la struct `Credential`:
+### Operational steps:
+1. Create `internal/gitrepo/types.go` and declare the `Credential` struct:
    ```go
    package gitrepo
 
@@ -66,7 +66,7 @@
    )
 
    type Credential struct {
-       Target        string   `json:"target"` // Dominio (es. github.com) o repo URL completo
+       Target        string   `json:"target"` // Domain (e.g. github.com) or full repo URL
        Provider      string   `json:"provider"`
        AuthType      AuthType `json:"auth_type"`
        Token         string   `json:"token,omitempty"`
@@ -74,15 +74,15 @@
        SSHPrivateKey string   `json:"ssh_private_key,omitempty"`
    }
    ```
-2. Crea `internal/gitrepo/store.go` per implementare lo store delle credenziali:
+2. Create `internal/gitrepo/store.go` to implement the credential store:
    ```go
    package gitrepo
 
    import (
        "context"
        "fmt"
-       "github.com/terenzif/ibis-assistant/internal/db"
-       "github.com/terenzif/ibis-assistant/internal/schema"
+       "github.com/terenzif/ibis-server/internal/db"
+       "github.com/terenzif/ibis-server/internal/schema"
    )
 
    type CredentialStore struct {
@@ -110,66 +110,66 @@
        if err != nil {
            return nil, err
        }
-       // Parsing del risultato
+       // Parse the result
        // ...
-       return nil, nil // Ritorna credenziale se trovata
+       return nil, nil // Return credential if found
    }
    ```
-3. Scrivi i relativi test unitari in `internal/gitrepo/store_test.go`.
+3. Write related unit tests in `internal/gitrepo/store_test.go`.
 
 ---
 
-## Fase 3: Git Command Runner con Log Masking (`internal/gitrepo` - Runner)
-**Obiettivo:** Eseguire comandi Git iniettando le credenziali corrette a seconda del provider e mascherando i token sensibili nei log/errori.
+## Phase 3: Git Command Runner with Log Masking (`internal/gitrepo` - Runner)
+**Goal:** Run Git commands injecting the correct credentials depending on the provider, and mask sensitive tokens in logs/errors.
 
-### Passi operativi:
-1. Crea `internal/gitrepo/runner.go`.
-2. Implementa `GitCommandRunner` che:
-   - Formatta gli argomenti di Git (es. modificando l'URL per inserire `http.extraHeader` o il token base64 basic auth).
-   - Esegue `exec.CommandContext`.
-   - Intercetta l'output e rimuove/sostituisce stringhe sensibili come PAT e token in modo che non vengano stampate nei log o ritornate negli errori.
-3. Scrivi i relativi test unitari in `internal/gitrepo/runner_test.go`.
-
----
-
-## Fase 4: Integrazione Context e Config (Lettura header `X-Git-Token`)
-**Obiettivo:** Abilitare il passaggio di token runtime dal client HTTP al contesto di esecuzione delle operazioni.
-
-### Passi operativi:
-1. Modifica `internal/auth/keys.go` aggiungendo la costante `GitTokenContextKey`.
-2. In `cmd/server/main.go`, modifica `AuthMiddleware` per intercettare l'header `X-Git-Token` (o `X-Git-PAT`) e iniettarlo nel contesto.
-3. Modifica la struct `Config` in `internal/config/config.go` affinché la funzione di ricerca credenziali interroghi anche il nuovo store se presente.
+### Operational steps:
+1. Create `internal/gitrepo/runner.go`.
+2. Implement `GitCommandRunner` that:
+   - Formats Git arguments (e.g. modifying the URL to insert `http.extraHeader` or base64 basic-auth token).
+   - Runs `exec.CommandContext`.
+   - Intercepts output and removes/replaces sensitive strings such as PATs and tokens so they are not printed in logs or returned in errors.
+3. Write related unit tests in `internal/gitrepo/runner_test.go`.
 
 ---
 
-## Fase 5: Rifattorizzazione Sincronizzazione Workspace (`internal/ingest/dynamic/workspace.go`)
-**Obiettivo:** Sostituire l'uso delle chiamate `exec.CommandContext` grezze in `SyncWorkspace` con il nuovo `GitCommandRunner`.
+## Phase 4: Context and Config Integration (Reading `X-Git-Token` header)
+**Goal:** Enable passing runtime tokens from the HTTP client into the execution context of operations.
 
-### Passi operativi:
-1. Apri `internal/ingest/dynamic/workspace.go`.
-2. Modifica la firma di `SyncWorkspace` (o aggiungi una versione aggiornata) che riceve anche un `db.Executor` per accedere alle credenziali salvate, oltre che a quelle a livello di request nel `ctx`.
-3. Integra la logica per cercare prima le credenziali nel contesto (runtime), poi nel database tramite il target `originUrl` o dominio del provider, e infine come fallback in `config.json`.
-4. Se l'esecuzione fallisce a causa di autorizzazione o se non vi sono credenziali per un repository privato, ritorna un errore strutturato ad-hoc (es. `CredentialsRequiredError`).
-
----
-
-## Fase 6: Implementazione Tool MCP (`git_configure_credentials` & Gestione `init_project`)
-**Obiettivo:** Esporre i nuovi strumenti MCP e aggiornare la gestione di errori in `init_project`.
-
-### Passi operativi:
-1. Apri `cmd/server/main.go`.
-2. Aggiungi il nuovo tool MCP `git_configure_credentials`:
-   - Prende come argomenti: `target`, `provider`, `auth_type`, `token`, `username`, `ssh_private_key`.
-   - Salva i dati in SurrealDB tramite lo store creato in Fase 2.
-3. Modifica il gestore di `init_project` e `update_project_status`:
-   - Cattura l'errore `CredentialsRequiredError`.
-   - Restituisce un payload JSON strutturato con `"status": "credentials_required"`.
+### Operational steps:
+1. Modify `internal/auth/keys.go` adding the `GitTokenContextKey` constant.
+2. In `cmd/server/main.go`, modify `AuthMiddleware` to intercept the `X-Git-Token` (or `X-Git-PAT`) header and inject it into the context.
+3. Modify the `Config` struct in `internal/config/config.go` so the credential lookup function also queries the new store if present.
 
 ---
 
-## Fase 7: Validazione e Unit Testing
-**Obiettivo:** Assicurare la stabilità globale del sistema.
+## Phase 5: Workspace Sync Refactor (`internal/ingest/dynamic/workspace.go`)
+**Goal:** Replace raw `exec.CommandContext` calls in `SyncWorkspace` with the new `GitCommandRunner`.
 
-### Passi operativi:
-1. Esegui la suite di test globale: `go test ./...`.
-2. Testa manualmente il flusso simulando la prima sincronizzazione di un repository privato e verificando che la richiesta di credenziali e il salvataggio funzionino correttamente.
+### Operational steps:
+1. Open `internal/ingest/dynamic/workspace.go`.
+2. Modify the `SyncWorkspace` signature (or add an updated version) that also receives a `db.Executor` to access saved credentials, in addition to request-level ones in `ctx`.
+3. Integrate logic to look up credentials first in the context (runtime), then in the database via the `originUrl` target or provider domain, and finally as fallback in `config.json`.
+4. If execution fails due to authorization or there are no credentials for a private repository, return a structured ad-hoc error (e.g. `CredentialsRequiredError`).
+
+---
+
+## Phase 6: MCP Tool Implementation (`git_configure_credentials` & `init_project` handling)
+**Goal:** Expose the new MCP tools and update error handling in `init_project`.
+
+### Operational steps:
+1. Open `cmd/server/main.go`.
+2. Add the new MCP tool `git_configure_credentials`:
+   - Takes as arguments: `target`, `provider`, `auth_type`, `token`, `username`, `ssh_private_key`.
+   - Saves data in SurrealDB via the store created in Phase 2.
+3. Modify the `init_project` and `update_project_status` handlers:
+   - Catch `CredentialsRequiredError`.
+   - Return a structured JSON payload with `"status": "credentials_required"`.
+
+---
+
+## Phase 7: Validation and Unit Testing
+**Goal:** Ensure overall system stability.
+
+### Operational steps:
+1. Run the global test suite: `go test ./...`.
+2. Manually test the flow by simulating the first sync of a private repository and verifying that credential request and persistence work correctly.

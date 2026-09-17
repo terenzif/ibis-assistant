@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-server/internal/ai"
 )
 
 // MockDB implements db.Executor

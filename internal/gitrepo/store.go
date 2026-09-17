@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/terenzif/ibis-assistant/internal/db"
-	"github.com/terenzif/ibis-assistant/internal/schema"
+	"github.com/terenzif/ibis-server/internal/db"
+	"github.com/terenzif/ibis-server/internal/schema"
 )
 
 type CredentialStore struct {

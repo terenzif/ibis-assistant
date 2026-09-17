@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-assistant/internal/ticketing"
+	"github.com/terenzif/ibis-server/internal/ticketing"
 )
 
 func TestGetIssueUsesBasicAuth(t *testing.T) {

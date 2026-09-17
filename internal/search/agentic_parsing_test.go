@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-server/internal/ai"
 )
 
 // TestAskProjectAgentic_Parsing verifies that SEARCH commands without quotes

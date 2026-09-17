@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/terenzif/ibis-assistant/internal/ticketing"
+	"github.com/terenzif/ibis-server/internal/ticketing"
 )
 
 var (
