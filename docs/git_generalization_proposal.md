@@ -6,19 +6,19 @@
 
 ---
 
-Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai repository Git all'interno del codebase `ibis-assistant`, introducendo la persistenza delle credenziali in SurrealDB, il supporto per override runtime tramite header HTTP e la risoluzione dello scenario "primo utilizzo non configurato" in un server centralizzato per team di sviluppo.
+Questo documento descrive la proposta architetturale per astrarre e generalizzare l'accesso ai repository Git all'interno del codebase `ibis-assistant`, introducendo la persistenza delle credenziali in SurrealDB, il supporto per override runtime tramite header HTTP e la risoluzione dello scenario "primo utilizzo non configurato" su un'istanza self-hosted.
 
 ---
 
 ## 1. Analisi del Contesto e Decisioni di Design
 
-### Nota 1: Server di Team e Checkout Condivisi
-> **Scenario:** Ibis Assistant è un server centrale a disposizione di un intero team di sviluppo (`localhost`). Gli sviluppatori lavorano sugli stessi repository privati ma possiedono credenziali personali distinte (es. Token PAT Azure DevOps o GitHub).
+### Nota 1: Istanza self-hosted e checkout locale
+> **Scenario:** Ibis Assistant gira come istanza personale/self-hosted (`localhost` o host dedicato). Si indicizzano repository privati con credenziali proprie (PAT Azure DevOps, GitHub, ecc.).
 
 **Soluzione Proposta:**
-1. **Repository Unico sul Server:** Poiché il server esegue l'indicizzazione del codice e la costruzione del grafo di conoscenza in SurrealDB in modo centralizzato, sul server esiste *una sola copia locale* del repository (salvata sotto `discovery_root/dynamic`).
-2. **Uso di Credenziali di Sistema (Default/Shared):** Quando il primo sviluppatore configura o usa il repository, il server può memorizzare una credenziale di default per quel repository o per l'intero provider (es. un PAT di un utente tecnico o il PAT del primo utente se condiviso). Questa credenziale verrà riutilizzata per le sincronizzazioni successive in background.
-3. **Override Runtime (Per-User):** Per garantire la privacy o utilizzare permessi specifici durante le richieste sincrone dell'utente, l'applicazione supporterà l'header HTTP `X-Git-Token` (o `X-Git-PAT`). Se presente, questo token farà l'override temporaneo di qualsiasi credenziale persistita sul server per la singola operazione (senza essere memorizzato su disco o DB).
+1. **Repository Unico sul Server:** L'indicizzazione e il grafo SurrealDB usano *una sola copia locale* del repository (sotto `discovery_root/dynamic`).
+2. **Credenziali di Sistema (Default):** Alla prima configurazione si può memorizzare una credenziale di default per repository o provider, riutilizzata per le sincronizzazioni in background.
+3. **Override Runtime:** L'header HTTP `X-Git-Token` (o `X-Git-PAT`) fa override temporaneo della credenziale persistita per la singola operazione (non memorizzato su disco o DB).
 
 ---
 

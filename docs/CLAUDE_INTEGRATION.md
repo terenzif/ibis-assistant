@@ -4,16 +4,16 @@ This guide describes how to connect **Claude Desktop** to the **Ibis Assistant**
 
 ## 🌉 Why a Bridge?
 
-Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. However, the Ibis Assistant runs as a remote HTTP/SSE (Server-Sent Events) service to allow multiple users to share the same knowledge graph.
+Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Ibis Assistant exposes HTTP/SSE so multiple MCP clients can share the same knowledge graph.
 
-To connect them, we use a lightweight **MCP Bridge** that runs locally on your machine, talks "Stdio" to Claude, and forwards messages to the remote Ibis Assistant.
+To connect them, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Ibis Assistant SSE endpoint.
 
 ---
 
 ## 🛠️ Installation & Setup
 
 ### 1. Prerequisite: The Ibis Assistant
-Ensure the Ibis Assistant is running (e.g., on a shared dev server like `http://localhost:3030`).
+Ensure the Ibis Assistant is running (e.g. `http://localhost:3030`).
 
 ### 2. Build the Bridge Tool
 If you haven't already, compile the bridge tool included in this repository.

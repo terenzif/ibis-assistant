@@ -188,7 +188,7 @@ L'eseguibile `ibis-assistant` include un client CLI completo che comunica tramit
 
 ### 🌐 Auto-Discovery HTTP (GET /)
 
-Se si effettua una richiesta GET alla radice del server (es. `http://localhost:3030/` o `http://localhost:3030/`):
+Se si effettua una richiesta GET alla radice del server (es. `http://localhost:3030/`):
 - **Web Browser (Accept: text/html)**: Mostra una dashboard web reattiva dal design moderno ed elegante in modalità dark, contenente gli endpoint attivi, le istruzioni di configurazione copia-e-incolla per Claude Desktop, Cursor, Windsurf, e l'elenco interattivo di tutti i tool MCP registrati con relativi schemi di input.
 - **Client AI / Programmatico (Accept: application/json)**: Ritorna i metadati strutturati e lo schema JSON completo di tutti i tool esposti, permettendo all'AI di auto-scoprire le potenzialità del server in autonomia senza probing manuale.
 
@@ -210,7 +210,7 @@ O via variabile d'ambiente: `DB_AUTO_UPDATE=false`.
 Il file `config.json` viene cercato automaticamente nella directory corrente e nella directory in cui si trova l'eseguibile (utile quando eseguito come servizio). È possibile specificare un file diverso con il flag `-config <path>`.
 
 #### 🔑 Credenziali Git e PAT (Personal Access Tokens)
-Poiché il server spesso gira come Servizio (es. LocalSystem) in un contesto di team, la gestione delle credenziali Git è stata generalizzata e strutturata su più livelli di priorità:
+Poiché il server può girare come Servizio (es. LocalSystem) o in background, la gestione delle credenziali Git è strutturata su più livelli di priorità:
 
 1. **Override Runtime (Per-User)**: Passato dall'utente tramite gli header HTTP `X-Git-Token` o `X-Git-PAT`. Questo valore ha la priorità massima e viene usato solo per la singola operazione sincrona dell'utente (non memorizzato).
 2. **Database Store (Centralizzato)**: Credenziali persistite in modo sicuro sul database SurrealDB (tabella `git_credential`). Possono essere configurate via MCP tool per singoli domini o per specifici URL di repository.
@@ -240,11 +240,11 @@ Se viene inizializzato un repository privato (`init_project`) e non vi sono cred
 L'agente client intercetta questa risposta, richiede il PAT all'utente in modo interattivo e lo memorizza sul server richiamando `git_configure_credentials`.
 
 
-### 🔌 Integrazione Client (Centralizzata)
+### 🔌 Integrazione Client (self-hosted)
 
-Il Ibis Assistant è installato centralmente su **`localhost`** e funge da oracolo per tutto il team. I client non devono eseguire nulla in locale, ma solo connettersi all'endpoint SSE.
+Ibis Assistant gira in locale (o su un host personale) ed espone un endpoint SSE a cui si collegano i client MCP.
 
-**Endpoint Pubblico:** `http://localhost:3030/sse`
+**Endpoint di default:** `http://localhost:3030/sse`
 
 ### 🔑 Autenticazione Utente (Ticketing)
 
@@ -297,7 +297,7 @@ Nel `settings.json` o nelle impostazioni dell'estensione:
 }
 ```
 
-Questo permette a tutti gli sviluppatori di accedere allo stesso grafo condiviso senza indicizzare i file localmente.
+Questo permette di interrogare lo stesso grafo senza reindicizzare i file da ogni client.
 
 #### 3. Visual Studio 2022
 
@@ -314,17 +314,17 @@ L'integrazione nativa di MCP in Visual Studio è in fase di evoluzione rapida.
 Non esiste ancora un supporto nativo *ufficiale* per MCP in SSMS.
 
 * **Copilot in SSMS**: Se attivo, utilizza il contesto di Azure/Github standard. Non è garantito che "veda" il server MCP locale/remoto.
-* **Workflow "Side-by-Side"**: Gli sviluppatori SQL devono tenere aperto il **Web Inspector** (vedi punto 3) o **Claude Desktop**.
+* **Workflow "Side-by-Side"**: Tenere aperto il **Web Inspector** (vedi punto 3) o **Claude Desktop** accanto all'IDE SQL.
   * *Scenario*: Incollate la definizione di una vista complessa nel Inspector e chiedete: *"Spiegami la logica di business dietro questa vista basandoti sulle Issue Redmine"*.
 
-#### 5. Antigravity & Agenti CI/CD
+#### 5. Agenti automatici / CI
 
-Gli agenti automatici (o Antigravity) configurati nella rete aziendale possono contattare direttamente l'endpoint.
+Gli agenti possono contattare direttamente l'endpoint locale o remoto.
 
 * **Discovery**: `http://localhost:3030`
-* **Vantaggio**: L'agente non deve clonare il repo per capirlo; chiede al Ibis Assistant centrale che ha già "digerito" tutto il codice e la storia.
+* **Vantaggio**: L'agente non deve clonare il repo per capirlo; interroga Ibis Assistant che ha già indicizzato codice e storia.
 
-> **Nota Troubleshooting**: Essendo il server su `win-dev`, assicuratevi che il firewall di Windows su quella macchina permetta il traffico in ingresso sulla porta **3030**.
+> **Nota Troubleshooting**: Se il server è su un'altra macchina Windows, aprite la porta **3030** in ingresso sul firewall.
 
 
 
@@ -394,9 +394,6 @@ Queste istruzioni sono destinate agli agenti AI (come te) che lavorano **sullo s
 - **Regole YAML**: I pattern di estrazione (C#, Go, TS, ecc.) risiedono nella directory `rules/` in formato YAML (gestito da `sgconfig.yml`).
 - **Deploy**: Tutto l'ambiente di produzione viene generato in modo automatizzato nella directory `dist/` usando il target `make dist`.
 
-## 📝 Registro del Lavoro
-Il file `work_log.md` nella root del progetto contiene il log storico di tutte le modifiche strutturali, fix e miglioramenti apportati durante lo sviluppo continuo.
-
 ---
 
-*Progetto sviluppato come parte dell'iniziativa "Universal Senior Engineer".*
+*Ibis Assistant — context server Graph + RAG + Timeline (iniziativa "Universal Senior Engineer").*

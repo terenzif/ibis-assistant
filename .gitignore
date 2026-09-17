@@ -1,4 +1,5 @@
 .vscode/
+.cursor/
 
 # Binaries
 *.exe
@@ -8,15 +9,22 @@ server
 !cmd/server/*.go
 surreal.exe
 ibis-assistant.exe
+mcp-bridge.exe
+knowledge_server.exe
 
-# Temporary
+# Temporary / local secrets
 tmp/
 .env
+config.json
+work_log.md
 
 # Database
 ibis-assistant.db
 ibis-assistant.db-wal
 ibis-assistant.db-shm
+project.db/
+*.db
+*.db-wal
+*.db-shm
 
 dist/
-

@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > **Stato dell'implementazione: COMPLETATO** (commit `69868c2`)  
-> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale. Per lo stato di debug operativo vedere `docs/debug/baseline_env_report.md`.
+> Tutte le fasi sono state implementate e verificate con test verdi. Questo documento è mantenuto come riferimento architetturale.
 >
 > **Rischi residui identificati (post-naming analysis):**
 > - Copertura edge-case SSH (chiavi multi-riga, permessi file temporanei su Windows).

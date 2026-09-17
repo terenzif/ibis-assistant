@@ -4,7 +4,7 @@
 
 ### Configurazione MCP client
 
-- Connetti il server remoto via SSE (es. `http://localhost:3333/sse`)
+- Connetti il server via SSE (es. `http://localhost:3030/sse`)
 - Per override credenziali runtime usa gli header provider:
   - `X-Redmine-API-Key`
   - `X-Jira-Email`, `X-Jira-API-Token`
