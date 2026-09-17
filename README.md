@@ -185,6 +185,15 @@ go test ./...
 * `rules/` — ast-grep YAML extractors
 * `docs/` — architecture and client guides (primary docs are English; some historical design notes may still be Italian)
 
+## Roadmap vision
+
+Ibis Assistant is meant to stay useful when the cloud is optional:
+
+* **Local LLMs first-class** — deepen Ollama (and similar) paths for embeddings *and* reasoning, so a full self-hosted loop works without mandatory cloud APIs; cloud providers remain adapters, not the core.
+* **Continuous learning** — close the loop from real use: reinforce useful graph paths, decay noise, learn from agent outcomes and feedback so retrieval and tooling improve over time instead of staying a static index.
+
+Contributions that move those two axes forward are especially welcome.
+
 ## Agent notes (for contributors working on this repo)
 
 * Treat `cmd/server/main.go` as the MCP tool source of truth

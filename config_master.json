@@ -45,7 +45,9 @@
   },
   "auto_scan": false,
   "git_repos": [],
-  "git_tokens": {"default": ""},
+  "git_tokens": {
+    "default": ""
+  },
   "log_file": "./server.log",
   "log_level": "INFO"
 }
