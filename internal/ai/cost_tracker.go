@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/terenzif/ibis-server/internal/db"
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type CostTracker struct {

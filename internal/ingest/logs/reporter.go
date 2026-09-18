@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/terenzif/ibis-server/internal/config"
-	"github.com/terenzif/ibis-server/internal/db"
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type Reporter struct {

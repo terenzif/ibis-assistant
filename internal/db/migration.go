@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 // MigrateLegacyFileTable moves data from the legacy 'file' table (reserved keyword in v3)

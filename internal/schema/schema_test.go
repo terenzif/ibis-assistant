@@ -3,7 +3,7 @@ package schema_test
 import (
 	"testing"
 
-	"github.com/terenzif/ibis-server/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 func TestSchemaConstants(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-server/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 func TestGetIssueUsesPAT(t *testing.T) {

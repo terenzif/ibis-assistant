@@ -1,16 +1,16 @@
 # Changelog — 17–18 September 2026
 
-Shipped on `terenzif/ibis-server` `master` (merge tip `3b3d3ee`). Primary docs are English. This note records **what landed**, **where it lives**, and **how it was verified**.
+Shipped on what is now `terenzif/ibis-assistant` `master` (merge tip `3b3d3ee`; repo was then named `ibis-server`). Primary docs are English. This note records **what landed**, **where it lives**, and **how it was verified**. See [naming.md](naming.md) for the current product name.
 
 ## Stack merged to master
 
 | PR | Branch | Commit (feature tip) | Summary |
 |----|--------|----------------------|---------|
-| [#1](https://github.com/terenzif/ibis-server/pull/1) | `fix/recordid-embed` | `198111a` + `5be666e` | RecordID formatting / embedding batch persistence; ignore local `AGENTS.md` |
-| [#2](https://github.com/terenzif/ibis-server/pull/2) | `fix/ask-project-search` | `4fc8a08` | Ask/project hybrid ranking and coverage (commits landed via later stack merges) |
-| [#3](https://github.com/terenzif/ibis-server/pull/3) | `feat/sync-local-patch` | `6225b2c` | MCP `sync_local_patch` for unpushed local commits |
-| [#5](https://github.com/terenzif/ibis-server/pull/5) | `feat/logs-pipeline` | `4cab006` | Enrich, LogAlign promote, sidecar reports (commits landed via #4) |
-| [#4](https://github.com/terenzif/ibis-server/pull/4) | `feat/ast-rule-synth` | `570d06a` | AI ast-grep rule synthesis + polyglot languageGlobs |
+| [#1](https://github.com/terenzif/ibis-assistant/pull/1) | `fix/recordid-embed` | `198111a` + `5be666e` | RecordID formatting / embedding batch persistence; ignore local `AGENTS.md` |
+| [#2](https://github.com/terenzif/ibis-assistant/pull/2) | `fix/ask-project-search` | `4fc8a08` | Ask/project hybrid ranking and coverage (commits landed via later stack merges) |
+| [#3](https://github.com/terenzif/ibis-assistant/pull/3) | `feat/sync-local-patch` | `6225b2c` | MCP `sync_local_patch` for unpushed local commits |
+| [#5](https://github.com/terenzif/ibis-assistant/pull/5) | `feat/logs-pipeline` | `4cab006` | Enrich, LogAlign promote, sidecar reports (commits landed via #4) |
+| [#4](https://github.com/terenzif/ibis-assistant/pull/4) | `feat/ast-rule-synth` | `570d06a` | AI ast-grep rule synthesis + polyglot languageGlobs |
 
 > Note: PR #2 and #5 were closed when intermediate base branches were deleted during stacked merge; their commits are ancestors of `origin/master` (`4fc8a08`, `4cab006`).
 
@@ -58,7 +58,7 @@ Shipped on `terenzif/ibis-server` `master` (merge tip `3b3d3ee`). Primary docs a
 |-------|------------------|
 | Unit tests (db / search / logs / code) | Covered by packages listed above; run `go test ./internal/db/ ./internal/search/ ./internal/ingest/logs/ ./internal/ingest/code/` |
 | MCP tool registration | Source of truth: `cmd/server/main.go` (`ask_project`, `sync_local_patch`, `analyze_logs`, `ingest_code`, …) |
-| Stacked merge on GitHub | PRs #1–#5 on `terenzif/ibis-server`; tip `3b3d3ee` |
+| Stacked merge on GitHub | PRs #1–#5 on `terenzif/ibis-assistant` (formerly `ibis-server`); tip `3b3d3ee` |
 | Manual QA (this repo as subject) | Log watch/analyze exercised against the project itself; reports expected beside the watched log with file/cause when enrich succeeds |
 
 ## Doc coherence follow-ups applied with this changelog

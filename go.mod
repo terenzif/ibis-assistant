@@ -1,4 +1,4 @@
-module github.com/terenzif/ibis-server
+module github.com/terenzif/ibis-assistant
 
 go 1.26
 

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/ai"
-	"github.com/terenzif/ibis-server/internal/db"
-	"github.com/terenzif/ibis-server/internal/logger"
-	"github.com/terenzif/ibis-server/internal/search"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/search"
 )
 
 // Optimizer manages the Retrieval-Augmented Fine-Tuning (RAFT) self-optimization loop, improving knowledge graph relevance over time.

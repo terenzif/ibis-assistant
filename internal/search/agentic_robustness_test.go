@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/terenzif/ibis-server/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/ai"
 )
 
 func TestAskProjectAgentic_Robustness(t *testing.T) {

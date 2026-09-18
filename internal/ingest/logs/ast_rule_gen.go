@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/terenzif/ibis-server/internal/ai"
-	"github.com/terenzif/ibis-server/internal/ingest/code"
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/ingest/code"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 const (

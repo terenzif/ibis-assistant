@@ -10,10 +10,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/terenzif/ibis-server/internal/ai"
-	"github.com/terenzif/ibis-server/internal/db"
-	"github.com/terenzif/ibis-server/internal/schema"
-	"github.com/terenzif/ibis-server/internal/search"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/search"
 )
 
 // TemporalBaseline is the code revision used when correlating log frames to source.

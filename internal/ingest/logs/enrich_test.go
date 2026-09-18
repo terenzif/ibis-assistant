@@ -3,8 +3,8 @@ package logs
 import "testing"
 
 func TestExtractStackLocationGoParen(t *testing.T) {
-	text := `at github.com/terenzif/ibis-server/internal/db.(*Client).Query (client.go:142)
-at github.com/terenzif/ibis-server/internal/search.(*Engine).Ask (search.go:88)`
+	text := `at github.com/terenzif/ibis-assistant/internal/db.(*Client).Query (client.go:142)
+at github.com/terenzif/ibis-assistant/internal/search.(*Engine).Ask (search.go:88)`
 	file, line, _ := extractStackLocation(text)
 	if file != "client.go" {
 		t.Fatalf("file=%q want client.go", file)

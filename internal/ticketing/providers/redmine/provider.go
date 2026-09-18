@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/auth"
-	legacy "github.com/terenzif/ibis-server/internal/ingest/redmine"
-	"github.com/terenzif/ibis-server/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/auth"
+	legacy "github.com/terenzif/ibis-assistant/internal/ingest/redmine"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 type Provider struct {

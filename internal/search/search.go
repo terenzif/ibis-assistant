@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/ai"
-	"github.com/terenzif/ibis-server/internal/db"
-	"github.com/terenzif/ibis-server/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 // AIProvider interface for AI client

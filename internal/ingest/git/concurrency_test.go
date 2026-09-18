@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/terenzif/ibis-server/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 type ConcurrencyMockRedmine struct {

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/ticketing"
+	"github.com/terenzif/ibis-assistant/internal/ticketing"
 )
 
 type Provider struct {
