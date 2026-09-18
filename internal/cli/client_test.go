@@ -93,11 +93,11 @@ func TestExecuteCLI_Subcommands(t *testing.T) {
 		},
 		{
 			name:         "memory add subcommand",
-			args:         []string{"memory", "add", "--project", "App", "--text", "Use Go 1.26"},
+			args:         []string{"memory", "add", "--project", "App", "--text", "Use Go 1.27"},
 			expectedTool: "provide_collaborative_memory",
 			expectedArgs: map[string]interface{}{
 				"project_name": "App",
-				"memory_text":  "Use Go 1.26",
+				"memory_text":  "Use Go 1.27",
 			},
 		},
 		{

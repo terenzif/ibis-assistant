@@ -14,7 +14,7 @@ func cleanEnv() {
 		"GEMINI_API_KEY", "SURREAL_URL", "SURREAL_NS",
 		"SURREAL_DB", "SURREAL_USER", "SURREAL_PASS",
 		"REDMINE_URL", "REDMINE_API_KEY", "DISCOVERY_ROOT", "AUTO_SCAN",
-		"DB_AUTO_UPDATE",
+		"DB_AUTO_UPDATE", "RUNTIME_MODE", "BIND_ADDRESS",
 	}
 	for _, v := range vars {
 		os.Unsetenv(v)
@@ -31,6 +31,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.Mode != "sse" {
 		t.Errorf("Expected default Mode sse, got %s", cfg.Mode)
+	}
+	if cfg.ListenAddr() != ":3030" {
+		t.Errorf("Expected default ListenAddr :3030, got %s", cfg.ListenAddr())
 	}
 	if cfg.GeminiDefaultRPM != 100 {
 		t.Errorf("Expected default RPM 100, got %d", cfg.GeminiDefaultRPM)
@@ -133,7 +136,7 @@ func TestEnvOverridesFile(t *testing.T) {
 
 func TestResolvePath(t *testing.T) {
 	baseDir := "C:\\app\\bin"
-	
+
 	tests := []struct {
 		name     string
 		baseDir  string
@@ -192,7 +195,7 @@ func TestConfigLoadResolution(t *testing.T) {
 	// We can't easily mock os.Executable() here without complex monkey patching,
 	// but we can verify it doesn't crash and returns absolute paths.
 	cfg := Load()
-	
+
 	if !filepath.IsAbs(cfg.DBDataPath) {
 		t.Errorf("DBDataPath should be absolute, got %s", cfg.DBDataPath)
 	}
@@ -201,5 +204,23 @@ func TestConfigLoadResolution(t *testing.T) {
 	}
 	if !filepath.IsAbs(cfg.LogsRoot) {
 		t.Errorf("LogsRoot should be absolute, got %s", cfg.LogsRoot)
+	}
+}
+
+func TestListenAddrAndPublicURL(t *testing.T) {
+	personal := &Config{Port: 3030, RuntimeMode: "personal"}
+	if personal.ListenAddr() != "127.0.0.1:3030" {
+		t.Fatalf("personal listen = %s", personal.ListenAddr())
+	}
+	server := &Config{Port: 3030, RuntimeMode: "server"}
+	if server.ListenAddr() != "0.0.0.0:3030" {
+		t.Fatalf("server listen = %s", server.ListenAddr())
+	}
+	custom := &Config{Port: 9, RuntimeMode: "personal", BindAddress: "10.0.0.5"}
+	if custom.ListenAddr() != "10.0.0.5:9" {
+		t.Fatalf("custom listen = %s", custom.ListenAddr())
+	}
+	if personal.PublicBaseURL() != "http://127.0.0.1:3030" {
+		t.Fatalf("public = %s", personal.PublicBaseURL())
 	}
 }

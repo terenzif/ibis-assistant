@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,40 +12,42 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	Port                int               `json:"port"`
-	Mode                string            `json:"mode"` // sse, stdio
-	DBUrl               string            `json:"db_url"`
-	DBNamespace         string            `json:"db_namespace"`
-	DBDatabase          string            `json:"db_database"`
-	DBUser              string            `json:"db_user"`
-	DBPassword          string            `json:"db_password"`
-	AI                  AIConfig          `json:"ai"`
-	GeminiKeys          []GeminiKeyConfig `json:"gemini_keys,omitempty"` // Legacy fallback
-	GeminiDefaultRPM    int               `json:"gemini_rpm,omitempty"`   // Legacy fallback
-	RedmineURL          string            `json:"redmine_url"`
-	RedmineKey          string            `json:"redmine_key"`
-	RedmineConcurrency  int               `json:"redmine_concurrency"`
-	CodeConcurrency     int               `json:"code_concurrency"`
-	DBTimeout           int               `json:"db_timeout"`
-	DBDataPath          string            `json:"db_data_path"`
-	DBAutoUpdate        bool              `json:"db_auto_update"`
-	DiscoveryRoot       string            `json:"discovery_root"`
-	PollInterval        int               `json:"poll_interval"` // seconds
-	AutoScan            bool              `json:"auto_scan"`
-	GitRepos            []string          `json:"git_repos"` // Manual list override
-	LogFile             string            `json:"log_file"`
-	LogLevel            string            `json:"log_level"`      // DEBUG, INFO, WARN, ERROR
-	MaxFileSize         int64             `json:"max_file_size"`  // bytes
-	MaxDeltaSize        int               `json:"max_delta_size"` // bytes/characters for commit diff chunking
-	IgnoredDirs         []string          `json:"ignored_dirs"`
-	IgnoredFiles        []string          `json:"ignored_files"`
-	SupportedExtensions []string          `json:"supported_extensions"`
-	LogsRoot            string            `json:"logs_root"`
-	GitTokens           map[string]string `json:"git_tokens"`
-	SMTP                SMTPConfig        `json:"smtp"`
+	Port                int                `json:"port"`
+	BindAddress         string             `json:"bind_address,omitempty"`
+	RuntimeMode         string             `json:"runtime_mode,omitempty"` // personal, server, plugin
+	Mode                string             `json:"mode"`                   // sse, stdio
+	DBUrl               string             `json:"db_url"`
+	DBNamespace         string             `json:"db_namespace"`
+	DBDatabase          string             `json:"db_database"`
+	DBUser              string             `json:"db_user"`
+	DBPassword          string             `json:"db_password"`
+	AI                  AIConfig           `json:"ai"`
+	GeminiKeys          []GeminiKeyConfig  `json:"gemini_keys,omitempty"` // Legacy fallback
+	GeminiDefaultRPM    int                `json:"gemini_rpm,omitempty"`  // Legacy fallback
+	RedmineURL          string             `json:"redmine_url"`
+	RedmineKey          string             `json:"redmine_key"`
+	RedmineConcurrency  int                `json:"redmine_concurrency"`
+	CodeConcurrency     int                `json:"code_concurrency"`
+	DBTimeout           int                `json:"db_timeout"`
+	DBDataPath          string             `json:"db_data_path"`
+	DBAutoUpdate        bool               `json:"db_auto_update"`
+	DiscoveryRoot       string             `json:"discovery_root"`
+	PollInterval        int                `json:"poll_interval"` // seconds
+	AutoScan            bool               `json:"auto_scan"`
+	GitRepos            []string           `json:"git_repos"` // Manual list override
+	LogFile             string             `json:"log_file"`
+	LogLevel            string             `json:"log_level"`      // DEBUG, INFO, WARN, ERROR
+	MaxFileSize         int64              `json:"max_file_size"`  // bytes
+	MaxDeltaSize        int                `json:"max_delta_size"` // bytes/characters for commit diff chunking
+	IgnoredDirs         []string           `json:"ignored_dirs"`
+	IgnoredFiles        []string           `json:"ignored_files"`
+	SupportedExtensions []string           `json:"supported_extensions"`
+	LogsRoot            string             `json:"logs_root"`
+	GitTokens           map[string]string  `json:"git_tokens"`
+	SMTP                SMTPConfig         `json:"smtp"`
 	LogIngestion        LogIngestionConfig `json:"log_ingestion"`
-	ConfigLoaded        bool              `json:"-"` // True if a config file was successfully loaded
-	ConfigPath          string            `json:"-"` // Path to the file that was loaded
+	ConfigLoaded        bool               `json:"-"` // True if a config file was successfully loaded
+	ConfigPath          string             `json:"-"` // Path to the file that was loaded
 }
 
 type SMTPConfig struct {
@@ -117,6 +120,31 @@ type ReasoningConfig struct {
 	Keys     []GeminiKeyConfig `json:"keys"`
 }
 
+// ListenAddr is host:port for the HTTP listener.
+// Empty bind_address keeps today's ":port" (all interfaces) unless runtime_mode is set:
+// personal/plugin → 127.0.0.1, server → 0.0.0.0.
+func (c *Config) ListenAddr() string {
+	host := strings.TrimSpace(c.BindAddress)
+	if host == "" {
+		switch strings.ToLower(strings.TrimSpace(c.RuntimeMode)) {
+		case "personal", "plugin":
+			host = "127.0.0.1"
+		case "server":
+			host = "0.0.0.0"
+		}
+	}
+	return net.JoinHostPort(host, strconv.Itoa(c.Port))
+}
+
+// PublicBaseURL is the URL advertised in discovery (loopback for wildcard binds).
+func (c *Config) PublicBaseURL() string {
+	host, _, err := net.SplitHostPort(c.ListenAddr())
+	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(c.Port)))
+}
+
 func (c *Config) GetGitToken(originUrl string) string {
 	if c.GitTokens == nil {
 		return ""
@@ -145,13 +173,13 @@ func (c *Config) GetGitToken(originUrl string) string {
 func Load(paths ...string) *Config {
 	// 1. Defaults
 	cfg := &Config{
-		Port:               3030,
-		Mode:               "sse",
-		DBUrl:              "ws://localhost:8000/rpc",
-		DBNamespace:        "ibisassistant",
-		DBDatabase:         "analysis",
-		DBUser:             "root",
-		DBPassword:         "root",
+		Port:        3030,
+		Mode:        "sse",
+		DBUrl:       "ws://localhost:8000/rpc",
+		DBNamespace: "ibisassistant",
+		DBDatabase:  "analysis",
+		DBUser:      "root",
+		DBPassword:  "root",
 		AI: AIConfig{
 			Embedding: EmbeddingConfig{
 				Provider:   "ollama",
@@ -245,6 +273,12 @@ func Load(paths ...string) *Config {
 	}
 	if v := os.Getenv("MODE"); v != "" { // Fallback
 		cfg.Mode = v
+	}
+	if v := os.Getenv("RUNTIME_MODE"); v != "" {
+		cfg.RuntimeMode = v
+	}
+	if v := os.Getenv("BIND_ADDRESS"); v != "" {
+		cfg.BindAddress = v
 	}
 
 	// DB
