@@ -11,6 +11,16 @@
 | GitHub | `https://github.com/terenzif/ibis-assistant` |
 | Future IDE plugin | Ibis Assistant for Cursor (same brand; not scaffolded yet) |
 
+**Runtimes** (`runtime_mode` in config; not the MCP listener `mode`):
+
+| Runtime | Meaning |
+|---------|---------|
+| `personal` | App/daemon/Windows service on the same PC as the working trees |
+| `server` | Dedicated host; clones under `discovery_root/dynamic` |
+| `plugin` | Cursor-owned stdio child of the same binary (not scaffolded yet) |
+
+`mode` (`sse` \| `stdio`) is the MCP **listener**. HTTP clients should use Streamable HTTP at `/mcp`; `/sse` is legacy. See [docs/superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md).
+
 The MCP process is an implementation detail (“the MCP server”), not a separate product name.
 
 ## Remotes

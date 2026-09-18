@@ -16,7 +16,7 @@ This document describes the architectural proposal to abstract and generalize Gi
 > **Scenario:** Ibis Assistant runs as a personal/self-hosted instance (`localhost` or a dedicated host). Private repositories are indexed with the operator's own credentials (Azure DevOps PAT, GitHub, etc.).
 
 **Proposed solution:**
-1. **Single repository on the server:** Indexing and the SurrealDB graph use *one local copy* of the repository (under `discovery_root/dynamic`).
+1. **Workspace ownership by runtime:** `server` indexes *one server-owned clone* under `discovery_root/dynamic`. `personal` and `plugin` index the developer working tree **in place** (no second copy, no OS symlink/junction). See [runtime modes spec](superpowers/specs/2026-09-18-runtime-modes-design.md). Until the workspace path resolver ships, `init_project` still clones into `dynamic/` (current code).
 2. **System credentials (default):** At first configuration a default credential can be stored per repository or provider, reused for background syncs.
 3. **Runtime override:** The HTTP header `X-Git-Token` (or `X-Git-PAT`) temporarily overrides the persisted credential for the single operation (not stored on disk or in the DB).
 

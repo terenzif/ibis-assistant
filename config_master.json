@@ -1,5 +1,6 @@
 {
   "port": 3333,
+  "runtime_mode": "personal",
   "mode": "sse",
   "db_url": "ws://127.0.0.1:8000/rpc",
   "db_namespace": "ibisassistant",
