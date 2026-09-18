@@ -71,3 +71,12 @@ func TestPollingManagerLifecycle(t *testing.T) {
 	// Stop the manager (verifies clean shutdown and no deadlock)
 	pm.Stop()
 }
+
+func TestJoinHostPort(t *testing.T) {
+	if got := joinHostPort("127.0.0.1", 445, 445); got != "127.0.0.1:445" {
+		t.Fatalf("ipv4: %q", got)
+	}
+	if got := joinHostPort("::1", 0, 22); got != "[::1]:22" {
+		t.Fatalf("ipv6 default port: %q", got)
+	}
+}

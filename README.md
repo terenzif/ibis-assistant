@@ -33,6 +33,8 @@ It gives AI agents (Claude, Copilot, Gemini, and others) context beyond the curr
 
 ## Setup
 
+Draft GitHub Releases with cross-platform binaries are published by CI when a `v*` tag is pushed. Download them from [Releases](https://github.com/terenzif/ibis-assistant/releases).
+
 ```bash
 git clone https://github.com/terenzif/ibis-assistant.git
 cd ibis-assistant
@@ -103,6 +105,7 @@ With no arguments, the binary prints a short command guide. If `config.json` is 
 | `run` | Interactive server (MCP) |
 | `start` / `stop` | Background daemon (`server.log`, `ibis-assistant.pid`) |
 | `config` | Interactive config wizard |
+| `version` | Print the binary version (release builds embed the git tag) |
 | `/install` `/uninstall` | Windows service (admin required) |
 
 ### CLI (MCP over Streamable HTTP)

@@ -1,0 +1,4 @@
+# Default owner for every path. GitHub enforces this as a required review
+# only when branch protection / rulesets are available (GitHub Pro on a
+# private personal repo, or a public repo on GitHub Free).
+* @terenzif

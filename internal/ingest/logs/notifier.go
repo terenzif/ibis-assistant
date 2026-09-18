@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/smtp"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -191,7 +192,7 @@ func (n *Notifier) ProcessPendingNotifications(ctx context.Context) error {
 }
 
 func (n *Notifier) SendRawEmail(msg []byte) error {
-	addr := fmt.Sprintf("%s:%d", n.Cfg.SMTP.Host, n.Cfg.SMTP.Port)
+	addr := net.JoinHostPort(n.Cfg.SMTP.Host, strconv.Itoa(n.Cfg.SMTP.Port))
 	var c *smtp.Client
 	var err error
 

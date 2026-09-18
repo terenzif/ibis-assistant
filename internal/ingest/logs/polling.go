@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -110,10 +111,7 @@ func (pm *PollingManager) pollSource(source config.PollingSource) error {
 }
 
 func pollFTP(ctx context.Context, source config.PollingSource, dbClient db.Executor, aiClient *ai.Client, cfg *config.Config) error {
-	addr := fmt.Sprintf("%s:%d", source.Host, source.Port)
-	if source.Port == 0 {
-		addr = fmt.Sprintf("%s:21", source.Host)
-	}
+	addr := joinHostPort(source.Host, source.Port, 21)
 	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(10*time.Second))
 	if err != nil {
 		return fmt.Errorf("FTP dial failed: %w", err)
@@ -182,10 +180,7 @@ func pollFTP(ctx context.Context, source config.PollingSource, dbClient db.Execu
 }
 
 func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Executor, aiClient *ai.Client, cfg *config.Config) error {
-	addr := fmt.Sprintf("%s:%d", source.Host, source.Port)
-	if source.Port == 0 {
-		addr = fmt.Sprintf("%s:22", source.Host)
-	}
+	addr := joinHostPort(source.Host, source.Port, 22)
 
 	sshConfig := &ssh.ClientConfig{
 		User: source.User,
@@ -278,10 +273,7 @@ func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Exec
 }
 
 func pollSMB(ctx context.Context, source config.PollingSource, dbClient db.Executor, aiClient *ai.Client, cfg *config.Config) error {
-	addr := fmt.Sprintf("%s:%d", source.Host, source.Port)
-	if source.Port == 0 {
-		addr = fmt.Sprintf("%s:445", source.Host)
-	}
+	addr := joinHostPort(source.Host, source.Port, 445)
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -456,4 +448,11 @@ func processLogLines(ctx context.Context, project, fileName string, lines []stri
 		}
 		notifier.QueueNotification(ctx, project, fileName, len(anomalies), maxSeverity, sb.String())
 	}
+}
+
+func joinHostPort(host string, port, defaultPort int) string {
+	if port == 0 {
+		port = defaultPort
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
