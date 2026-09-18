@@ -56,14 +56,14 @@ func attachMCPProgress(ctx context.Context, mcpServer *server.MCPServer, request
 	if token == nil || mcpServer == nil {
 		return ctx
 	}
-	return progress.With(ctx, func(done, total int, message string) {
+	return progress.With(ctx, progress.Throttle(func(done, total int, message string) {
 		_ = mcpServer.SendNotificationToClient(ctx, "notifications/progress", map[string]any{
 			"progressToken": token,
 			"progress":      done,
 			"total":         total,
 			"message":       message,
 		})
-	})
+	}, time.Second))
 }
 
 func main() {
@@ -274,6 +274,7 @@ func runServer(ctx context.Context) {
 		server.WithLogging(),
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(false, true),
+		server.WithInstructions("Ibis Assistant MCP. Prefer Streamable HTTP POST /mcp. Read resource ibis://guide for install and usage."),
 	)
 
 	// --- [NEW] Start Embedded DB and Sidecars ---

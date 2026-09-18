@@ -42,11 +42,7 @@ func listToolMeta(mcpServer *server.MCPServer) []toolMeta {
 }
 
 func protocolVersions() []string {
-	return []string{
-		mcp.LATEST_PROTOCOL_VERSION,
-		"2025-03-26",
-		"2024-11-05",
-	}
+	return append([]string(nil), mcp.ValidProtocolVersions...)
 }
 
 // GuideMarkdown is the human install/usage guide (also served as MCP resource).
@@ -74,7 +70,7 @@ func GuideMarkdown(cfg *config.Config, tools []toolMeta) string {
 	b.WriteString("Personal mode binds `127.0.0.1` unless `bind_address` is set. Server mode binds `0.0.0.0`.\n\n")
 
 	b.WriteString("## Agent autoconfig\n\n")
-	b.WriteString("HTTP clients: `GET /` with `Accept: application/json`. MCP: connect to `/mcp`, then `resources/read` on `ibis://guide` to show this page to a human.\n\n")
+	b.WriteString("HTTP clients: `GET /` with `Accept: application/json`. MCP 2026-07-28 clients: `server/discover` on `/mcp` (legacy clients still `initialize`). Then `resources/read` on `ibis://guide` to show this page to a human.\n\n")
 	b.WriteString("Cursor / VS Code MCP (Streamable HTTP):\n\n")
 	b.WriteString("```json\n")
 	fmt.Fprintf(&b, "{\n  \"mcpServers\": {\n    \"ibis-assistant\": {\n      \"url\": \"%s/mcp\"\n    }\n  }\n}\n", base)
@@ -142,6 +138,7 @@ func writeJSONDiscovery(w http.ResponseWriter, cfg *config.Config, tools []toolM
 			"log_push_upload": base + "/api/v1/logs/upload",
 			"guide_markdown":  base + "/",
 			"guide_resource":  GuideURI,
+			"server_discover": "server/discover",
 		},
 		"auth_headers": []string{
 			"X-Git-Token", "X-Git-PAT",

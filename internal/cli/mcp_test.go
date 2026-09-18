@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/server/servertest"
 )
 
 func TestCallMCPToolOverStreamableHTTP(t *testing.T) {
@@ -22,7 +23,7 @@ func TestCallMCPToolOverStreamableHTTP(t *testing.T) {
 		}
 		return mcp.NewToolResultText(`{"ok":true,"msg":"` + msg + `"}`), nil
 	})
-	ts := server.NewTestStreamableHTTPServer(mcpServer)
+	ts := servertest.NewTestStreamableHTTPServer(mcpServer)
 	defer ts.Close()
 
 	orig := mcpEndpoint
@@ -41,7 +42,7 @@ func TestCallMCPToolOverStreamableHTTP(t *testing.T) {
 
 func TestCallMCPToolUnknownTool(t *testing.T) {
 	mcpServer := server.NewMCPServer("t", "1", server.WithToolCapabilities(true))
-	ts := server.NewTestStreamableHTTPServer(mcpServer)
+	ts := servertest.NewTestStreamableHTTPServer(mcpServer)
 	defer ts.Close()
 
 	orig := mcpEndpoint

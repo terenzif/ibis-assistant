@@ -120,7 +120,7 @@ MCP-only (no CLI wrapper yet): `sync_local_patch`, `analyze_blast_radius`, `find
 Example: `http://localhost:3030/`
 
 * Browsers (`Accept: text/html`): install/usage guide, endpoints, client snippets, and tool schemas
-* Agents (`Accept: application/json`): Streamable HTTP URL, protocol versions, `runtime_mode`, auth headers, tools
+* Agents (`Accept: application/json`): Streamable HTTP URL, protocol versions (including 2026-07-28), `runtime_mode`, auth headers, tools. After MCP connect, `server/discover` on `/mcp` is enough to attach.
 * Markdown (`Accept: text/markdown`) and MCP resource `ibis://guide`: the same guide for a connected agent to show a human
 
 ### Config precedence
@@ -147,7 +147,7 @@ If the requested commit is not on the remote, the server may return `{"status":"
 
 ## MCP clients
 
-Default Streamable HTTP endpoint: `http://localhost:3030/mcp`  
+Default Streamable HTTP endpoint: `http://localhost:3030/mcp` (mcp-go v1.1.0; protocol **2026-07-28** `server/discover` plus legacy `initialize`).  
 Legacy SSE (kept for `mcp-bridge`): `http://localhost:3030/sse`
 
 ### Claude Desktop

@@ -23,6 +23,7 @@ func originGate(bindHost string, next http.Handler) http.Handler {
 func withDeprecation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Deprecation", "true")
+		w.Header().Set("Sunset", "Sat, 18 Sep 2027 00:00:00 GMT")
 		w.Header().Set("Link", `</mcp>; rel="successor-version"`)
 		next.ServeHTTP(w, r)
 	})
