@@ -13,16 +13,25 @@ import (
 	"github.com/terenzif/ibis-assistant/internal/db"
 	"github.com/terenzif/ibis-assistant/internal/gitrepo"
 	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/workspace"
 )
 
-// SyncWorkspace assicura che il repo sia aggiornato usando il runner generalizzato.
-// Ritorna (repoPath, actualCommit, isAligned, error).
-// isAligned è true se il commit richiesto è stato fatto checkout con successo.
+// SyncWorkspace ensures the repo is ready for ingest.
+// Server-owned clones may clone/reset/fetch. Live personal/plugin trees are read in place.
+// Returns (repoPath, actualCommit, isAligned, error).
 func SyncWorkspace(ctx context.Context, cfg *config.Config, dbClient db.Executor, repoName, originUrl, branch, commit string) (string, string, bool, error) {
-	repoPath := filepath.Join(cfg.DiscoveryRoot, "dynamic", repoName)
-	logger.Info("Syncing workspace for %s at %s (Branch: %s, Commit: %s)", repoName, repoPath, branch, commit)
+	resolved, err := workspace.Resolve(cfg, repoName)
+	if err != nil {
+		return "", "", false, err
+	}
+	repoPath := resolved.Path
+	logger.Info("Syncing workspace for %s at %s (owned=%v Branch: %s, Commit: %s)", repoName, repoPath, resolved.Owned, branch, commit)
 
-	err := os.MkdirAll(filepath.Dir(repoPath), 0755)
+	if !resolved.Owned {
+		return syncLiveWorkspace(ctx, repoPath)
+	}
+
+	err = os.MkdirAll(filepath.Dir(repoPath), 0755)
 	if err != nil {
 		return "", "", false, fmt.Errorf("failed to create dynamic repos directory: %w", err)
 	}
@@ -165,6 +174,20 @@ func SyncWorkspace(ctx context.Context, cfg *config.Config, dbClient db.Executor
 	}
 
 	return repoPath, actualCommit, isAligned, nil
+}
+
+func syncLiveWorkspace(ctx context.Context, repoPath string) (string, string, bool, error) {
+	if st, err := os.Stat(repoPath); err != nil || !st.IsDir() {
+		return "", "", false, fmt.Errorf("live workspace %s is not a directory: %w", repoPath, err)
+	}
+	runner := gitrepo.NewRunner(nil)
+	outRev, errRev := runner.Run(ctx, repoPath, "rev-parse", "HEAD")
+	if errRev != nil {
+		return "", "", false, fmt.Errorf("git rev-parse HEAD failed in live workspace %s: %v, output: %s", repoPath, errRev, string(outRev))
+	}
+	actualCommit := strings.TrimSpace(string(outRev))
+	logger.Info("Using live working tree at %s (HEAD %s); skipping clone/reset/fetch", repoPath, actualCommit)
+	return repoPath, actualCommit, true, nil
 }
 
 func getHost(rawURL string) (string, error) {

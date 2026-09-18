@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/terenzif/ibis-assistant/internal/config"
 )
 
 const pidFileName = "ibis-assistant.pid"
@@ -111,5 +113,30 @@ func configExists() bool {
 		}
 	}
 	return false
+}
+
+func peekFlag(names ...string) string {
+	args := os.Args
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		for _, name := range names {
+			if arg == name {
+				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+					return args[i+1]
+				}
+			}
+			if strings.HasPrefix(arg, name+"=") {
+				return strings.TrimPrefix(arg, name+"=")
+			}
+		}
+	}
+	return ""
+}
+
+func isPluginLaunch() bool {
+	if config.IsPluginRuntime(os.Getenv("RUNTIME_MODE")) {
+		return true
+	}
+	return config.IsPluginRuntime(peekFlag("-runtime-mode", "--runtime-mode"))
 }
 

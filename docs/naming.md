@@ -9,7 +9,7 @@
 | Executable | `ibis-assistant` / `ibis-assistant.exe` |
 | Go module | `github.com/terenzif/ibis-assistant` |
 | GitHub | `https://github.com/terenzif/ibis-assistant` |
-| Future IDE plugin | Ibis Assistant for Cursor (same brand; not scaffolded yet) |
+| Future IDE plugin | Ibis Assistant for Cursor (stdio child of the same binary) |
 
 **Runtimes** (`runtime_mode` in config; not the MCP listener `mode`):
 
@@ -17,7 +17,7 @@
 |---------|---------|
 | `personal` | App/daemon/Windows service on the same PC as the working trees |
 | `server` | Dedicated host; clones under `discovery_root/dynamic` |
-| `plugin` | Cursor-owned stdio child of the same binary (not scaffolded yet) |
+| `plugin` | Cursor-owned stdio child of the same binary |
 
 `mode` (`sse` \| `stdio`) is the MCP **listener**. HTTP clients should use Streamable HTTP at `/mcp`; `/sse` is legacy. See [docs/superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md).
 

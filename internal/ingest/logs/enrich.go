@@ -14,6 +14,7 @@ import (
 	"github.com/terenzif/ibis-assistant/internal/db"
 	"github.com/terenzif/ibis-assistant/internal/schema"
 	"github.com/terenzif/ibis-assistant/internal/search"
+	"github.com/terenzif/ibis-assistant/internal/workspace"
 )
 
 // TemporalBaseline is the code revision used when correlating log frames to source.
@@ -134,12 +135,9 @@ func (a *LogAnalyzer) resolveBaseline(ctx context.Context) TemporalBaseline {
 		}
 	}
 
-	// 2) Workspace HEAD under discovery_root
-	if a.Cfg != nil && a.Cfg.DiscoveryRoot != "" && a.Project != "" {
-		candidates := []string{
-			filepath.Join(a.Cfg.DiscoveryRoot, "dynamic", a.Project),
-			filepath.Join(a.Cfg.DiscoveryRoot, a.Project),
-		}
+	// 2) Workspace HEAD (live tree first, then discovery_root clones)
+	if a.Cfg != nil && a.Project != "" {
+		candidates := workspace.CandidatePaths(a.Cfg, a.Project)
 		for _, dir := range candidates {
 			if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 				continue
