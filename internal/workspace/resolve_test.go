@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -186,14 +187,21 @@ func TestWorkspaceStartUsesCursorFolderEnv(t *testing.T) {
 }
 
 func TestFileURIToPath(t *testing.T) {
-	want := filepath.Clean(`C:\devsrc\ibis-assistant`)
-	got := FileURIToPath("file:///C:/devsrc/ibis-assistant")
-	if got != want {
-		t.Fatalf("file URI got %q want %q", got, want)
+	if runtime.GOOS == "windows" {
+		want := filepath.Clean(`C:\devsrc\ibis-assistant`)
+		got := FileURIToPath("file:///C:/devsrc/ibis-assistant")
+		if got != want {
+			t.Fatalf("file URI got %q want %q", got, want)
+		}
+		got = FileURIToPath(`c:\devsrc\ibis-assistant`)
+		if !strings.EqualFold(got, want) {
+			t.Fatalf("drive path got %q want %q", got, want)
+		}
+		return
 	}
-	got = FileURIToPath(`c:\devsrc\ibis-assistant`)
-	if !strings.EqualFold(got, want) {
-		t.Fatalf("drive path got %q want %q", got, want)
+	got := FileURIToPath("file:///tmp/ibis-assistant")
+	if got != "/tmp/ibis-assistant" {
+		t.Fatalf("posix file URI got %q", got)
 	}
 }
 
