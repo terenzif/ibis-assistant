@@ -1,19 +1,23 @@
-# Implementation Plan: Ibis Assistant Hybrid Search
-**Target Developer:** Jules
-**Status:** Ingestion is COMPLETE. Retrieval is PENDING.
-**Objective:** Implement "AskProject" functionality combining Vector Search with Graph Traversal in `ibis-assistant`.
+# Implementation Plan: Ibis Assistant Hybrid Search (DEPRECATED)
 
-## 1. Confirmed Codebase State
+> [!WARNING]
+> **DO NOT USE.** This Jules-era stub plan is obsolete.
+> **AskProject is implemented** (`internal/search/search.go`, MCP `ask_project`) with per-table hybrid scoring and agentic search. See [changelog_20260918.md](changelog_20260918.md) and the live code — not this document.
+
+**Target Developer:** Jules (historical)
+**Status:** SUPERSEDED — ingestion and retrieval are both live.
+**Objective (historical):** Implement "AskProject" combining Vector Search with Graph Traversal.
+
+## 1. Confirmed Codebase State (historical — inaccurate today)
 -   **Ingestion (`internal/ingest/`)**:
     -   `git`: Already populates `commit` nodes and links them to `file` (`changed`) and `issue` (`implements`).
     -   `code`: Already populates `file_chunk` with embeddings.
     -   `redmine`: Already populates `issue` details.
 -   **Service (`cmd/server/main.go`)**:
     -   Fully wired with `auth`, `config`, and `background indexing`.
-    -   `AskProject` tool is registered but calls a stub in `search.go`.
+    -   ~~`AskProject` tool is registered but calls a stub in `search.go`.~~ **False today — live hybrid/agentic path.**
 -   **Search (`internal/search/search.go`)**:
-    -   **STUB**: Currently performs a vector search but returns empty results.
-    -   Missing the logic to traverse from `file_chunk` back to `commit` and `issue`.
+    -   ~~**STUB**~~ **Implemented** hybrid search with graph context.
 
 ## 2. Architecture
 The logic resides in `internal/search/`.

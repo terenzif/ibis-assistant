@@ -42,3 +42,12 @@
 - [x] Add `git_configure_credentials` MCP tool and update `init_project` error handling <!-- id: 47 -->
 - [x] Verify complete system test suite and manual credential validation <!-- id: 48 -->
 
+## September 2026 (post-rewrite stack on master)
+
+- [x] Safe Surreal RecordID helpers + embedding batch persistence <!-- id: 49 -->
+- [x] Ask/project hybrid ranking (per-table vector + time decay) <!-- id: 50 -->
+- [x] MCP `sync_local_patch` for unpushed local commits <!-- id: 51 -->
+- [x] Log pipeline: enrich, LogAlign promote, sidecar reports, recursive watch <!-- id: 52 -->
+- [x] AI ast-grep rule synthesis + polyglot `languageGlobs` <!-- id: 53 -->
+- [x] Docs: changelog + pipeline guides + client inventory coherence <!-- id: 54 -->
+

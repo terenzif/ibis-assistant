@@ -1,8 +1,8 @@
 # Architecture Proposal: Log Analyzer Extension, Integration, and Reform
 
 > [!NOTE]
-> **Proposal status: UNDER REVIEW (June 2026)**
-> This document describes the architectural proposal to overcome the current limitations of the Ibis Assistant Log Analysis module, introducing third-party reception channels (Push API, FTP/SFTP/SMB polling, MCP) and fixing historical bugs related to email notification delivery.
+> **Proposal status: IMPLEMENTED** (channels + SMTP reform landed mid-2026; September 2026 extended the analysis pipeline — see [log_analysis_pipeline.md](log_analysis_pipeline.md) and [changelog_20260918.md](changelog_20260918.md)).
+> Historical proposal text below is kept for design rationale. The live MCP tool name is **`analyze_logs`** (not `analyze_log_stream`).
 
 ---
 
@@ -36,7 +36,7 @@ flowchart TD
     subgraph Ibis Assistant Server
         B --> G[Log Pipeline Manager]
         D --> G
-        F -->|analyze_log_stream| G
+        F -->|analyze_logs| G
         
         G --> H[Log Analyzer]
         H -->|1. Static Match| I[SurrealDB]
@@ -85,7 +85,7 @@ A background worker (`LogPullScheduler`) will periodically scan configured remot
 ### C. MCP Model: Dedicated Tool for Agents
 A new MCP tool will be added so AI agents (such as Claude or Gemini on the client side) or IDE extensions can send log blocks displayed on the user's terminal.
 
-* **Tool**: `analyze_log_stream`
+* **Tool**: `analyze_logs`
 * **Parameters**:
   * `project_name` (string, required): Project name.
   * `log_data` (string, required): The log text block to analyze.
@@ -247,7 +247,7 @@ Implementation of the changes can be structured in 3 incremental phases:
 ### Phase 2: HTTP Endpoint & MCP Tool (Push Model)
 * Expose the HTTP POST endpoint `/api/v1/logs/upload` in `cmd/server/main.go`.
 * Implement API Key authentication.
-* Add the MCP tool `analyze_log_stream` to the server for on-demand synchronous analysis (wait for analysis and respond with error details).
+* Add the MCP tool `analyze_logs` to the server for on-demand synchronous analysis (wait for analysis and respond with error details).
 * Modify `LogAnalyzer` to process arbitrary text strings from the API without requiring a local physical file.
 
 ### Phase 3: Polling Scheduler (Pull Model)

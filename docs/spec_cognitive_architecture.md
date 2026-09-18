@@ -1,6 +1,6 @@
 # Cognitive Architecture Specification: Adaptive Ibis Assistant
 **Target Developer:** Jules
-**Status:** Ingestion Complete. Cognitive Logic Pending.
+**Status:** Historical cognitive-architecture notes. Hybrid AskProject retrieval is **implemented** as of 2026 (see [changelog_20260918.md](changelog_20260918.md)); treat scoring details below as design background, not as “pending”.
 **Objective:** Implement a "Cognitive" Retrieval System that combines Vector Similarity, Graph Structure, Temporal Recency, and Usage-Based Reinforcement (Weighted Memory).
 
 ## 1. Core Philosophy
@@ -71,11 +71,10 @@ Return a **Structured JSON** object for the AI agent:
 ```
 
 ## 4. Feedback Loop (The "Learning" System)
-**New Tool Required**: `reinforce_path`
-Jules, implement a tool that allows the AI Agent to "tell" the server what was useful.
+**Historical name:** `reinforce_path` — **not registered today**. Prefer MCP **`save_reasoning_outcome`** and **`provide_collaborative_memory`** (see `cmd/server/main.go`).
 
-*   **Tool**: `reinforce_path(source_node, target_node, feedback_score)`
-*   **Logic**:
+*   **Former sketch**: `reinforce_path(source_node, target_node, feedback_score)`
+*   **Logic (design intent, still relevant to RAFT weights):**
     1.  If `feedback_score > 0` (Positive):
         *   `UPDATE $edge SET usage_weight += 0.1;`
         *   `UPDATE $target_node SET access_count += 1;`

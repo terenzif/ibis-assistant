@@ -1,9 +1,12 @@
 # Evaluation: Adapting "Why Similarity Isn’t Enough for Memory" to Ibis Assistant
 
+> [!NOTE]
+> **Historical evaluation (pre–hybrid AskProject).** Much of the “vector only” gap analysis below is **outdated**: `ask_project` now runs per-table hybrid scoring with time decay and graph context, and `save_reasoning_outcome` / collaborative memory address parts of episodic reinforcement. Keep this file for the article mapping; see [changelog_20260918.md](changelog_20260918.md) for current retrieval behavior.
+
 ## Executive Summary
 The article "Why Similarity Isn’t Enough for Memory" argues that simple vector-based retrieval (RAG) is insufficient for robust agentic memory because it lacks **temporal awareness**, **conflict resolution**, and **structured relationships**. 
 
-The current `ibis-assistant` implementation has the **structural foundation** (a Knowledge Graph in SurrealDB and Git/Redmine ingestion) but currently relies almost exclusively on stateless **vector similarity** for retrieval.
+At the time of writing, `ibis-assistant` had the **structural foundation** (Knowledge Graph + Git/Redmine ingestion) but relied heavily on vector similarity for retrieval. That retrieval gap has since been reduced by the hybrid AskProject path.
 
 ## Gap Analysis
 

@@ -1,6 +1,6 @@
 # Agentic RAFT Strategy
 
-**Status:** Draft
+**Status:** Draft (design). Live reinforcement today uses MCP `save_reasoning_outcome` / collaborative memory rather than a `reinforce_path` tool name.
 **Objective:** Upgrade the Ibis Assistant from a passive retrieval system to an active, self-optimizing agentic system.
 
 ## 1. Core Concepts

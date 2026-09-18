@@ -1,8 +1,8 @@
 # Architecture Proposal: CLI Interface, Background Management, and Configuration Wizard
 
 > [!NOTE]
-> **Proposal status: UNDER REVIEW (June 2026)**
-> This document describes the architectural proposal for integrating a command-line interface (CLI) in Ibis Assistant for sending MCP commands, a textual assistant (Q&A wizard) for guided first-time product initialization, and an auto-discovery mechanism to ease integration with external AI clients.
+> **Proposal status: IMPLEMENTED** (see [cli_and_wizard_implementation_instructions.md](cli_and_wizard_implementation_instructions.md); CLI includes `logs analyze` as of September 2026).
+> Historical proposal text below is kept for design rationale.
 
 ---
 

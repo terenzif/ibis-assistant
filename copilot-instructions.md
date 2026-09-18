@@ -16,11 +16,19 @@
 
 1. `init_project(project_name, origin_url, branch, commit?)`
    * May return `{"status": "credentials_required", ...}` when auth is missing.
-2. `update_project_status(project_name, origin_url, branch, commit)`
-3. `ask_project(query, branch_or_commit?)`
-4. `provide_collaborative_memory(project_name, memory_text, embedding?)`
-5. `save_reasoning_outcome(project_name, question, outcome_text, useful_sources)`
-6. `git_configure_credentials(target, provider, auth_type, token, username?, ssh_private_key?)`
+   * May return `{"status": "requires_patch", "closest_known_commit": "..."}` when the tip is not on the remote — follow with `sync_local_patch`.
+   * May return `{"status": "aligned", ...}` when ingestion starts normally.
+2. `sync_local_patch(project_name, patch, commit?)`
+   * `patch` is a unified diff; requires a prior `init_project` workspace.
+3. `update_project_status(project_name, origin_url, branch, commit)`
+4. `ask_project(query, branch_or_commit?)`
+5. `ingest_code` — AST/vector ingest (ast-grep + `rules/` + optional AI rule synth)
+6. `analyze_logs(project_name, log_text, log_file?)` — static → AI → enrich; see `docs/log_analysis_pipeline.md`
+7. `analyze_blast_radius(...)` / `find_dead_code(repo_name)`
+8. `provide_collaborative_memory(project_name, memory_text, embedding?)`
+9. `save_reasoning_outcome(project_name, question, outcome_text, useful_sources)`
+10. `optimize_knowledge(iterations?)`
+11. `git_configure_credentials(target, provider, auth_type, token, username?, ssh_private_key?)`
    * Persists credentials in SurrealDB (domain or full repo URL).
 
 ### Ticketing tools (`ticket_*`)
@@ -59,9 +67,24 @@
 4. Open PR: `repo_pr_create`
 5. Tester closes: `ticket_mark_closed`
 
+### Local unpushed commit playbook
+
+1. `init_project(...)` → if `requires_patch`, note `closest_known_commit`
+2. Produce a unified diff of local commits not on the remote
+3. `sync_local_patch(project_name, patch, commit?)`
+4. Continue with `ask_project` / `ingest_code` as needed
+
+### Log triage playbook
+
+1. `analyze_logs(project_name, log_text, log_file?)` (or CLI `logs analyze`)
+2. Prefer results that name a source file and cause (enrich path)
+3. Optionally re-ingest code if enrich lacked graph context
+
 ### Common errors
 
 - `provider not registered`: missing entry in `config/ticketing_config.json`
 - `permission denied` / auth errors: missing/invalid user credential headers
 - `workflow target not found`: status mapping incomplete; heuristic fallback may apply
 - `credentials_required` (`init_project`): ask the user for a PAT and call `git_configure_credentials`, or pass `X-Git-Token` on each call
+- `requires_patch` (`init_project`): call `sync_local_patch` with a unified diff; do not invent a remote SHA
+- `workspace not found` (`sync_local_patch`): run `init_project` first

@@ -1,8 +1,8 @@
 # Phased Implementation Guide: Log Analysis Extension and SMTP Reform
 
 > [!NOTE]
-> **Implementation status: COMPLETED** (commit `cf677b3`)
-> All phases have been implemented and verified with green tests. This document is kept as an architectural reference.
+> **Implementation status: COMPLETED** (commit `cf677b3`; MCP tool renamed/shipped as **`analyze_logs`**)
+> All original phases have been implemented. September 2026 additions (enrich, LogAlign promote, sidecar reports, AI→ast-grep for logs) are documented in [log_analysis_pipeline.md](log_analysis_pipeline.md) and [changelog_20260918.md](changelog_20260918.md).
 >
 > **Residual risks identified (post-naming analysis):**
 > - Polling pattern matching + file archival in real scenarios (permissions/path of SMB shares on Windows).
@@ -16,7 +16,7 @@
 * **Phase 2:** SMTP Client Reform (`internal/ingest/logs/notifier.go`)
 * **Phase 3:** Notification Throttling and Aggregation (Daily Digest)
 * **Phase 4:** Synchronous Ingestion & HTTP POST Endpoint `/api/v1/logs/upload`
-* **Phase 5:** Add Synchronous MCP Tool `analyze_log_stream`
+* **Phase 5:** Add Synchronous MCP Tool `analyze_logs`
 * **Phase 6:** Scheduler and Polling Client (FTP / SFTP / SMB)
 * **Phase 7:** Validation and Unit Testing
 
@@ -100,12 +100,12 @@
 
 ---
 
-## Phase 5: Add Synchronous MCP Tool `analyze_log_stream`
+## Phase 5: Add Synchronous MCP Tool `analyze_logs`
 **Goal:** Add the synchronous MCP tool so remote agents can analyze log snippets in real time.
 
 ### Operational steps:
 1. Open `cmd/server/main.go`.
-2. Add the MCP tool `analyze_log_stream`.
+2. Add the MCP tool `analyze_logs`.
 3. Handle the call by synchronously running log analysis via `LogAnalyzer` and return a JSON report containing the identified errors.
 
 ---

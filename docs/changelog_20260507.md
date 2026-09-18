@@ -1,6 +1,6 @@
 # Changelog - May 7, 2026
 
-This document summarizes all implementations, architectural refactorings, and improvements introduced between May 6 and May 7, 2026. These features consolidate Ibis Assistant for stable, multi-language, production-ready use on Windows.
+This document summarizes implementations between May 6 and May 7, 2026. For **September 2026** work (RecordID, ask ranking, `sync_local_patch`, log enrich/report, AI rule synth, polyglot globs), see **[changelog_20260918.md](changelog_20260918.md)**.
 
 ## 1. Dynamic Workspace Management and Code Ingestion
 - **Dynamic Code Ingestion**: Added `internal/ingest/dynamic/queue.go` and `workspace.go` to orchestrate real-time repository updates via `ProjectIngestionManager`. Synchronization (fetch/checkout) is separated from asynchronous vectorization.

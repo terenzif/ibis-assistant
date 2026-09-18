@@ -26,4 +26,4 @@ The repository's test suite was fully synchronized with the updated interfaces a
 - **Schema Alignment**: Ensured all ingestion and search tests use the `Table:Repo_File` ID convention and modern schema constants.
 
 ---
-*Refer to `walkthrough.md` for historical verification logs.*
+Historical note: verification logs formerly referenced a root `walkthrough.md` that is not in this repository. Prefer package tests and [changelog_20260918.md](changelog_20260918.md) for current verification pointers.

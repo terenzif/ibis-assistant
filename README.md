@@ -8,11 +8,13 @@ It gives AI agents (Claude, Copilot, Gemini, and others) context beyond the curr
 
 * **Unified knowledge graph**: Files, commits, authors, branches, and issues in SurrealDB.
 * **Git ingestion**: Builds causal links (`commit` → `changed` → `file`).
+* **Local patch sync**: MCP `sync_local_patch` aligns workspaces when `init_project` returns `requires_patch` for unpushed commits.
 * **Multi-provider ticketing**: Links code changes to work items (`commit` → `implements` → `issue`).
-* **Log analysis**: Ingests logs, classifies error patterns, and persists read offsets.
-* **Email reporting**: Optional SMTP reports for anomalies and AI cost tracking.
+* **Log analysis pipeline**: Recursive watch → LogAlign / known patterns / ast-grep first → AI residual → enrich (file/cause) → sidecar markdown report. See [docs/log_analysis_pipeline.md](docs/log_analysis_pipeline.md).
+* **Email reporting**: Optional SMTP digests for anomalies and AI cost tracking.
+* **Polyglot AST ingest**: ast-grep rules + `languageGlobs`; AI may synthesize missing YAML rules. See [docs/code_ingest_polyglot_and_rules.md](docs/code_ingest_polyglot_and_rules.md).
 * **Efficient vector RAG**: Gemini batch embeddings (or local Ollama) for large chunk sets.
-* **Hybrid search**: Graph structure + semantic vectors.
+* **Hybrid search**: Per-table vector queries + time decay + graph context via `ask_project`.
 * **MCP-compliant**: Standard tools for plug-and-play MCP clients.
 
 ## Prerequisites
@@ -29,7 +31,7 @@ It gives AI agents (Claude, Copilot, Gemini, and others) context beyond the curr
 
 ```bash
 git clone https://github.com/terenzif/ibis-server.git
-cd ibis-assistant
+cd ibis-server
 go build -o ibis-assistant ./cmd/server   # on Windows: ibis-assistant.exe
 ```
 
@@ -99,10 +101,16 @@ The same binary talks to a running server via `/api/v1/cli/call`:
 ./ibis-assistant ask "Explain the auth flow" --branch main
 ./ibis-assistant ingest code --path ./path/to/project
 ./ibis-assistant ingest git --name MyApp --url https://github.com/org/repo --branch main
+./ibis-assistant logs analyze --project MyApp --text "ERROR timeout talking to db"
 ./ibis-assistant ticket search --query "login bug" --provider jira
 ./ibis-assistant pr create --source feature/x --target main --title "Add feature"
 ./ibis-assistant credentials add --target github.com --token MY_PAT
+./ibis-assistant memory --help          # collaborative memory helpers
+./ibis-assistant outcome --help         # save_reasoning_outcome
+./ibis-assistant optimize --help        # optimize_knowledge
 ```
+
+MCP-only (no CLI wrapper yet): `sync_local_patch`, `analyze_blast_radius`, `find_dead_code`, `update_project_status`.
 
 ### HTTP auto-discovery (`GET /`)
 
@@ -130,6 +138,8 @@ Priority:
 4. `GIT_TOKEN` environment variable
 
 If `init_project` hits a private repo with no credentials, the server returns `{"status":"credentials_required", ...}` so the client can prompt for a PAT.
+
+If the requested commit is not on the remote, the server may return `{"status":"requires_patch", "closest_known_commit":"…"}`. Clients should send a unified diff with MCP `sync_local_patch` (see [copilot-instructions.md](copilot-instructions.md)).
 
 ## MCP clients
 
@@ -181,9 +191,10 @@ go test ./...
 ## Layout
 
 * `cmd/` — application entrypoints
-* `internal/` — schema, ingest (git/code/logs/redmine), db, search, ticketing, AI
-* `rules/` — ast-grep YAML extractors
-* `docs/` — architecture and client guides (primary docs are English; some historical design notes may still be Italian)
+* `internal/` — schema, ingest (git/code/logs/dynamic), db, search, ticketing, AI
+* `rules/` — ast-grep YAML extractors (hand-written + optional `ai-generated-*`)
+* `sgconfig.yml` — ast-grep config including `languageGlobs`
+* `docs/` — architecture and client guides (English). Start with [docs/changelog_20260918.md](docs/changelog_20260918.md) for the latest shipped work.
 
 ## Roadmap vision
 
@@ -199,6 +210,7 @@ Contributions that move those two axes forward are especially welcome.
 * Treat `cmd/server/main.go` as the MCP tool source of truth
 * Prefer `ticket_*` over deprecated `redmine_*` names
 * Keep `config_master.json` tracked; never commit local `config.json`
+* Keep `AGENTS.md` local-only (gitignored); do not commit it
 * AST chunking/logs go through the **ast-grep** sidecar (`sg`)
 * Production layout is built into `dist/` via `make dist`
 
