@@ -17,6 +17,7 @@ import (
 	"github.com/terenzif/ibis-assistant/internal/config"
 	"github.com/terenzif/ibis-assistant/internal/db"
 	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/progress"
 	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
@@ -40,6 +41,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	}
 
 	logger.Info("Starting code analysis for: %s", absPath)
+	progress.Report(ctx, 0, 4, "Scanning repository")
 	_ = EnsureAstGrepRules()
 
 	if aiClient == nil || !aiClient.IsEmbeddingFunctional() {
@@ -215,6 +217,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	}
 
 	close(pathsChan) // Signal workers to finish
+	progress.Report(ctx, 2, 4, "Processing files")
 	wg.Wait()        // Wait for all workers
 
 	if ctx.Err() != nil {
@@ -228,6 +231,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	}
 
 	logger.Info("Code analysis complete for %s", absPath)
+	progress.Report(ctx, 4, 4, "Ingest complete")
 	return err
 }
 

@@ -17,17 +17,19 @@ import (
 	"time"
 
 	"github.com/terenzif/ibis-assistant/internal/ai"
-	"github.com/terenzif/ibis-assistant/internal/auth"
 	"github.com/terenzif/ibis-assistant/internal/cli"
 	"github.com/terenzif/ibis-assistant/internal/config"
 	"github.com/terenzif/ibis-assistant/internal/db"
 	"github.com/terenzif/ibis-assistant/internal/discovery"
+	"github.com/terenzif/ibis-assistant/internal/gitrepo"
+	"github.com/terenzif/ibis-assistant/internal/httpserver"
 	"github.com/terenzif/ibis-assistant/internal/ingest/code"
 	"github.com/terenzif/ibis-assistant/internal/ingest/dynamic"
 	"github.com/terenzif/ibis-assistant/internal/ingest/git"
 	"github.com/terenzif/ibis-assistant/internal/ingest/logs"
 	"github.com/terenzif/ibis-assistant/internal/logger"
 	"github.com/terenzif/ibis-assistant/internal/optimization"
+	"github.com/terenzif/ibis-assistant/internal/progress"
 	"github.com/terenzif/ibis-assistant/internal/repopr"
 	repoprado "github.com/terenzif/ibis-assistant/internal/repopr/providers/azuredevops"
 	"github.com/terenzif/ibis-assistant/internal/schema"
@@ -36,7 +38,6 @@ import (
 	ticketado "github.com/terenzif/ibis-assistant/internal/ticketing/providers/azuredevops"
 	ticketjira "github.com/terenzif/ibis-assistant/internal/ticketing/providers/jira"
 	ticketredmine "github.com/terenzif/ibis-assistant/internal/ticketing/providers/redmine"
-	"github.com/terenzif/ibis-assistant/internal/gitrepo"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -44,37 +45,25 @@ import (
 
 // AuthMiddleware injects ticketing and repo-provider auth headers into request context.
 func AuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+	return httpserver.Auth(next)
+}
 
-		if key := strings.TrimSpace(r.Header.Get("X-Redmine-API-Key")); key != "" {
-			ctx = context.WithValue(ctx, auth.RedmineKeyContextKey, key)
-		}
-		if email := strings.TrimSpace(r.Header.Get("X-Jira-Email")); email != "" {
-			ctx = context.WithValue(ctx, auth.JiraEmailContextKey, email)
-		}
-		if token := strings.TrimSpace(r.Header.Get("X-Jira-API-Token")); token != "" {
-			ctx = context.WithValue(ctx, auth.JiraAPITokenContextKey, token)
-		}
-		if pat := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-PAT")); pat != "" {
-			ctx = context.WithValue(ctx, auth.AzureDevOpsPATContextKey, pat)
-		}
-		if org := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Org")); org != "" {
-			ctx = context.WithValue(ctx, auth.AzureDevOpsOrgContextKey, org)
-		}
-		if project := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Project")); project != "" {
-			ctx = context.WithValue(ctx, auth.AzureDevOpsProjectContextKey, project)
-		}
-		if repo := strings.TrimSpace(r.Header.Get("X-Azure-DevOps-Repo")); repo != "" {
-			ctx = context.WithValue(ctx, auth.AzureDevOpsRepoContextKey, repo)
-		}
-		if gitToken := strings.TrimSpace(r.Header.Get("X-Git-Token")); gitToken != "" {
-			ctx = context.WithValue(ctx, auth.GitTokenContextKey, gitToken)
-		} else if gitPat := strings.TrimSpace(r.Header.Get("X-Git-PAT")); gitPat != "" {
-			ctx = context.WithValue(ctx, auth.GitTokenContextKey, gitPat)
-		}
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+func attachMCPProgress(ctx context.Context, mcpServer *server.MCPServer, request mcp.CallToolRequest) context.Context {
+	var token mcp.ProgressToken
+	if request.Params.Meta != nil {
+		token = request.Params.Meta.ProgressToken
+	}
+	if token == nil || mcpServer == nil {
+		return ctx
+	}
+	return progress.With(ctx, progress.Throttle(func(done, total int, message string) {
+		_ = mcpServer.SendNotificationToClient(ctx, "notifications/progress", map[string]any{
+			"progressToken": token,
+			"progress":      done,
+			"total":         total,
+			"message":       message,
+		})
+	}, time.Second))
 }
 
 func main() {
@@ -83,7 +72,7 @@ func main() {
 	if !configExists() {
 		if len(os.Args) < 2 || (os.Args[1] != "help" && os.Args[1] != "-h" && os.Args[1] != "--help" && os.Args[1] != "install" && os.Args[1] != "uninstall" && os.Args[1] != "/install" && os.Args[1] != "/uninstall") {
 			if err := config.RunWizard(); err != nil {
-				fmt.Fprintf(os.Stderr, "Errore durante il wizard di configurazione: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
 				os.Exit(1)
 			}
 			// Una volta completato il wizard, se l'utente ha creato il file di configurazione,
@@ -119,7 +108,7 @@ func main() {
 		handleService("/uninstall")
 	case "config":
 		if err := config.RunWizard(); err != nil {
-			fmt.Fprintf(os.Stderr, "Errore durante il wizard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
 			os.Exit(1)
 		}
 	case "start":
@@ -140,26 +129,26 @@ func main() {
 func printHelp() {
 	binName := filepath.Base(os.Args[0])
 	fmt.Println("Ibis Assistant - MCP Knowledge Graph & Search Engine")
-	fmt.Println("\nUso:")
-	fmt.Printf("  %s <comando> [opzioni]\n", binName)
-	fmt.Println("\nComandi del Server:")
-	fmt.Println("  run         Avvia il server in modalità interattiva (comportamento standard)")
-	fmt.Println("  start       Avvia il server in background come demone")
-	fmt.Println("  stop        Ferma il server avviato in background")
-	fmt.Println("  config      Avvia il wizard interattivo di configurazione")
-	fmt.Println("  install     Installa Ibis Assistant come Servizio Windows ('ibis-assistant')")
-	fmt.Println("  uninstall   Disinstalla il Servizio Windows")
-	fmt.Println("\nComandi del Client CLI:")
-	fmt.Println("  ask          Invia una domanda di reasoning sul codice")
-	fmt.Println("  ingest       Sincronizza e indicizza codice o Git")
-	fmt.Println("  ticket       Gestisce i ticket su Redmine/Jira/Azure DevOps")
-	fmt.Println("  pr           Gestisce Pull Request")
-	fmt.Println("  logs         Analizza file di log")
-	fmt.Println("  credentials  Configura credenziali Git persistenti")
-	fmt.Println("  memory       Gestisce memorie collaborative del progetto")
-	fmt.Println("  outcome      Gestisce outcome e deduizioni di reasoning")
-	fmt.Println("  optimize     Ottimizza la knowledge base tramite RAFT")
-	fmt.Println("\nEsempio:")
+	fmt.Println("\nUsage:")
+	fmt.Printf("  %s <command> [options]\n", binName)
+	fmt.Println("\nServer commands:")
+	fmt.Println("  run         Start the server interactively (default)")
+	fmt.Println("  start       Start the server in the background")
+	fmt.Println("  stop        Stop the background server")
+	fmt.Println("  config      Interactive configuration wizard")
+	fmt.Println("  install     Install as a Windows service ('ibis-assistant')")
+	fmt.Println("  uninstall   Uninstall the Windows service")
+	fmt.Println("\nCLI client (MCP Streamable HTTP POST /mcp):")
+	fmt.Println("  ask          Ask a reasoning question about indexed code")
+	fmt.Println("  ingest       Sync and index code or Git")
+	fmt.Println("  ticket       Tickets on Redmine / Jira / Azure DevOps")
+	fmt.Println("  pr           Pull requests")
+	fmt.Println("  logs         Analyze log text")
+	fmt.Println("  credentials  Persist Git credentials")
+	fmt.Println("  memory       Collaborative project memories")
+	fmt.Println("  outcome      Save reasoning outcomes")
+	fmt.Println("  optimize     RAFT knowledge-base optimization")
+	fmt.Println("\nExample:")
 	fmt.Printf("  %s run -port 3030\n", binName)
 }
 
@@ -279,11 +268,14 @@ func runServer(ctx context.Context) {
 	}
 
 	// 4. Initialize MCP Server
-	s := &mcpServerWrapper{server.NewMCPServer(
-		"Knowledge Graph MCP",
+	s := server.NewMCPServer(
+		"Ibis Assistant",
 		"1.1.0",
 		server.WithLogging(),
-	)}
+		server.WithToolCapabilities(true),
+		server.WithResourceCapabilities(false, true),
+		server.WithInstructions("Ibis Assistant MCP. Prefer Streamable HTTP POST /mcp. Read resource ibis://guide for install and usage."),
+	)
 
 	// --- [NEW] Start Embedded DB and Sidecars ---
 	if err := code.EnsureAstGrep(cfg.DBAutoUpdate); err != nil {
@@ -648,32 +640,18 @@ func runServer(ctx context.Context) {
 		mcp.WithString("commit", mcp.Description("Target commit hash (optional, takes precedence)")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: init_project")
+		ctx = attachMCPProgress(ctx, s, request)
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
 			return mcp.NewToolResultError("Invalid arguments"), nil
 		}
 
-		syncDone := make(chan dynamic.IngestionResult, 1)
 		projectName := getStringArg(args, "project_name")
 		job := dynamic.IngestionJob{
 			ProjectName: projectName,
 			OriginURL:   getStringArg(args, "origin_url"),
 			Branch:      getStringArg(args, "branch"),
 			Commit:      getStringArg(args, "commit"),
-			OnSyncDone: func(res dynamic.IngestionResult) {
-				syncDone <- res
-			},
-			OnComplete: func(err error) {
-				name := projectName
-				if name == "" {
-					name = "(unnamed)"
-				}
-				msg := fmt.Sprintf("Ingestion completed for %s", name)
-				if err != nil {
-					msg = fmt.Sprintf("Ingestion failed for %s: %v", name, err)
-				}
-				logger.Info(msg)
-			},
 		}
 		setSession(repoSessionContext{
 			ProjectName: job.ProjectName,
@@ -694,38 +672,41 @@ func runServer(ctx context.Context) {
 				projectID, db.EscapeSQL(job.ProjectName), db.EscapeSQL(commit), db.EscapeSQL(branch), source))
 		}
 
-		ingestionManager.Enqueue(job)
-
-		select {
-		case res := <-syncDone:
-			if res.Error != nil {
-				var credErr *gitrepo.CredentialsRequiredError
-				if errors.As(res.Error, &credErr) {
-					jsonPayload := fmt.Sprintf(`{"status": "credentials_required", "provider": "%s", "target": "%s", "message": "%s"}`,
-						credErr.Provider, credErr.Target, strings.ReplaceAll(credErr.Message, `"`, `\"`))
-					return mcp.NewToolResultText(jsonPayload), nil
-				}
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to sync: %v", res.Error)), nil
+		progress.Report(ctx, 0, 3, "Syncing git workspace")
+		repoPath, actualCommit, isAligned, err := dynamic.SyncWorkspace(ctx, cfg, dbClient, job.ProjectName, job.OriginURL, job.Branch, job.Commit)
+		if err != nil {
+			var credErr *gitrepo.CredentialsRequiredError
+			if errors.As(err, &credErr) {
+				jsonPayload := fmt.Sprintf(`{"status": "credentials_required", "provider": "%s", "target": "%s", "message": "%s"}`,
+					credErr.Provider, credErr.Target, strings.ReplaceAll(credErr.Message, `"`, `\"`))
+				return mcp.NewToolResultText(jsonPayload), nil
 			}
-			if dbClient != nil && projectName != "" && res.ActualCommit != "" {
-				projectID := db.FormatRecordID(schema.TableProject, db.SanitizeID(projectName))
-				_, _ = dbClient.Execute(ctx, fmt.Sprintf(
-					"UPDATE %s SET baseline_commit = '%s', baseline_branch = '%s', baseline_source = 'init_project';",
-					projectID, db.EscapeSQL(res.ActualCommit), db.EscapeSQL(job.Branch)))
-				setSession(repoSessionContext{
-					ProjectName: projectName,
-					OriginURL:   job.OriginURL,
-					Branch:      job.Branch,
-					Commit:      res.ActualCommit,
-				})
-			}
-			if !res.IsAligned {
-				return mcp.NewToolResultText(fmt.Sprintf(`{"status": "requires_patch", "closest_known_commit": "%s", "message": "Commit not found on remote. Please use sync_local_patch for perfect alignment or continue with the closest commit."}`, res.ActualCommit)), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf(`{"status": "aligned", "actual_commit": "%s", "message": "Ingestion started in background"}`, res.ActualCommit)), nil
-		case <-time.After(3 * time.Minute):
-			return mcp.NewToolResultError("Timeout waiting for git sync"), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to sync: %v", err)), nil
 		}
+		if dbClient != nil && projectName != "" && actualCommit != "" {
+			projectID := db.FormatRecordID(schema.TableProject, db.SanitizeID(projectName))
+			_, _ = dbClient.Execute(ctx, fmt.Sprintf(
+				"UPDATE %s SET baseline_commit = '%s', baseline_branch = '%s', baseline_source = 'init_project';",
+				projectID, db.EscapeSQL(actualCommit), db.EscapeSQL(job.Branch)))
+			setSession(repoSessionContext{
+				ProjectName: projectName,
+				OriginURL:   job.OriginURL,
+				Branch:      job.Branch,
+				Commit:      actualCommit,
+			})
+		}
+		if !isAligned {
+			return mcp.NewToolResultText(fmt.Sprintf(`{"status": "requires_patch", "closest_known_commit": "%s", "message": "Commit not found on remote. Please use sync_local_patch for perfect alignment or continue with the closest commit."}`, actualCommit)), nil
+		}
+
+		progress.Report(ctx, 1, 3, "Ingesting git history and code")
+		if ingestionManager.ProcessJob != nil {
+			if err := ingestionManager.ProcessJob(ctx, job, repoPath); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Ingestion failed: %v", err)), nil
+			}
+		}
+		progress.Report(ctx, 3, 3, "Project ready")
+		return mcp.NewToolResultText(fmt.Sprintf(`{"status": "aligned", "actual_commit": "%s", "message": "Workspace synced and ingestion completed"}`, actualCommit)), nil
 	})
 
 	s.AddTool(mcp.NewTool("update_project_status",
@@ -753,7 +734,7 @@ func runServer(ctx context.Context) {
 			Commit:      job.Commit,
 		})
 		ingestionManager.Enqueue(job)
-		return mcp.NewToolResultText("Aggiornamento accodato con successo."), nil
+		return mcp.NewToolResultText("Update queued successfully."), nil
 	})
 
 	s.AddTool(mcp.NewTool("sync_local_patch",
@@ -967,6 +948,7 @@ func runServer(ctx context.Context) {
 		mcp.WithString("path", mcp.Description("Optional specific repo path")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: ingest_code")
+		ctx = attachMCPProgress(ctx, s, request)
 		if dbClient == nil {
 			return mcp.NewToolResultError("Database not connected"), nil
 		}
@@ -1598,6 +1580,7 @@ func runServer(ctx context.Context) {
 		mcp.WithString("log_text", mcp.Description("Raw log text content to analyze (entries separated by newlines)")),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("MCP Tool Call: analyze_logs")
+		ctx = attachMCPProgress(ctx, s, request)
 		args, _ := request.Params.Arguments.(map[string]interface{})
 		projectName := getStringArg(args, "project_name")
 		logFile := getStringArg(args, "log_file")
@@ -1666,6 +1649,8 @@ func runServer(ctx context.Context) {
 		return mcp.NewToolResultText(string(out)), nil
 	})
 
+	httpserver.RegisterGuideResource(s, cfg)
+
 	// 8. Start Server
 
 	// Handle Signals in Main Thread
@@ -1673,38 +1658,8 @@ func runServer(ctx context.Context) {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	if cfg.Mode == "sse" {
-		logger.Info("Starting SSE/Streamable HTTP server on port %d...", cfg.Port)
-		sseServer := server.NewSSEServer(s.MCPServer)
-		streamableServer := server.NewStreamableHTTPServer(s.MCPServer)
-
-		// Standard HTTP server with graceful shutdown
-		mux := http.NewServeMux()
-
-		// Endpoint per l'auto-discovery (HTML e metadata JSON)
-		mux.HandleFunc("/", autoDiscoveryHandler(cfg))
-
-		// Bridge HTTP POST per inoltrare i comandi CLI locali
-		mux.HandleFunc("/api/v1/cli/call", cliCallHandler())
-
-		// Legacy SSE endpoints
-		mux.Handle("/sse", sseServer.SSEHandler())
-		mux.Handle("/message", sseServer.MessageHandler())
-
-		// Streamable HTTP endpoints (MCP standard)
-		mux.Handle("/mcp/", streamableServer)
-		mux.Handle("/mcp", streamableServer)
-
-		// New HTTP Log Upload endpoint
-		mux.HandleFunc("/api/v1/logs/upload", logUploadHandler(cfg, dbClient, aiClient))
-
-		// Wrap the entire mux with AuthMiddleware
-		handler := AuthMiddleware(mux)
-
-		// Store server instance for graceful shutdown
-		httpSrv := &http.Server{
-			Addr:    fmt.Sprintf(":%d", cfg.Port),
-			Handler: handler,
-		}
+		logger.Info("Starting Streamable HTTP (legacy SSE on /sse) at %s...", cfg.ListenAddr())
+		httpSrv := httpserver.NewHTTPServer(cfg, s, logUploadHandler(cfg, dbClient, aiClient))
 
 		go func() {
 			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -1735,7 +1690,7 @@ func runServer(ctx context.Context) {
 		logger.Info("Starting STDIO server...")
 		// STDIO usually blocks until stdin closes
 		go func() {
-			if err := server.ServeStdio(s.MCPServer); err != nil {
+			if err := server.ServeStdio(s); err != nil {
 				logger.Error("Server error: %v", err)
 			}
 			// If stdio interaction ends, we assume done

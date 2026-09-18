@@ -16,6 +16,7 @@ import (
 	"github.com/terenzif/ibis-assistant/internal/config"
 	"github.com/terenzif/ibis-assistant/internal/db"
 	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/progress"
 	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
@@ -306,8 +307,11 @@ func (a *LogAnalyzer) ProcessBatchSync(ctx context.Context, lines []string) ([]S
 		chunkSize = 250
 	}
 	nChunks := (len(lines) + chunkSize - 1) / chunkSize
+	progress.Report(ctx, 0, nChunks, "Analyzing log batch")
 	if nChunks <= 1 {
-		return a.processBatchChunk(ctx, lines, 1, 1)
+		out, err := a.processBatchChunk(ctx, lines, 1, 1)
+		progress.Report(ctx, 1, 1, "Log analysis complete")
+		return out, err
 	}
 
 	var all []SemanticError
@@ -326,6 +330,7 @@ func (a *LogAnalyzer) ProcessBatchSync(ctx context.Context, lines []string) ([]S
 			firstErr = err
 			// Continue remaining chunks so known-pattern accumulation still helps later slices.
 		}
+		progress.Report(ctx, chunkIdx, nChunks, fmt.Sprintf("Log analysis chunk %d/%d", chunkIdx, nChunks))
 	}
 	return all, firstErr
 }
