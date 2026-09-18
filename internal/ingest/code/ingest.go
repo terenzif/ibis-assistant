@@ -24,6 +24,14 @@ type AIClient interface {
 	IsEmbeddingFunctional() bool
 }
 
+func maybeRescanWithSynth(ctx context.Context, aiClient AIClient, relPath string, content []byte, chunks []ASTChunk, calls []CallEdge) bool {
+	gen, ok := aiClient.(ContentGenerator)
+	if !ok {
+		return false
+	}
+	return MaybeSynthesizeForSparseAST(ctx, gen, relPath, content, chunks, calls)
+}
+
 // IngestCodebase scans the repository and updates vector embeddings for any modified or new files.
 func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient, repoPath string, repoName string, cfg *config.Config) error {
 	absPath, err := filepath.Abs(repoPath)
@@ -32,6 +40,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 	}
 
 	logger.Info("Starting code analysis for: %s", absPath)
+	_ = EnsureAstGrepRules()
 
 	if aiClient == nil || !aiClient.IsEmbeddingFunctional() {
 		return fmt.Errorf("AI vectorization is disabled: embedding provider not configured (set embedding.provider and embedding.model in config.json)")
@@ -97,7 +106,7 @@ func IngestCodebase(ctx context.Context, dbClient db.Executor, aiClient AIClient
 					logger.Error("Error calculating relative path for %s: %v", path, err)
 					continue
 				}
-				if err := processFile(ctx, dbClient, path, relPath, repoName); err != nil {
+				if err := processFile(ctx, dbClient, path, relPath, repoName, aiClient); err != nil {
 					logger.Error("Error processing %s: %v", path, err)
 				}
 			}
@@ -315,7 +324,7 @@ func pruneRepo(ctx context.Context, dbClient db.Executor, repoPath string, activ
 	return nil
 }
 
-func processFile(ctx context.Context, dbClient db.Executor, absPath string, relPath string, repoName string) error {
+func processFile(ctx context.Context, dbClient db.Executor, absPath string, relPath string, repoName string, aiClient AIClient) error {
 	f, err := os.Open(absPath)
 	if err != nil {
 		return fmt.Errorf("open error: %w", err)
@@ -412,6 +421,11 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 	var validChunks []ASTChunk
 	astChunks, logs, calls, err := ParseAST(ctx, relPath, fileBytes)
+	if err == nil && NeedsRuleSynthesis(relPath, astChunks, calls, fileBytes) && aiClient != nil {
+		if rewritten := maybeRescanWithSynth(ctx, aiClient, relPath, fileBytes, astChunks, calls); rewritten {
+			astChunks, logs, calls, err = ParseAST(ctx, relPath, fileBytes)
+		}
+	}
 	if err == nil && len(astChunks) > 0 {
 		validChunks = astChunks
 		logger.Debug("  - Extracted %d AST chunks, %d log templates, and %d calls", len(astChunks), len(logs), len(calls))
@@ -457,9 +471,12 @@ func processFile(ctx context.Context, dbClient db.Executor, absPath string, relP
 
 			formatBytes, _ := json.Marshal(logDef.FormatString)
 			regexBytes, _ := json.Marshal(logDef.Regex)
+			// JSON-encode path so Windows backslashes do not break Surreal string literals.
+			srcPath := strings.ReplaceAll(logDef.SourceFile, `\`, `/`)
+			srcBytes, _ := json.Marshal(srcPath)
 
-			ql := fmt.Sprintf("CREATE %s SET format_string=%s, regex=%s, source_file='%s', source_line=%d;",
-				logID, string(formatBytes), string(regexBytes), logDef.SourceFile, logDef.SourceLine)
+			ql := fmt.Sprintf("UPSERT %s SET format_string=%s, regex=%s, source_file=%s, source_line=%d, origin='ast';",
+				logID, string(formatBytes), string(regexBytes), string(srcBytes), logDef.SourceLine)
 			logBuilder.WriteString(ql)
 
 			// Relate File -> LogTemplate

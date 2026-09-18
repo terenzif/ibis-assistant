@@ -482,6 +482,12 @@ Log text:
 	// so subsequent lines/chunks LogAlign-bypass classify AI (AST remains primary).
 	_ = a.PromoteAIErrorsToLogAlign(ctx, errors)
 
+	// Path D: optionally synthesize ast-grep *-logs.yml rules (cost-bounded).
+	// Full LogAlign source_file/line effect typically requires a later ingest_code.
+	if a.shouldAttemptASTRuleGen(errors) {
+		_, _ = a.GenerateASTRulesFromErrors(ctx, errors)
+	}
+
 	for _, e := range errors {
 		if e.Template != "" {
 			a.AddKnownPattern(e.Category, e.Template)

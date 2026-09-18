@@ -187,8 +187,10 @@ func Load(paths ...string) *Config {
 			"Gemfile.lock", "pnpm-lock.yaml",
 		},
 		SupportedExtensions: []string{
-			".go", ".py", ".js", ".ts", ".md", ".cs",
-			".java", ".cpp", ".h", ".c", ".html", ".css", ".sql",
+			".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".md", ".cs",
+			".java", ".cpp", ".h", ".c", ".html", ".htm", ".css", ".scss", ".sql",
+			".vue", ".aspx", ".ascx", ".cshtml", ".razor", ".jsp", ".erb", ".ejs",
+			".svelte", ".astro", ".php", ".rb",
 		},
 		SMTP: SMTPConfig{
 			Enabled:                    false,

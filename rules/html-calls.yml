@@ -1,7 +1,5 @@
+# Disabled: HTML script_element relational fields are not reliable across ast-grep versions.
 id: html-calls
 language: html
 rule:
-  kind: script_element
-  has:
-    field: content
-    pattern: $FUNC($$$ARGS)
+  pattern: __ibis_disabled_html_calls__
