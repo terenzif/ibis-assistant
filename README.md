@@ -172,6 +172,14 @@ See **[docs/CLAUDE_INTEGRATION.md](docs/CLAUDE_INTEGRATION.md)**. Build `tools/m
 }
 ```
 
+### Cursor plugin (stdio child)
+
+Canonical package: [`cursor-plugin/`](cursor-plugin/). Copy it to `~/.cursor/plugins/local/ibis-assistant/` so Cursor can load it immediately.
+
+The plugin runs `ibis-assistant -mode stdio` with `RUNTIME_MODE=plugin`. Put the Go binary on `PATH` (`go build -o ibis-assistant.exe ./cmd/server`). It uses the opened folder as the live workspace and an isolated data dir (`%LOCALAPPDATA%\ibis-assistant\plugin` or `IBIS_DATA_DIR`). If a personal daemon is already running, the plugin warns and does **not** attach to that HTTP port.
+
+See [`cursor-plugin/README.md`](cursor-plugin/README.md).
+
 Ticketing identity headers (optional overrides):
 
 * `X-Redmine-API-Key`
@@ -200,7 +208,8 @@ go test ./...
 ## Layout
 
 * `cmd/` — application entrypoints
-* `internal/` — schema, ingest (git/code/logs/dynamic), db, search, ticketing, AI
+* `internal/` — schema, ingest (git/code/logs/dynamic), db, search, ticketing, AI, workspace resolver
+* `cursor-plugin/` — Cursor marketplace plugin (MCP stdio spawn; binary stays on PATH)
 * `rules/` — ast-grep YAML extractors (hand-written + optional `ai-generated-*`)
 * `sgconfig.yml` — ast-grep config including `languageGlobs`
 * `docs/` — architecture and client guides (English). Start with [docs/naming.md](docs/naming.md) and [docs/changelog_20260918.md](docs/changelog_20260918.md) for product name and recent shipped work.

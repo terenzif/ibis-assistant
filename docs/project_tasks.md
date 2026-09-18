@@ -55,5 +55,5 @@
 
 - [x] Formalize personal / server / plugin runtimes and HTTP Streamable MCP surface <!-- id: 55 -->
 - [x] Workspace path resolver (`working_repo_path` vs `discovery_root/dynamic`) <!-- id: 56 -->
-- [ ] Cursor plugin scaffold (Ibis Assistant for Cursor, stdio child) <!-- id: 57 -->
+- [x] Cursor plugin scaffold (Ibis Assistant for Cursor, stdio child) <!-- id: 57 -->
 
