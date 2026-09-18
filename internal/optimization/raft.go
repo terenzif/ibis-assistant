@@ -2,7 +2,6 @@ package optimization
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -101,15 +100,26 @@ func (o *Optimizer) OptimizeLoop(ctx context.Context, iterations int) error {
 		return fmt.Errorf("failed to select chunks: %w", err)
 	}
 
-	// Parse
+	rows, ok := res.([]interface{})
+	if !ok {
+		return fmt.Errorf("failed to parse chunks: unexpected result type %T", res)
+	}
 	type Chunk struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
+		ID      string
+		Content string
 	}
 	var chunks []Chunk
-	bytes, _ := json.Marshal(res)
-	if err := json.Unmarshal(bytes, &chunks); err != nil {
-		return fmt.Errorf("failed to parse chunks: %w", err)
+	for _, r := range rows {
+		row, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id := db.CoerceRecordID(row["id"])
+		content, _ := row["content"].(string)
+		if id == "" || content == "" {
+			continue
+		}
+		chunks = append(chunks, Chunk{ID: id, Content: content})
 	}
 
 	for i, c := range chunks {

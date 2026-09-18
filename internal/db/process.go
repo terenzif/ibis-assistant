@@ -68,7 +68,8 @@ func StartEmbedded(user, password, dataPath string, port int, autoUpdate bool) (
 		cmd.Stderr = os.Stderr
 	}
 
-	log.Printf("Starting embedded database: %s %v", binName, args)
+	// Do not log args: they include --pass <password>.
+	log.Printf("Starting embedded database: %s (bind=%s, data=%s)", binName, bindAddr, absDataPath)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start database process: %w", err)
 	}

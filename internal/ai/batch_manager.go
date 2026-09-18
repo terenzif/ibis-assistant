@@ -76,7 +76,7 @@ func (bm *BatchManager) runLoop() {
 
 // processPendingChunks finds chunks waiting for embedding and submits them in batches
 func (bm *BatchManager) processPendingChunks() {
-	if bm.DB == nil || bm.AI == nil || !bm.AI.IsFunctional() {
+	if bm.DB == nil || bm.AI == nil || !bm.AI.IsEmbeddingFunctional() {
 		return
 	}
 
@@ -96,8 +96,8 @@ func (bm *BatchManager) processPendingChunks() {
 		}
 		if rows, ok := res.([]interface{}); ok {
 			allRows = append(allRows, rows...)
-		} else {
-			logger.Debug("BatchManager: Failed to cast result to []interface{}. Res: %v", res)
+		} else if res != nil {
+			logger.Debug("BatchManager: Failed to cast result to []interface{}. Res type=%T", res)
 		}
 		if len(allRows) >= BatchSize {
 			allRows = allRows[:BatchSize]
@@ -111,34 +111,28 @@ func (bm *BatchManager) processPendingChunks() {
 
 	var chunkIDs []string
 	var texts []string
+	skipped := 0
 
 	for _, r := range allRows {
 		row, ok := r.(map[string]interface{})
 		if !ok {
+			skipped++
 			continue
 		}
 
-		var id string
-		if rawID, exists := row["id"]; exists {
-			switch v := rawID.(type) {
-			case string:
-				id = v
-			case map[string]interface{}:
-				if idVal, ok := v["id"].(string); ok {
-					id = idVal
-				}
-			}
-		}
-
+		id := db.CoerceRecordID(row["id"])
 		content, _ := row["content"].(string)
 
 		if id != "" && content != "" {
 			chunkIDs = append(chunkIDs, id)
 			texts = append(texts, content)
+		} else {
+			skipped++
 		}
 	}
 
 	if len(chunkIDs) == 0 {
+		logger.Warn("BatchManager: %d pending rows but 0 usable chunk IDs (skipped=%d)", len(allRows), skipped)
 		return
 	}
 

@@ -28,3 +28,7 @@ project.db/
 *.db-shm
 
 dist/
+
+# Local agent notes
+AGENTS.md
+

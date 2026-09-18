@@ -69,3 +69,49 @@ func TestFormatRecordID(t *testing.T) {
 		}
 	}
 }
+
+func TestIsSafeRecordID(t *testing.T) {
+	ok := []string{"commit:abc123", "file:⟨main_go⟩", "issue:42"}
+	bad := []string{"", "nocolon", "x; DELETE repo;", "a:b c", "a:'b'", "DROP TABLE:x"}
+	for _, id := range ok {
+		if !IsSafeRecordID(id) {
+			t.Errorf("IsSafeRecordID(%q) = false; want true", id)
+		}
+	}
+	for _, id := range bad {
+		if IsSafeRecordID(id) {
+			t.Errorf("IsSafeRecordID(%q) = true; want false", id)
+		}
+	}
+}
+
+func TestCoerceRecordID(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  interface{}
+		want string
+	}{
+		{"string", "file_chunk:abc", "file_chunk:abc"},
+		{"map full", map[string]interface{}{"id": "file_chunk:abc"}, "file_chunk:abc"},
+		{"map tb+id", map[string]interface{}{"tb": "file_chunk", "id": "abc"}, "file_chunk:abc"},
+		{"map Table+ID", map[string]interface{}{"Table": "file_chunk", "ID": "abc"}, "file_chunk:abc"},
+		{"map empty", map[string]interface{}{"other": "x"}, ""},
+		{"nil", nil, ""},
+	}
+	for _, tt := range tests {
+		if got := CoerceRecordID(tt.raw); got != tt.want {
+			t.Errorf("%s: CoerceRecordID() = %q; want %q", tt.name, got, tt.want)
+		}
+	}
+	// Surreal models.RecordID-like struct
+	type recordID struct {
+		Table string
+		ID    string
+	}
+	got := CoerceRecordID(recordID{Table: "file_chunk", ID: "xyz"})
+	if got != "file_chunk:xyz" {
+		t.Errorf("struct RecordID: got %q; want file_chunk:xyz", got)
+	}
+	// Must not recurse infinitely on maps that miss id
+	_ = CoerceRecordID(map[string]interface{}{"nested": map[string]interface{}{"id": "x"}})
+}

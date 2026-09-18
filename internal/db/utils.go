@@ -1,6 +1,9 @@
 package db
 
 import (
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -12,7 +15,24 @@ var (
 	multiUnderscore = regexp.MustCompile(`_+`)
 	// isNumericId detects IDs that are purely numeric, which don't need bracket wrapping.
 	isNumericId = regexp.MustCompile(`^[0-9]+$`)
+	// safeRecordIDTable matches a Surreal table name segment.
+	safeRecordIDTable = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	// safeRecordIDKey matches the ID segment (optionally angle-bracket wrapped).
+	safeRecordIDKey = regexp.MustCompile(`^(?:⟨)?[a-zA-Z0-9_.-]+(?:⟩)?$`)
 )
+
+// IsSafeRecordID reports whether id is a single Surreal record reference safe to interpolate.
+func IsSafeRecordID(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.ContainsAny(id, ";\n\r\t '\"\\") {
+		return false
+	}
+	parts := strings.SplitN(id, ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	return safeRecordIDTable.MatchString(parts[0]) && safeRecordIDKey.MatchString(parts[1])
+}
 
 // FormatRecordID returns a SurrealDB record ID formatted with angled brackets for v3.0 compatibility.
 func FormatRecordID(table, id string) string {
@@ -69,4 +89,99 @@ func EscapeSQL(s string) string {
 	s = strings.ReplaceAll(s, "'", "\\'")
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	return s
+}
+
+// CoerceRecordID converts SurrealDB driver ID values (string, map, or RecordID struct) into a record ID string.
+func CoerceRecordID(raw interface{}) string {
+	if raw == nil {
+		return ""
+	}
+	if s, ok := raw.(string); ok {
+		return s
+	}
+	if m, ok := raw.(map[string]interface{}); ok {
+		return coerceRecordIDMap(m)
+	}
+	if s, ok := raw.(fmt.Stringer); ok {
+		if out := s.String(); out != "" && out != "<nil>" {
+			return out
+		}
+	}
+
+	if b, err := json.Marshal(raw); err == nil {
+		var asString string
+		if err := json.Unmarshal(b, &asString); err == nil && asString != "" {
+			return asString
+		}
+		var asMap map[string]interface{}
+		if err := json.Unmarshal(b, &asMap); err == nil && asMap != nil {
+			if s := coerceRecordIDMap(asMap); s != "" {
+				return s
+			}
+		}
+	}
+
+	rv := reflect.ValueOf(raw)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return ""
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Struct {
+		var table, id string
+		for i := 0; i < rv.NumField(); i++ {
+			f := rv.Field(i)
+			name := strings.ToLower(rv.Type().Field(i).Name)
+			if !f.CanInterface() {
+				continue
+			}
+			s, ok := f.Interface().(string)
+			if !ok || s == "" {
+				continue
+			}
+			switch name {
+			case "table", "tb":
+				table = s
+			case "id", "key":
+				id = s
+			}
+		}
+		if table != "" && id != "" {
+			if strings.Contains(id, ":") {
+				return id
+			}
+			return table + ":" + id
+		}
+	}
+
+	s := fmt.Sprint(raw)
+	if s == "<nil>" {
+		return ""
+	}
+	return s
+}
+
+func coerceRecordIDMap(v map[string]interface{}) string {
+	idVal, _ := v["id"].(string)
+	if idVal == "" {
+		idVal, _ = v["ID"].(string)
+	}
+	if idVal == "" {
+		return ""
+	}
+	if strings.Contains(idVal, ":") {
+		return idVal
+	}
+	tb, _ := v["tb"].(string)
+	if tb == "" {
+		tb, _ = v["table"].(string)
+	}
+	if tb == "" {
+		tb, _ = v["Table"].(string)
+	}
+	if tb != "" {
+		return tb + ":" + idVal
+	}
+	return idVal
 }
