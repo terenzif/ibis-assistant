@@ -193,8 +193,8 @@ package logs
 import (
 	"context"
 	"time"
-	"github.com/terenzif/ibis-server/internal/config"
-	"github.com/terenzif/ibis-server/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/db"
 )
 
 type PollingSource struct {

@@ -30,8 +30,8 @@ It gives AI agents (Claude, Copilot, Gemini, and others) context beyond the curr
 ## Setup
 
 ```bash
-git clone https://github.com/terenzif/ibis-server.git
-cd ibis-server
+git clone https://github.com/terenzif/ibis-assistant.git
+cd ibis-assistant
 go build -o ibis-assistant ./cmd/server   # on Windows: ibis-assistant.exe
 ```
 
@@ -194,7 +194,7 @@ go test ./...
 * `internal/` — schema, ingest (git/code/logs/dynamic), db, search, ticketing, AI
 * `rules/` — ast-grep YAML extractors (hand-written + optional `ai-generated-*`)
 * `sgconfig.yml` — ast-grep config including `languageGlobs`
-* `docs/` — architecture and client guides (English). Start with [docs/changelog_20260918.md](docs/changelog_20260918.md) for the latest shipped work.
+* `docs/` — architecture and client guides (English). Start with [docs/naming.md](docs/naming.md) and [docs/changelog_20260918.md](docs/changelog_20260918.md) for product name and recent shipped work.
 
 ## Roadmap vision
 

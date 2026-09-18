@@ -81,8 +81,8 @@
    import (
        "context"
        "fmt"
-       "github.com/terenzif/ibis-server/internal/db"
-       "github.com/terenzif/ibis-server/internal/schema"
+       "github.com/terenzif/ibis-assistant/internal/db"
+       "github.com/terenzif/ibis-assistant/internal/schema"
    )
 
    type CredentialStore struct {

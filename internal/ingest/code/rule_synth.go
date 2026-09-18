@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/terenzif/ibis-server/internal/ai"
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 // RuleKind selects which ParseAST suffix family a synthesized rule belongs to.

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-server/internal/config"
+	"github.com/terenzif/ibis-assistant/internal/config"
 )
 
 type MockUploadDB struct {

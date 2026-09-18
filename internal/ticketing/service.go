@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/auth"
-	"github.com/terenzif/ibis-server/internal/db"
-	"github.com/terenzif/ibis-server/internal/logger"
-	"github.com/terenzif/ibis-server/internal/schema"
+	"github.com/terenzif/ibis-assistant/internal/auth"
+	"github.com/terenzif/ibis-assistant/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/schema"
 )
 
 var digitRegex = regexp.MustCompile(`\d+`)

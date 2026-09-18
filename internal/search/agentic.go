@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/ai"
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/ai"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 // AgenticResult represents the outcome of an agentic search

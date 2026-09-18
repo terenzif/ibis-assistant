@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/terenzif/ibis-server/internal/db"
+	"github.com/terenzif/ibis-assistant/internal/db"
 )
 
 func TestChunkContent(t *testing.T) {

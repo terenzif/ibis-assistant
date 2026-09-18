@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/terenzif/ibis-server/internal/logger"
+	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
 type ASTChunk struct {
