@@ -56,6 +56,7 @@ func EnsureAstGrep(autoUpdate bool) error {
 	if !autoUpdate {
 		if localVer != "" {
 			logger.Info("ast-grep auto-update is disabled, using local version: %s", localVer)
+			_ = EnsureAstGrepRules()
 			return nil
 		}
 		logger.Warn("ast-grep auto-update is disabled but no local binary found. Force checking for download...")
@@ -68,6 +69,7 @@ func EnsureAstGrep(autoUpdate bool) error {
 	if err != nil {
 		if localVer != "" {
 			logger.Warn("Failed to check for updates (using local version): %v", err)
+			_ = EnsureAstGrepRules()
 			return nil
 		}
 		return fmt.Errorf("failed to get release info and no local binary found: %w", err)
@@ -77,6 +79,7 @@ func EnsureAstGrep(autoUpdate bool) error {
 
 	if localVer == remoteVer {
 		logger.Info("ast-grep is up to date (%s).", localVer)
+		_ = EnsureAstGrepRules()
 		return nil
 	}
 
@@ -88,13 +91,114 @@ func EnsureAstGrep(autoUpdate bool) error {
 	if err := installAstGrep(downloadCtx, release, binName); err != nil {
 		if localVer != "" {
 			logger.Warn("Failed to update ast-grep (using local version): %v", err)
+			_ = EnsureAstGrepRules()
 			return nil
 		}
 		return fmt.Errorf("failed to install ast-grep: %w", err)
 	}
 
 	logger.Info("ast-grep updated successfully to %s.", remoteVer)
+	_ = EnsureAstGrepRules()
 	return nil
+}
+
+// EnsureAstGrepRules copies sgconfig.yml + rules/ next to the sg binary (and
+// executable dir) so ParseAST can find LogAlign extractors when the process
+// cwd is testrun/ or another harness directory.
+func EnsureAstGrepRules() error {
+	srcRoot := findSGConfigDir()
+	if srcRoot == "" {
+		// Walk from this source file's repo via cwd parents already tried;
+		// last resort: look beside the running binary's parent (repo root).
+		if cwd, err := os.Getwd(); err == nil {
+			dir := cwd
+			for i := 0; i < 8; i++ {
+				if _, err := os.Stat(filepath.Join(dir, "rules", "go-logs.yml")); err == nil {
+					srcRoot = dir
+					break
+				}
+				parent := filepath.Dir(dir)
+				if parent == dir {
+					break
+				}
+				dir = parent
+			}
+		}
+	}
+	if srcRoot == "" {
+		logger.Debug("EnsureAstGrepRules: no rules source found")
+		return nil
+	}
+
+	targets := map[string]struct{}{}
+	if exe, err := os.Executable(); err == nil {
+		targets[filepath.Dir(exe)] = struct{}{}
+	}
+	if bin := getAstGrepBinPath(); bin != "" {
+		if abs, err := filepath.Abs(filepath.Dir(bin)); err == nil {
+			targets[abs] = struct{}{}
+		}
+	}
+	for dest := range targets {
+		if dest == "" || dest == srcRoot {
+			continue
+		}
+		if err := syncSGAssets(srcRoot, dest); err != nil {
+			logger.Warn("EnsureAstGrepRules: sync to %s failed: %v", dest, err)
+		} else {
+			logger.Info("EnsureAstGrepRules: synced rules/sgconfig → %s", dest)
+		}
+	}
+	return nil
+}
+
+func syncSGAssets(srcRoot, destDir string) error {
+	srcCfg := filepath.Join(srcRoot, "sgconfig.yml")
+	dstCfg := filepath.Join(destDir, "sgconfig.yml")
+	if err := copyFile(srcCfg, dstCfg); err != nil {
+		return err
+	}
+	srcRules := filepath.Join(srcRoot, "rules")
+	dstRules := filepath.Join(destDir, "rules")
+	if err := os.RemoveAll(dstRules); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return copyDir(srcRules, dstRules)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return copyFile(path, target)
+	})
 }
 
 func getLatestRelease(ctx context.Context) (*GitHubRelease, error) {

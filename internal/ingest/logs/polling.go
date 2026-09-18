@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net"
 	"path/filepath"
 	"strings"
@@ -149,11 +148,14 @@ func pollFTP(ctx context.Context, source config.PollingSource, dbClient db.Execu
 			continue
 		}
 
-		bodyBytes, err := io.ReadAll(resp)
+		bodyBytes, truncated, err := ReadCapped(resp, MaxLogIngestBytes)
 		resp.Close()
 		if err != nil {
 			logger.Error("FTP read failed for %s: %v", remotePath, err)
 			continue
+		}
+		if truncated {
+			logger.Warn("FTP file truncated at %d bytes: %s (processing capped prefix)", MaxLogIngestBytes, remotePath)
 		}
 
 		hash := contentHash(bodyBytes)
@@ -241,11 +243,14 @@ func pollSFTP(ctx context.Context, source config.PollingSource, dbClient db.Exec
 			continue
 		}
 
-		bodyBytes, err := io.ReadAll(f)
+		bodyBytes, truncated, err := ReadCapped(f, MaxLogIngestBytes)
 		f.Close()
 		if err != nil {
 			logger.Error("SFTP read failed for %s: %v", remotePath, err)
 			continue
+		}
+		if truncated {
+			logger.Warn("SFTP file truncated at %d bytes: %s (processing capped prefix)", MaxLogIngestBytes, remotePath)
 		}
 
 		hash := contentHash(bodyBytes)
@@ -338,11 +343,14 @@ func pollSMB(ctx context.Context, source config.PollingSource, dbClient db.Execu
 			continue
 		}
 
-		bodyBytes, err := io.ReadAll(f)
+		bodyBytes, truncated, err := ReadCapped(f, MaxLogIngestBytes)
 		f.Close()
 		if err != nil {
 			logger.Error("SMB read failed for %s: %v", remotePath, err)
 			continue
+		}
+		if truncated {
+			logger.Warn("SMB file truncated at %d bytes: %s (processing capped prefix)", MaxLogIngestBytes, remotePath)
 		}
 
 		hash := contentHash(bodyBytes)
@@ -417,7 +425,7 @@ func processLogLines(ctx context.Context, project, fileName string, lines []stri
 	}
 
 	path := filepath.Join(cfg.LogsRoot, project, fileName)
-	analyzer := NewLogAnalyzer(ctx, path, cfg, dbClient, aiClient)
+	analyzer := NewLogAnalyzerWithProject(ctx, path, project, cfg, dbClient, aiClient)
 
 	anomalies, err := analyzer.ProcessBatchSync(ctx, cleanLines)
 	if err != nil {
@@ -439,6 +447,9 @@ func processLogLines(ctx context.Context, project, fileName string, lines []stri
 			sb.WriteString(fmt.Sprintf("Severity: %d/10\r\n", e.Severity))
 			if e.File != "" {
 				sb.WriteString(fmt.Sprintf("File: %s\r\n", e.File))
+			}
+			if e.Cause != "" {
+				sb.WriteString(fmt.Sprintf("Cause: %s\r\n", e.Cause))
 			}
 			sb.WriteString("Stack Trace:\r\n")
 			sb.WriteString(e.StackTrace + "\r\n\r\n")

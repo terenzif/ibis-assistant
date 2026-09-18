@@ -21,6 +21,7 @@ type Watcher struct {
 	tailers map[string]*Tailer
 	mu      sync.Mutex
 	cancel  context.CancelFunc
+	fs      *fsnotify.Watcher
 }
 
 func NewWatcher(cfg *config.Config, dbClient db.Executor, aiClient *ai.Client) *Watcher {
@@ -36,48 +37,49 @@ func (w *Watcher) Start(ctx context.Context) error {
 	wCtx, cancel := context.WithCancel(ctx)
 	w.cancel = cancel
 
-	// Ensure logs dir exists
-	err := os.MkdirAll(w.Config.LogsRoot, 0755)
-	if err != nil {
+	if err := os.MkdirAll(w.Config.LogsRoot, 0755); err != nil {
 		return err
 	}
 
-	watcher, err := fsnotify.NewWatcher()
+	fsWatcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
+	w.fs = fsWatcher
 
-	// Read existing files
-	entries, err := os.ReadDir(w.Config.LogsRoot)
-	if err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && (strings.HasSuffix(e.Name(), ".txt") || strings.HasSuffix(e.Name(), ".log")) {
-				path := filepath.Join(w.Config.LogsRoot, e.Name())
-				if !strings.HasPrefix(e.Name(), "report_") {
-					w.addTailer(wCtx, path)
-				}
-			}
-		}
+	if err := w.addDirRecursive(wCtx, w.Config.LogsRoot); err != nil {
+		_ = fsWatcher.Close()
+		return err
 	}
 
 	go func() {
-		defer watcher.Close()
+		defer fsWatcher.Close()
 		for {
 			select {
 			case <-wCtx.Done():
 				return
-			case event, ok := <-watcher.Events:
+			case event, ok := <-fsWatcher.Events:
 				if !ok {
 					return
 				}
-				if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) {
-					// Check if it's a log file and not a report
-					name := filepath.Base(event.Name)
-					if (strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, ".log")) && !strings.HasPrefix(name, "report_") {
-						w.addTailer(wCtx, event.Name)
-					}
+				if !(event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Rename)) {
+					continue
 				}
-			case err, ok := <-watcher.Errors:
+				info, err := os.Stat(event.Name)
+				if err != nil {
+					continue
+				}
+				if info.IsDir() {
+					if event.Has(fsnotify.Create) {
+						_ = w.addDirRecursive(wCtx, event.Name)
+					}
+					continue
+				}
+				name := filepath.Base(event.Name)
+				if isWatchableLog(name) {
+					w.addTailer(wCtx, event.Name)
+				}
+			case err, ok := <-fsWatcher.Errors:
 				if !ok {
 					return
 				}
@@ -86,19 +88,49 @@ func (w *Watcher) Start(ctx context.Context) error {
 		}
 	}()
 
-	logger.Info("Live monitoring log folder: %s", w.Config.LogsRoot)
-	return watcher.Add(w.Config.LogsRoot)
+	logger.Info("Live monitoring log folder (recursive): %s", w.Config.LogsRoot)
+	return nil
+}
+
+func isWatchableLog(name string) bool {
+	if strings.HasPrefix(name, "report_") {
+		return false
+	}
+	return strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, ".log")
+}
+
+func (w *Watcher) addDirRecursive(ctx context.Context, dir string) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
+	}
+
+	return filepath.WalkDir(absDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			logger.Warn("Log watch walk error on %s: %v", path, walkErr)
+			return nil
+		}
+		if d.IsDir() {
+			if err := w.fs.Add(path); err != nil {
+				logger.Warn("Failed to watch log dir %s: %v", path, err)
+			} else {
+			}
+			return nil
+		}
+		if isWatchableLog(d.Name()) {
+			w.addTailer(ctx, path)
+		}
+		return nil
+	})
 }
 
 func (w *Watcher) addTailer(ctx context.Context, path string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Normalize path
 	absPath, _ := filepath.Abs(path)
-
 	if _, exists := w.tailers[absPath]; exists {
-		return // already tailing
+		return
 	}
 	t := NewTailer(ctx, absPath, w.Config, w.DB, w.AI)
 	w.tailers[absPath] = t

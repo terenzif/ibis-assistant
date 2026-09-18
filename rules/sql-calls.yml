@@ -1,7 +1,0 @@
-id: sql-calls
-language: sql
-rule:
-  kind: function_call
-  has:
-    field: function
-    kind: identifier
