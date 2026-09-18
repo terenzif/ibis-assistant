@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Ibis Assistant" width="160" height="160">
+</p>
+
 # Ibis Assistant (MCP)
 
 **Ibis Assistant** is an advanced MCP (Model Context Protocol) server that acts as a living project memory. It combines structural code analysis (Git), semantic understanding (vector RAG), and intent from ticketing (Redmine / Jira / Azure DevOps) into one queryable knowledge graph.
@@ -8,7 +12,7 @@ It gives AI agents (Claude, Copilot, Gemini, and others) context beyond the curr
 
 * **Unified knowledge graph**: Files, commits, authors, branches, and issues in SurrealDB.
 * **Git ingestion**: Builds causal links (`commit` → `changed` → `file`).
-* **Local patch sync**: MCP `sync_local_patch` aligns workspaces when `init_project` returns `requires_patch` for unpushed commits.
+* **Local patch sync**: MCP `sync_local_patch` aligns **server clones** when `init_project` returns `requires_patch`. Personal/plugin live trees skip the patch (`status=live_tree`).
 * **Multi-provider ticketing**: Links code changes to work items (`commit` → `implements` → `issue`).
 * **Log analysis pipeline**: Recursive watch → LogAlign / known patterns / ast-grep first → AI residual → enrich (file/cause) → sidecar markdown report. See [docs/log_analysis_pipeline.md](docs/log_analysis_pipeline.md).
 * **Email reporting**: Optional SMTP digests for anomalies and AI cost tracking.
@@ -148,7 +152,7 @@ Priority:
 
 If `init_project` hits a private repo with no credentials, the server returns `{"status":"credentials_required", ...}` so the client can prompt for a PAT.
 
-If the requested commit is not on the remote, the server may return `{"status":"requires_patch", "closest_known_commit":"…"}`. Clients should send a unified diff with MCP `sync_local_patch` (see [copilot-instructions.md](copilot-instructions.md)).
+If the requested commit is not on the remote, a **server** may return `{"status":"requires_patch", "closest_known_commit":"…"}`. Clients should send a unified diff with MCP `sync_local_patch`. On a personal/plugin live tree that tool returns `live_tree` instead (see [copilot-instructions.md](copilot-instructions.md) and [docs/runtime_modes.md](docs/runtime_modes.md)).
 
 ## MCP clients
 
@@ -171,6 +175,18 @@ See **[docs/CLAUDE_INTEGRATION.md](docs/CLAUDE_INTEGRATION.md)**. Build `tools/m
   }
 }
 ```
+
+### Cursor plugin (stdio child)
+
+Canonical package: [`cursor-plugin/`](cursor-plugin/). Copy it to `~/.cursor/plugins/local/ibis-assistant/` so Cursor can load it immediately.
+
+The plugin runs `ibis-assistant -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin` (no `${workspaceFolder}` interpolation). Put the Go binary on `PATH` (not only in the repo folder):
+
+```powershell
+go build -o "$env:USERPROFILE\go\bin\ibis-assistant.exe" ./cmd/server
+```
+
+See [`cursor-plugin/README.md`](cursor-plugin/README.md).
 
 Ticketing identity headers (optional overrides):
 
@@ -200,10 +216,11 @@ go test ./...
 ## Layout
 
 * `cmd/` — application entrypoints
-* `internal/` — schema, ingest (git/code/logs/dynamic), db, search, ticketing, AI
+* `internal/` — schema, ingest (git/code/logs/dynamic), db, search, ticketing, AI, workspace resolver
+* `cursor-plugin/` — Cursor marketplace plugin (MCP stdio spawn; binary stays on PATH)
 * `rules/` — ast-grep YAML extractors (hand-written + optional `ai-generated-*`)
 * `sgconfig.yml` — ast-grep config including `languageGlobs`
-* `docs/` — architecture and client guides (English). Start with [docs/naming.md](docs/naming.md) and [docs/changelog_20260918.md](docs/changelog_20260918.md) for product name and recent shipped work.
+* `docs/` — architecture and client guides (English). Start with [docs/naming.md](docs/naming.md), [docs/runtime_modes.md](docs/runtime_modes.md), and [docs/changelog_20260918.md](docs/changelog_20260918.md).
 
 ## Roadmap vision
 
@@ -211,6 +228,10 @@ Ibis Assistant is meant to stay useful when the cloud is optional:
 
 * **Local LLMs first-class** — deepen Ollama (and similar) paths for embeddings *and* reasoning, so a full self-hosted loop works without mandatory cloud APIs; cloud providers remain adapters, not the core.
 * **Continuous learning** — close the loop from real use: reinforce useful graph paths, decay noise, learn from agent outcomes and feedback so retrieval and tooling improve over time instead of staying a static index.
+
+**Walked on 18 Sep 2026** (this branch stack, not yet master): three runtimes with **live working trees** for personal/plugin (no OS links, no `reset --hard` on developer checkouts); Streamable HTTP `/mcp` as the default MCP transport; dual discovery (agent JSON + human guide); blocking `init_project` with progress; Cursor **stdio sidecar** with isolated plugin data. See [docs/runtime_modes.md](docs/runtime_modes.md).
+
+**Still open on those two axes:** local **reasoning** (embeddings can already be Ollama); a closed learning loop from agent outcomes. Also still out of scope: OAuth, moving `mcp-bridge` off SSE, in-process Go in Cursor.
 
 Contributions that move those two axes forward are especially welcome.
 

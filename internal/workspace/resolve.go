@@ -2,8 +2,10 @@ package workspace
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/terenzif/ibis-assistant/internal/config"
@@ -29,6 +31,10 @@ func OwnedClonePath(cfg *config.Config, repoName string) string {
 // Empty or server runtime_mode: owned clone path (caller may clone).
 // personal/plugin: live path from projects[], git_repos, or cwd/IBIS_WORKSPACE; never clones.
 func Resolve(cfg *config.Config, repoName string) (Resolved, error) {
+	return resolve(cfg, repoName)
+}
+
+func resolve(cfg *config.Config, repoName string) (Resolved, error) {
 	if cfg == nil {
 		return Resolved{}, fmt.Errorf("config is required")
 	}
@@ -121,20 +127,26 @@ func EnsureOpenedWorkspace(cfg *config.Config) error {
 	if cfg == nil {
 		return nil
 	}
+	explicit := workspaceExplicit(cfg)
 	start := workspaceStart(cfg)
 	if start == "" {
 		if !cfg.IsPlugin() {
 			return nil
 		}
-		cwd, err := os.Getwd()
+		got, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("plugin workspace: %w", err)
 		}
-		start = cwd
+		start = got
 	}
+	gitRoot, gitOK := FindGitRoot(start)
 	root := start
-	if gitRoot, ok := FindGitRoot(start); ok {
+	if gitOK {
 		root = gitRoot
+	}
+	if cfg.IsPlugin() && !gitOK && !explicit {
+		cfg.Projects = nil
+		return nil
 	}
 	name := filepath.Base(root)
 	entry := config.ProjectConfig{Name: name, WorkingRepoPath: root}
@@ -152,6 +164,21 @@ func EnsureOpenedWorkspace(cfg *config.Config) error {
 	}
 	cfg.Projects = append([]config.ProjectConfig{entry}, cfg.Projects...)
 	return nil
+}
+
+// PluginHasBoundWorkspace is true when plugin mode has a live opened folder to serve.
+func PluginHasBoundWorkspace(cfg *config.Config) bool {
+	if cfg == nil || !cfg.IsPlugin() {
+		return false
+	}
+	if len(cfg.Projects) == 0 {
+		return false
+	}
+	path := strings.TrimSpace(cfg.Projects[0].WorkingRepoPath)
+	if path == "" || isUserHome(path) {
+		return false
+	}
+	return true
 }
 
 // FindGitRoot walks up from start until a .git entry is found.
@@ -173,12 +200,105 @@ func FindGitRoot(start string) (string, bool) {
 }
 
 func workspaceStart(cfg *config.Config) string {
+	candidates := []string{}
 	if cfg != nil {
-		if v := strings.TrimSpace(cfg.Workspace); v != "" {
-			return v
+		candidates = append(candidates, cfg.Workspace)
+	}
+	for _, key := range []string{
+		"IBIS_WORKSPACE",
+		"CURSOR_WORKSPACE_FOLDER",
+		"CURSOR_WORKSPACE",
+		"VSCODE_WORKSPACE_FOLDER",
+	} {
+		candidates = append(candidates, os.Getenv(key))
+	}
+	for _, v := range candidates {
+		v = strings.TrimSpace(v)
+		if v == "" || v == "${workspaceFolder}" {
+			continue
+		}
+		return v
+	}
+	return ""
+}
+
+func isWindowsDrivePath(p string) bool {
+	if len(p) < 3 {
+		return false
+	}
+	c := p[0]
+	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+		return false
+	}
+	if p[1] != ':' {
+		return false
+	}
+	return p[2] == '\\' || p[2] == '/'
+}
+
+// FileURIToPath turns an MCP file:// root URI or a Windows drive path into a filesystem path.
+func FileURIToPath(uri string) string {
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return ""
+	}
+	if isWindowsDrivePath(uri) {
+		return filepath.Clean(uri)
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+	// url.Parse("c:\\devsrc\\repo") treats "c" as the scheme.
+	if len(u.Scheme) == 1 {
+		rest := u.Opaque
+		if rest == "" {
+			rest = u.Path
+			if u.Host != "" {
+				rest = u.Host + rest
+			}
+		}
+		p := u.Scheme + ":" + rest
+		if isWindowsDrivePath(p) || (len(p) >= 2 && p[1] == ':') {
+			return filepath.Clean(p)
 		}
 	}
-	return strings.TrimSpace(os.Getenv("IBIS_WORKSPACE"))
+	if u.Scheme == "" && !strings.Contains(uri, "://") {
+		return filepath.Clean(uri)
+	}
+	if !strings.EqualFold(u.Scheme, "file") {
+		return ""
+	}
+	p := u.Path
+	if runtime.GOOS == "windows" {
+		if u.Host != "" && len(u.Host) == 1 {
+			p = u.Host + ":" + p
+		} else if strings.HasPrefix(p, "/") && len(p) >= 3 && p[2] == ':' {
+			p = p[1:]
+		}
+	}
+	return filepath.FromSlash(p)
+}
+
+func workspaceExplicit(cfg *config.Config) bool {
+	return workspaceStart(cfg) != ""
+}
+
+func isUserHome(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	a, err1 := filepath.Abs(path)
+	b, err2 := filepath.Abs(home)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 func findProject(cfg *config.Config, name string) *config.ProjectConfig {

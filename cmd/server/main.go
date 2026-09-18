@@ -71,16 +71,12 @@ func attachMCPProgress(ctx context.Context, mcpServer *server.MCPServer, request
 func main() {
 	// Se la configurazione non esiste e non stiamo usando opzioni di help o installazione,
 	// avviamo automaticamente il wizard interattivo.
-	if !configExists() && !isPluginLaunch() {
-		if len(os.Args) < 2 || (os.Args[1] != "help" && os.Args[1] != "-h" && os.Args[1] != "--help" && os.Args[1] != "install" && os.Args[1] != "uninstall" && os.Args[1] != "/install" && os.Args[1] != "/uninstall") {
-			if err := config.RunWizard(); err != nil {
-				fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
-				os.Exit(1)
-			}
-			// Una volta completato il wizard, se l'utente ha creato il file di configurazione,
-			// forziamo l'avvio del server in modalità interattiva.
-			os.Args = []string{os.Args[0], "run"}
+	if shouldRunWizard() {
+		if err := config.RunWizard(); err != nil {
+			fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
+			os.Exit(1)
 		}
+		os.Args = []string{os.Args[0], "run"}
 	}
 
 	if len(os.Args) < 2 {
@@ -226,7 +222,6 @@ func runServer(ctx context.Context) {
 	_ = fs.String("config", "", "Path to config.json")
 
 	fs.Parse(os.Args[1:])
-	logger.Info("[INIT] Flags parsed. Mode: %s, Port: %d", *modeFlag, *portFlag)
 
 	// 4. Apply overrides back to cfg
 	cfg.Port = *portFlag
@@ -249,9 +244,9 @@ func runServer(ctx context.Context) {
 			cfg.Mode = "stdio"
 		}
 		config.ApplyPluginIsolation(cfg)
-		if err := workspace.EnsureOpenedWorkspace(cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "Plugin workspace: %v\n", err)
-		} else if len(cfg.Projects) > 0 && cfg.Projects[0].WorkingRepoPath != "" {
+		_ = workspace.EnsureOpenedWorkspace(cfg)
+		cfg.AutoScan = false
+		if len(cfg.Projects) > 0 && cfg.Projects[0].WorkingRepoPath != "" {
 			cfg.DiscoveryRoot = cfg.Projects[0].WorkingRepoPath
 			cfg.GitRepos = append(cfg.GitRepos, cfg.Projects[0].WorkingRepoPath)
 		}
@@ -259,11 +254,15 @@ func runServer(ctx context.Context) {
 		_ = workspace.EnsureOpenedWorkspace(cfg)
 	}
 
+	stdioQuiet := cfg.Mode == "stdio" || cfg.IsPlugin()
 	// Initialize Logger
-	if err := logger.Init(cfg.LogFile, cfg.LogLevel); err != nil {
-		fmt.Printf("Error initializing logger: %v\n", err)
+	if err := logger.Init(cfg.LogFile, cfg.LogLevel, stdioQuiet); err != nil {
+		if !stdioQuiet {
+			fmt.Fprintf(os.Stderr, "Error initializing logger: %v\n", err)
+		}
 		os.Exit(1)
 	}
+	logger.Info("[INIT] Flags parsed. Mode: %s, Port: %d", cfg.Mode, cfg.Port)
 
 	if cfg.IsPlugin() {
 		warnPluginCollisions(cfg)
@@ -298,55 +297,69 @@ func runServer(ctx context.Context) {
 		logger.Debug("Added %d manually configured repositories", len(cfg.GitRepos))
 	}
 
+	pluginUnbound := cfg.IsPlugin() && !workspace.PluginHasBoundWorkspace(cfg)
+
 	// 4. Initialize MCP Server
-	s := server.NewMCPServer(
-		"Ibis Assistant",
-		"1.1.0",
-		server.WithLogging(),
+	mcpHooks := &server.Hooks{}
+	mcpOpts := []server.ServerOption{
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(false, true),
 		server.WithInstructions("Ibis Assistant MCP. Prefer Streamable HTTP POST /mcp. Read resource ibis://guide for install and usage."),
+		server.WithHooks(mcpHooks),
+	}
+	if cfg.Mode != "stdio" {
+		mcpOpts = append([]server.ServerOption{server.WithLogging()}, mcpOpts...)
+	}
+	s := server.NewMCPServer(
+		"Ibis Assistant",
+		"1.1.0",
+		mcpOpts...,
 	)
 
-	// --- [NEW] Start Embedded DB and Sidecars ---
-	if err := code.EnsureAstGrep(cfg.DBAutoUpdate); err != nil {
-		logger.Warn("Could not ensure ast-grep binary: %v", err)
-	}
-
 	var dbProcess *db.ProcessManager
-	// Extract port from DBUrl
-	dbPort := 8000
-	if parts := strings.Split(cfg.DBUrl, ":"); len(parts) > 1 {
-		fmt.Sscanf(parts[len(parts)-1], "%d", &dbPort)
-	}
-
-	logger.Debug("Attempting to start embedded database on port %d...", dbPort)
-	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, cfg.DBDataPath, dbPort, cfg.DBAutoUpdate)
-	if err != nil {
-		logger.Info("Note: Could not start embedded database (or it is already running): %v", err)
+	var dbClient db.Executor
+	attachPluginWorkspaceHooks(mcpHooks, cfg, &dbClient, &dbProcess)
+	if pluginUnbound {
+		logger.Info("Plugin stdio has no opened folder yet; serving MCP handshake without SurrealDB or ingest.")
 	} else {
-		dbProcess = proc
-		logger.Info("Embedded SurrealDB started successfully.")
-	}
-
-	// 5. Connect DB
-	logger.Info("Connecting to SurrealDB at %s...", cfg.DBUrl)
-	var dbClient db.Executor // Use interface type directly
-	concreteClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
-	if err != nil {
-		logger.Error("CRITICAL: Failed to connect to SurrealDB: %v", err)
-		// dbClient remains nil (interface nil)
-	} else {
-		dbClient = concreteClient
-		if cfg.DBTimeout > 0 {
-			concreteClient.SetTimeout(time.Duration(cfg.DBTimeout) * time.Second)
+		// --- [NEW] Start Embedded DB and Sidecars ---
+		if err := code.EnsureAstGrep(cfg.DBAutoUpdate); err != nil {
+			logger.Warn("Could not ensure ast-grep binary: %v", err)
 		}
-		defer dbClient.Close()
-		logger.Info("Successfully connected to SurrealDB.")
 
-		// --- [NEW] Initialize Schema ---
-		if err := db.InitSchema(ctx, dbClient); err != nil {
-			logger.Warn("Database schema initialization warning: %v", err)
+		// Extract port from DBUrl
+		dbPort := 8000
+		if parts := strings.Split(cfg.DBUrl, ":"); len(parts) > 1 {
+			fmt.Sscanf(parts[len(parts)-1], "%d", &dbPort)
+		}
+
+		logger.Debug("Attempting to start embedded database on port %d...", dbPort)
+		proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, cfg.DBDataPath, dbPort, cfg.DBAutoUpdate)
+		if err != nil {
+			logger.Info("Note: Could not start embedded database (or it is already running): %v", err)
+		} else {
+			dbProcess = proc
+			logger.Info("Embedded SurrealDB started successfully.")
+		}
+
+		// 5. Connect DB
+		logger.Info("Connecting to SurrealDB at %s...", cfg.DBUrl)
+		concreteClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
+		if err != nil {
+			logger.Error("CRITICAL: Failed to connect to SurrealDB: %v", err)
+			// dbClient remains nil (interface nil)
+		} else {
+			dbClient = concreteClient
+			if cfg.DBTimeout > 0 {
+				concreteClient.SetTimeout(time.Duration(cfg.DBTimeout) * time.Second)
+			}
+			defer dbClient.Close()
+			logger.Info("Successfully connected to SurrealDB.")
+
+			// --- [NEW] Initialize Schema ---
+			if err := db.InitSchema(ctx, dbClient); err != nil {
+				logger.Warn("Database schema initialization warning: %v", err)
+			}
 		}
 	}
 
@@ -358,11 +371,13 @@ func runServer(ctx context.Context) {
 	// --- 6a. Initialize Embedding Provider ---
 	switch cfg.AI.Embedding.Provider {
 	case "ollama":
-		cmd, err := ai.EnsureOllama(ctx, cfg.AI.Embedding.URL, cfg.AI.Embedding.Model, cfg.AI.Embedding.AutoStart, cfg.AI.Embedding.AutoUpdate)
-		if err != nil {
-			logger.Warn("Ollama initialization failed/skipped: %v. Embedding provider might be non-functional.", err)
-		} else if cmd != nil {
-			ollamaRunner = &ai.OllamaRunner{Cmd: cmd}
+		if !pluginUnbound {
+			cmd, err := ai.EnsureOllama(ctx, cfg.AI.Embedding.URL, cfg.AI.Embedding.Model, cfg.AI.Embedding.AutoStart, cfg.AI.Embedding.AutoUpdate)
+			if err != nil {
+				logger.Warn("Ollama initialization failed/skipped: %v. Embedding provider might be non-functional.", err)
+			} else if cmd != nil {
+				ollamaRunner = &ai.OllamaRunner{Cmd: cmd}
+			}
 		}
 		embProvider = ai.NewOllamaProvider(cfg.AI.Embedding.Model, cfg.AI.Embedding.URL)
 
@@ -1932,6 +1947,88 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 	}
 }
 
+func attachPluginWorkspaceHooks(hooks *server.Hooks, cfg *config.Config, dbClient *db.Executor, dbProcess **db.ProcessManager) {
+	if hooks == nil || cfg == nil || !cfg.IsPlugin() {
+		return
+	}
+	hooks.AddOnRegisterSession(func(ctx context.Context, session server.ClientSession) {
+		rootsSession, ok := session.(server.SessionWithRoots)
+		if !ok || workspace.PluginHasBoundWorkspace(cfg) {
+			return
+		}
+		go func() {
+			rctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			res, err := rootsSession.ListRoots(rctx, mcp.ListRootsRequest{
+				Request: mcp.Request{Method: string(mcp.MethodListRoots)},
+			})
+			if err != nil || res == nil {
+				return
+			}
+			path := ""
+			for _, root := range res.Roots {
+				path = workspace.FileURIToPath(root.URI)
+				if path != "" {
+					break
+				}
+			}
+			if path == "" {
+				return
+			}
+			cfg.Workspace = path
+			_ = workspace.EnsureOpenedWorkspace(cfg)
+			bound := workspace.PluginHasBoundWorkspace(cfg)
+			if bound && len(cfg.Projects) > 0 && cfg.Projects[0].WorkingRepoPath != "" {
+				cfg.DiscoveryRoot = cfg.Projects[0].WorkingRepoPath
+				cfg.GitRepos = append(cfg.GitRepos, cfg.Projects[0].WorkingRepoPath)
+			}
+			if bound && dbClient != nil && *dbClient == nil {
+				client, proc := startPluginEmbeddedDB(context.Background(), cfg)
+				*dbClient = client
+				if dbProcess != nil {
+					*dbProcess = proc
+				}
+			}
+		}()
+	})
+}
+
+func startPluginEmbeddedDB(ctx context.Context, cfg *config.Config) (db.Executor, *db.ProcessManager) {
+	if cfg == nil {
+		return nil, nil
+	}
+	if err := code.EnsureAstGrep(cfg.DBAutoUpdate); err != nil {
+		logger.Warn("Could not ensure ast-grep binary: %v", err)
+	}
+	dbPort := 8000
+	if parts := strings.Split(cfg.DBUrl, ":"); len(parts) > 1 {
+		fmt.Sscanf(parts[len(parts)-1], "%d", &dbPort)
+	}
+	logger.Debug("Attempting to start embedded database on port %d...", dbPort)
+	var dbProcess *db.ProcessManager
+	proc, err := db.StartEmbedded(cfg.DBUser, cfg.DBPassword, cfg.DBDataPath, dbPort, cfg.DBAutoUpdate)
+	if err != nil {
+		logger.Info("Note: Could not start embedded database (or it is already running): %v", err)
+	} else {
+		dbProcess = proc
+		logger.Info("Embedded SurrealDB started successfully.")
+	}
+	logger.Info("Connecting to SurrealDB at %s...", cfg.DBUrl)
+	concreteClient, err := db.NewClient(cfg.DBUrl, cfg.DBNamespace, cfg.DBDatabase, cfg.DBUser, cfg.DBPassword)
+	if err != nil {
+		logger.Error("CRITICAL: Failed to connect to SurrealDB: %v", err)
+		return nil, dbProcess
+	}
+	if cfg.DBTimeout > 0 {
+		concreteClient.SetTimeout(time.Duration(cfg.DBTimeout) * time.Second)
+	}
+	logger.Info("Successfully connected to SurrealDB.")
+	if err := db.InitSchema(ctx, concreteClient); err != nil {
+		logger.Warn("Database schema initialization warning: %v", err)
+	}
+	return concreteClient, dbProcess
+}
+
 func warnPluginCollisions(cfg *config.Config) {
 	pidRunning := false
 	pid := 0
@@ -1947,5 +2044,7 @@ func warnPluginCollisions(cfg *config.Config) {
 		return
 	}
 	logger.Warn("%s", msg)
-	fmt.Fprintln(os.Stderr, msg)
+	if cfg != nil && cfg.Mode != "stdio" && !cfg.IsPlugin() {
+		fmt.Fprintln(os.Stderr, msg)
+	}
 }

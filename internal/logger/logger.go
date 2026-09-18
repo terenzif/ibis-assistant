@@ -42,22 +42,25 @@ func SetLevel(levelStr string) {
 	}
 }
 
-func Init(logFile string, levelStr string) error {
+func Init(logFile string, levelStr string, fileOnly bool) error {
 	SetLevel(levelStr)
-	
+
 	var writer io.Writer = os.Stderr
+	if fileOnly && logFile == "" {
+		writer = io.Discard
+	}
 	if logFile != "" {
 		f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to open log file: %w", err)
 		}
-		if service.Interactive() {
-			writer = io.MultiWriter(os.Stderr, f)
-		} else {
+		if fileOnly || !service.Interactive() {
 			writer = f
+		} else {
+			writer = io.MultiWriter(os.Stderr, f)
 		}
 	}
-	
+
 	currentWriter = writer
 	log.SetOutput(writer)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)

@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/terenzif/ibis-assistant/internal/config"
@@ -144,6 +145,55 @@ func TestEnsureOpenedWorkspacePluginReplaces(t *testing.T) {
 	}
 	if cfg.Projects[0].Name != filepath.Base(root) {
 		t.Fatalf("name=%s", cfg.Projects[0].Name)
+	}
+}
+
+func TestEnsureOpenedWorkspacePluginSkipsNonGitCwd(t *testing.T) {
+	t.Setenv("IBIS_WORKSPACE", "")
+	empty := t.TempDir()
+	t.Chdir(empty)
+	cfg := &config.Config{
+		RuntimeMode: "plugin",
+		Projects:    []config.ProjectConfig{{Name: "stale", WorkingRepoPath: `C:\old`}},
+	}
+	if err := EnsureOpenedWorkspace(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Projects) != 0 {
+		t.Fatalf("plugin must not bind a non-git cwd as a project: %v", cfg.Projects)
+	}
+	if PluginHasBoundWorkspace(cfg) {
+		t.Fatal("empty plugin cwd must not be ready")
+	}
+}
+
+func TestWorkspaceStartIgnoresUnexpandedFolder(t *testing.T) {
+	t.Setenv("IBIS_WORKSPACE", "${workspaceFolder}")
+	t.Setenv("CURSOR_WORKSPACE_FOLDER", "")
+	t.Setenv("CURSOR_WORKSPACE", "")
+	t.Setenv("VSCODE_WORKSPACE_FOLDER", "")
+	if got := workspaceStart(&config.Config{RuntimeMode: "plugin"}); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestWorkspaceStartUsesCursorFolderEnv(t *testing.T) {
+	t.Setenv("IBIS_WORKSPACE", "")
+	t.Setenv("CURSOR_WORKSPACE_FOLDER", `C:\devsrc\ibis-assistant`)
+	if got := workspaceStart(&config.Config{RuntimeMode: "plugin"}); got != `C:\devsrc\ibis-assistant` {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFileURIToPath(t *testing.T) {
+	want := filepath.Clean(`C:\devsrc\ibis-assistant`)
+	got := FileURIToPath("file:///C:/devsrc/ibis-assistant")
+	if got != want {
+		t.Fatalf("file URI got %q want %q", got, want)
+	}
+	got = FileURIToPath(`c:\devsrc\ibis-assistant`)
+	if !strings.EqualFold(got, want) {
+		t.Fatalf("drive path got %q want %q", got, want)
 	}
 }
 

@@ -7,12 +7,12 @@ import (
 )
 
 const (
-	defaultDBDataPath     = "db"
-	defaultLogsRoot       = "./logs"
-	defaultDBURL          = "ws://localhost:8000/rpc"
-	defaultLoopbackDBURL  = "ws://127.0.0.1:8000/rpc"
-	defaultPluginDBURL    = "ws://127.0.0.1:18000/rpc"
-	defaultPluginLogFile  = "plugin.log"
+	defaultDBDataPath    = "db"
+	defaultLogsRoot      = "./logs"
+	defaultDBURL         = "ws://localhost:8000/rpc"
+	defaultLoopbackDBURL = "ws://127.0.0.1:8000/rpc"
+	defaultPluginDBURL   = "ws://127.0.0.1:18000/rpc"
+	defaultPluginLogFile = "plugin.log"
 )
 
 // NormalizeRuntimeMode returns a lowercased runtime_mode (personal/server/plugin) or empty.

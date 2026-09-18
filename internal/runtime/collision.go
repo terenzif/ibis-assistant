@@ -23,14 +23,14 @@ func PortInUse(host string, port int) bool {
 
 // CollisionWarning describes a personal daemon / HTTP listener that the plugin should not attach to.
 func CollisionWarning(pidRunning bool, pid int, defaultPortInUse bool, port int) string {
+	var msg string
 	switch {
 	case pidRunning && defaultPortInUse:
-		return fmt.Sprintf("warning: personal Ibis Assistant appears to be running (pid %d) and port %d is in use; plugin continues on stdio with its own database and will not attach to that HTTP listener", pid, port)
+		msg = fmt.Sprintf("warning: personal Ibis Assistant appears to be running (pid %d) and port %d is in use; plugin continues on stdio with its own database and will not attach to that HTTP listener", pid, port)
 	case pidRunning:
-		return fmt.Sprintf("warning: personal Ibis Assistant appears to be running (pid %d); plugin continues on stdio with its own database and will not attach to that process", pid)
+		msg = fmt.Sprintf("warning: personal Ibis Assistant appears to be running (pid %d); plugin continues on stdio with its own database and will not attach to that process", pid)
 	case defaultPortInUse:
-		return fmt.Sprintf("warning: default HTTP port %d is in use (likely a personal daemon); plugin continues on stdio with its own database and will not attach to that listener", port)
-	default:
-		return ""
+		msg = fmt.Sprintf("warning: default HTTP port %d is in use (likely a personal daemon); plugin continues on stdio with its own database and will not attach to that listener", port)
 	}
+	return msg
 }
