@@ -10,6 +10,7 @@
   "homepage": "https://github.com/terenzif/ibis-assistant",
   "repository": "https://github.com/terenzif/ibis-assistant",
   "license": "MIT",
+  "logo": "assets/logo.png",
   "keywords": [
     "ibis",
     "mcp",

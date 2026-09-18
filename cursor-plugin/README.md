@@ -1,18 +1,26 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Ibis Assistant" width="128" height="128">
+</p>
+
 # Ibis Assistant for Cursor
 
 Thin Cursor plugin that **spawns** the Ibis Assistant Go binary as an MCP stdio child. It does not embed Go in-process and does not ship the binary.
 
-The opened folder is the live workspace (`RUNTIME_MODE=plugin`). Knowledge is stored under `%LOCALAPPDATA%\ibis-assistant\plugin` (or `IBIS_DATA_DIR`), separate from a personal `ibis-assistant` daemon.
+The opened folder is the live workspace (`RUNTIME_MODE=plugin`). Knowledge is stored under `%LOCALAPPDATA%\ibis-assistant\plugin` (or `IBIS_DATA_DIR`), separate from a personal `ibis-assistant` daemon. A Cursor empty window (no folder) still completes the MCP handshake (no `${workspaceFolder}` in `mcp.json`, no SurrealDB) so the shared plugin id is not marked failed. The opened folder is bound from `IBIS_WORKSPACE` / Cursor workspace env / MCP `roots/list` when present.
 
 ## Install
 
-1. Build or install the Go binary and put it on `PATH` as `ibis-assistant` (Windows: `ibis-assistant.exe`):
+1. Build or install the Go binary and put it on `PATH` as `ibis-assistant` (Windows: `ibis-assistant.exe`).
 
-   ```bash
-   go build -o ibis-assistant.exe ./cmd/server
+   From the repo root, install into the user Go bin (already on a typical Windows PATH):
+
+   ```powershell
+   go build -o "$env:USERPROFILE\go\bin\ibis-assistant.exe" ./cmd/server
    ```
 
-   A personal install (`ibis-assistant /install` or copying the exe into a directory on `PATH`) also works.
+   A personal install (`ibis-assistant /install`) also works if that directory is on `PATH`.
+
+   Cursor spawns the command **without** the repo as cwd. If the exe exists only in the working tree, MCP fails with: `ibis-assistant is not recognized as an internal or external command`.
 
 2. Enable this plugin from the repo copy, or from the local Cursor plugins folder:
 
@@ -22,9 +30,11 @@ The opened folder is the live workspace (`RUNTIME_MODE=plugin`). Knowledge is st
 3. Reload Cursor. The MCP server `ibis-assistant` starts with:
 
    ```text
-   ibis-assistant -mode stdio
+   ibis-assistant -mode stdio -runtime-mode plugin
    RUNTIME_MODE=plugin
    ```
+
+   Do **not** put `${workspaceFolder}` in plugin `mcp.json`. Cursor empty windows cannot resolve that variable and abort spawn, which marks the shared MCP identifier as error. The Go child binds the opened folder from `IBIS_WORKSPACE` (if you set it), Cursor/VS Code workspace env vars, MCP `roots/list`, or a git cwd that is not the user home directory.
 
 ## Personal daemon vs plugin
 
@@ -42,7 +52,7 @@ Optional env:
 
 | Variable | Purpose |
 |----------|---------|
-| `IBIS_WORKSPACE` | Override the opened folder / git root |
+| `IBIS_WORKSPACE` | Optional opened-folder path. Plugin `mcp.json` does not set `${workspaceFolder}` (empty windows cannot resolve it). |
 | `IBIS_DATA_DIR` | Override plugin data directory |
 | `RUNTIME_MODE` | Must stay `plugin` for isolation |
 

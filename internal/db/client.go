@@ -3,13 +3,17 @@ package db
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go" // Standard driver
 	"github.com/surrealdb/surrealdb.go/pkg/connection"
 	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
+	surreallog "github.com/surrealdb/surrealdb.go/pkg/logger"
 	"github.com/terenzif/ibis-assistant/internal/logger"
 )
 
@@ -31,6 +35,14 @@ func (c *Client) SetTimeout(d time.Duration) {
 	c.Timeout = d
 }
 
+func surrealDriverLogger() surreallog.Logger {
+	w := logger.GetWriter()
+	if w == nil || w == os.Stdout {
+		w = io.Discard
+	}
+	return surreallog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
+
 func NewClient(endpoint, ns, db, user, pass string) (*Client, error) {
 	// Connect to SurrealDB
 	logger.Info("Connecting to SurrealDB at %s...", endpoint)
@@ -45,6 +57,7 @@ func NewClient(endpoint, ns, db, user, pass string) (*Client, error) {
 		conf := connection.NewConfig(u)
 		ws := gorillaws.New(conf)
 		ws.Timeout = 0 // Disable internal driver timeout, rely on Context
+		ws.Logger(surrealDriverLogger())
 
 		dbConn, err = surrealdb.FromConnection(context.Background(), ws)
 		if err != nil {

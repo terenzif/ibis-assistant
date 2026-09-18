@@ -4,7 +4,9 @@
 
 ### MCP client setup
 
-- Connect over SSE (e.g. `http://localhost:3030/sse`)
+- Connect over Streamable HTTP (e.g. `http://localhost:3030/mcp`). Legacy SSE `http://localhost:3030/sse` remains for `mcp-bridge`.
+- Personal/plugin clients can instead spawn `ibis-assistant -mode stdio` with `RUNTIME_MODE=plugin` (Cursor plugin).
+- After connect, `GET /` (`Accept: application/json`) or MCP `server/discover` + resource `ibis://guide` is enough to attach and show install/usage to a human.
 - Runtime credential overrides via headers:
   - `X-Redmine-API-Key`
   - `X-Jira-Email`, `X-Jira-API-Token`
@@ -15,11 +17,13 @@
 ### Core tools
 
 1. `init_project(project_name, origin_url, branch, commit?)`
+   * **Blocks** until git sync and ingest finish (progress notifications if you send `progressToken`).
+   * Personal/plugin: uses the live working tree (no clone / `reset --hard`).
    * May return `{"status": "credentials_required", ...}` when auth is missing.
-   * May return `{"status": "requires_patch", "closest_known_commit": "..."}` when the tip is not on the remote — follow with `sync_local_patch`.
-   * May return `{"status": "aligned", ...}` when ingestion starts normally.
+   * May return `{"status": "requires_patch", "closest_known_commit": "..."}` on **server-owned clones** when the tip is not on the remote — follow with `sync_local_patch`.
+   * May return `{"status": "aligned", ...}` when ingestion completed.
 2. `sync_local_patch(project_name, patch, commit?)`
-   * `patch` is a unified diff; requires a prior `init_project` workspace.
+   * `patch` is a unified diff against a **server clone**. On a live personal/plugin tree the tool returns `{"status":"live_tree"}` and does not apply a patch.
 3. `update_project_status(project_name, origin_url, branch, commit)`
 4. `ask_project(query, branch_or_commit?)`
 5. `ingest_code` — AST/vector ingest (ast-grep + `rules/` + optional AI rule synth)
@@ -86,5 +90,6 @@
 - `permission denied` / auth errors: missing/invalid user credential headers
 - `workflow target not found`: status mapping incomplete; heuristic fallback may apply
 - `credentials_required` (`init_project`): ask the user for a PAT and call `git_configure_credentials`, or pass `X-Git-Token` on each call
-- `requires_patch` (`init_project`): call `sync_local_patch` with a unified diff; do not invent a remote SHA
-- `workspace not found` (`sync_local_patch`): run `init_project` first
+- `requires_patch` (`init_project`): call `sync_local_patch` with a unified diff; do not invent a remote SHA. On personal/plugin live trees this status is not used for ordinary dirty work.
+- `live_tree` (`sync_local_patch`): working tree is already visible; do not expect a cloned workspace.
+- `workspace not found` (`sync_local_patch`): run `init_project` first (server clones) or set `projects[].working_repo_path`.

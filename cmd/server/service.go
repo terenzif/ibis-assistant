@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/kardianos/service"
 	"github.com/terenzif/ibis-assistant/internal/logger"
@@ -34,6 +35,28 @@ func (p *program) Stop(s service.Service) error {
 		p.cancel()
 	}
 	return nil
+}
+
+func shouldRunWizard() bool {
+	interactive := service.Interactive()
+	arg1 := ""
+	if len(os.Args) >= 2 {
+		arg1 = os.Args[1]
+	}
+	skip := false
+	switch {
+	case !interactive:
+		skip = true
+	case isPluginLaunch():
+		skip = true
+	case configExists():
+		skip = true
+	case arg1 == "help", arg1 == "-h", arg1 == "--help",
+		arg1 == "install", arg1 == "uninstall", arg1 == "/install", arg1 == "/uninstall",
+		arg1 == "/run", arg1 == "start", arg1 == "stop", arg1 == "config":
+		skip = true
+	}
+	return !skip
 }
 
 func handleService(cmd string) {

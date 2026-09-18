@@ -4,16 +4,16 @@ This guide describes how to connect **Claude Desktop** to the **Ibis Assistant**
 
 ## 🌉 Why a Bridge?
 
-Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Ibis Assistant exposes HTTP/SSE so multiple MCP clients can share the same knowledge graph.
+Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Ibis Assistant's **product default** for HTTP clients is Streamable HTTP at `/mcp`. Legacy HTTP+SSE (`/sse`) remains so `mcp-bridge` and older clients can share the same knowledge graph.
 
-To connect them, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Ibis Assistant SSE endpoint.
+To connect Claude Desktop, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Ibis Assistant **SSE** endpoint (`http://localhost:3030/sse`) until the bridge is moved onto `/mcp`.
 
 ---
 
 ## 🛠️ Installation & Setup
 
 ### 1. Prerequisite: The Ibis Assistant
-Ensure the Ibis Assistant is running (e.g. `http://localhost:3030`).
+Ensure the Ibis Assistant is running (e.g. `http://localhost:3030/mcp` for new HTTP clients; the bridge below still uses `/sse`).
 
 ### 2. Build the Bridge Tool
 If you haven't already, compile the bridge tool included in this repository.
@@ -67,7 +67,7 @@ Source of truth: `cmd/server/main.go`. Obsolete names (`ingest_git`, `reinforce_
 ### Ingestion and git
 
 * **`init_project(project_name, origin_url, branch, commit?)`**: Clone/sync and start ingestion. May return `credentials_required`, `requires_patch`, or `aligned`.
-* **`sync_local_patch(project_name, patch, commit?)`**: Apply a unified diff when the tip is not on the remote (`requires_patch`).
+* **`sync_local_patch(project_name, patch, commit?)`**: Apply a unified diff when the tip is not on the remote (`requires_patch`) **on a server-owned clone**. Personal/plugin live trees return `live_tree` instead.
 * **`update_project_status(project_name, origin_url, branch, commit)`**: Queue status/commit updates.
 * **`ingest_code`**: Vectorize / AST-chunk source (ast-grep + rules).
 * **`git_configure_credentials(...)`**: Persist Git auth in SurrealDB.

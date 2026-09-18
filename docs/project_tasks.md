@@ -56,4 +56,5 @@
 - [x] Formalize personal / server / plugin runtimes and HTTP Streamable MCP surface <!-- id: 55 -->
 - [x] Workspace path resolver (`working_repo_path` vs `discovery_root/dynamic`) <!-- id: 56 -->
 - [x] Cursor plugin scaffold (Ibis Assistant for Cursor, stdio child) <!-- id: 57 -->
+- [x] E2E of 18 Sep runtime/HTTP/plugin stack (`go test ./internal/e2erun`) <!-- id: 58 -->
 

@@ -56,4 +56,10 @@ func TestCursorPluginManifest(t *testing.T) {
 	if env["RUNTIME_MODE"] != "plugin" {
 		t.Fatalf("env=%v", env)
 	}
+	if _, ok := env["IBIS_WORKSPACE"]; ok {
+		t.Fatal("mcp.json must not interpolate ${workspaceFolder}; empty Cursor windows cannot resolve it")
+	}
+	if !strings.Contains(string(mcpRaw), `"-runtime-mode"`) {
+		t.Fatal("args must set -runtime-mode plugin")
+	}
 }

@@ -1,11 +1,11 @@
 # Runtime modes and HTTP MCP surface
 
 **Date:** 2026-09-18  
-**Status:** Approved for implementation
+**Status:** Implemented (PRs [#7](https://github.com/terenzif/ibis-assistant/pull/7)–[#10](https://github.com/terenzif/ibis-assistant/pull/10); product rename [#6](https://github.com/terenzif/ibis-assistant/pull/6)). Operator guide: [runtime_modes.md](../../runtime_modes.md).
 
 ## Summary
 
-Ibis Assistant is one Go binary with three **runtimes** (`runtime_mode`). Personal and plugin use the developer working tree **directly**. Server keeps a clone under `discovery_root/dynamic`. OS symlink/junction aliases are rejected. HTTP MCP uses Streamable HTTP (`/mcp`) as the product default, keeps legacy SSE, and exposes agent autoconfig plus a human install/usage guide. Cursor plugin is specified, not scaffolded.
+Ibis Assistant is one Go binary with three **runtimes** (`runtime_mode`). Personal and plugin use the developer working tree **directly**. Server keeps a clone under `discovery_root/dynamic`. OS symlink/junction aliases are rejected. HTTP MCP uses Streamable HTTP (`/mcp`) as the product default, keeps legacy SSE, and exposes agent autoconfig plus a human install/usage guide. Cursor plugin is an in-repo `mcpServers` host that spawns the same binary on stdio.
 
 `mode` in `config.json` remains the **listener kind** (`sse` | `stdio`). Do not overload it.
 
@@ -13,7 +13,7 @@ Ibis Assistant is one Go binary with three **runtimes** (`runtime_mode`). Person
 
 | Runtime | Process | Workspace | Knowledge store |
 |---------|---------|-----------|-----------------|
-| `personal` | `run` / daemon / Windows service on the same PC as the repos | Working-tree path (`git_repos` or future `projects[].working_repo_path`) | Exe-relative / `config.json` SurrealDB |
+| `personal` | `run` / daemon / Windows service on the same PC as the repos | Working-tree path (`projects[].working_repo_path`, else `git_repos`) | Exe-relative / `config.json` SurrealDB |
 | `server` | Same binary on a dedicated host | Git clone at `discovery_root/dynamic/<name>` | Host-local SurrealDB |
 | `plugin` | Cursor-owned **child**: `ibis-assistant -mode stdio` (no Windows service) | Opened Cursor folder | Isolated Cursor/user-data DB; do not silently share with a personal install |
 
@@ -23,7 +23,7 @@ Ibis Assistant is one Go binary with three **runtimes** (`runtime_mode`). Person
 - Destructive git (`fetch` + `reset --hard`) only on **server-owned clones**. Forbidden on personal/plugin working trees.
 - `sync_local_patch` is server-oriented (unpushed tips against a clone). Live trees do not need it for ordinary dirty work.
 
-Workspace path **resolver** (stop hard-coding `discovery_root/dynamic` in `SyncWorkspace`, log enrich, `sync_local_patch`) is a follow-up. This spec still names `working_repo_path` as the personal/plugin contract.
+Workspace path **resolver** is implemented (`internal/workspace`, `SyncWorkspace`, log enrich, `sync_local_patch`). Live trees skip destructive git.
 
 ## Config
 
@@ -39,7 +39,7 @@ Workspace path **resolver** (stop hard-coding `discovery_root/dynamic` in `SyncW
 - `runtime_mode`: `personal` | `server` | `plugin`. Empty = unspecified (backward compatible).
 - `bind_address`: optional host. Empty + `personal` → `127.0.0.1`. Empty + `server` → `0.0.0.0`. Empty + unspecified → all interfaces (`:port`, current behavior).
 - Env: `RUNTIME_MODE`, `BIND_ADDRESS`.
-- `projects[]` is reserved; until the resolver ships, `git_repos` and `ingest_code --path` remain the direct-path list.
+- `projects[]` with `working_repo_path` (personal/plugin) or `url`/`branch` (server). `git_repos` remains a basename fallback.
 
 ## MCP transports
 
@@ -93,9 +93,7 @@ Language version and `toolchain` directive track the current stable Go (1.27 / `
 
 ## Out of scope
 
-- Workspace path resolver
-- Cursor plugin scaffold
-- Wizard prompts beyond config fields + defaults
 - OAuth
 - Moving `mcp-bridge` off SSE
 - OS symlink/junction
+- In-process Go inside Cursor

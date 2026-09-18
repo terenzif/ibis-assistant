@@ -2,6 +2,30 @@
 
 Shipped on what is now `terenzif/ibis-assistant` `master` (merge tip `3b3d3ee`; repo was then named `ibis-server`). Primary docs are English. This note records **what landed**, **where it lives**, and **how it was verified**. See [naming.md](naming.md) for the current product name.
 
+## 18 Sep 2026 — runtime modes + HTTP MCP (open PRs, not yet on master)
+
+Operator guide: [runtime_modes.md](runtime_modes.md). Design: [superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md).
+
+| PR | Branch | Summary |
+|----|--------|---------|
+| [#6](https://github.com/terenzif/ibis-assistant/pull/6) | `chore/rename-ibis-assistant` | Product/module rename to Ibis Assistant |
+| [#7](https://github.com/terenzif/ibis-assistant/pull/7) | `feat/runtime-modes-spec-go` | Go 1.27.1 + runtime_mode / bind labels |
+| [#8](https://github.com/terenzif/ibis-assistant/pull/8) | `feat/runtime-modes-http-go` | Streamable HTTP `/mcp`, blocking `init_project` + progress, CLI over `/mcp` |
+| [#9](https://github.com/terenzif/ibis-assistant/pull/9) | `feat/personal-plugin-workspace` | Live-tree resolver; plugin stdio + isolated data + collision warn |
+| [#10](https://github.com/terenzif/ibis-assistant/pull/10) | `feat/ibis-cursor-plugin` | In-repo Cursor plugin (`mcpServers` spawn); local install copy |
+
+### Behavior
+
+- **Personal/plugin** ingest the live working tree (`projects[].working_repo_path` / `git_repos` / opened folder). No `git clone` or `reset --hard`. **Server** (or empty `runtime_mode`) still clones under `discovery_root/dynamic/<name>`.
+- **`sync_local_patch`**: live tree → `status=live_tree`; owned clone → apply diff as before.
+- **Plugin**: `RUNTIME_MODE=plugin` forces stdio unless `-mode` is set; data under `%LOCALAPPDATA%\ibis-assistant\plugin` or `IBIS_DATA_DIR`; default Surreal `ws://127.0.0.1:18000/rpc`; warn if personal PID/port is busy, do not attach to that HTTP listener.
+- **HTTP**: `/mcp` primary; `/sse` deprecated; `GET /` autoconfig + human guide; CLI JSON-RPC to `/mcp`; `/api/v1/cli/call` removed.
+- **Cursor**: `cursor-plugin/` + `~/.cursor/plugins/local/ibis-assistant/`. Binary stays on `PATH`. Plugin `mcp.json` does not use `${workspaceFolder}` (empty windows cannot resolve it). Stdio binds the opened folder from env / MCP roots / git cwd, skips Surreal when unbound, and keeps Surreal slog off stdout.
+
+### Verification (same day e2e)
+
+`go test ./internal/e2erun` plus package tests for workspace, config, runtime, httpserver, cli, cursorplugin, dynamic ingest. Plugin binary spawn: stdio forced, isolated `db/`, no writes into a decoy personal `db/`, collision warn when 3030 is in use.
+
 ## Stack merged to master
 
 | PR | Branch | Commit (feature tip) | Summary |
