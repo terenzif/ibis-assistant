@@ -68,6 +68,8 @@ func RunWizard() error {
 func runFastWizard(cfg *Config, scanner *bufio.Scanner) error {
 	fmt.Println("\n--- Configurazione Veloce ---")
 
+	promptRuntimeAndFolder(cfg, scanner)
+
 	// Porta
 	cfg.Port = promptInt("Porta del server", cfg.Port, scanner)
 
@@ -119,6 +121,8 @@ func runFastWizard(cfg *Config, scanner *bufio.Scanner) error {
 
 func runDetailedWizard(cfg *Config, scanner *bufio.Scanner) error {
 	fmt.Println("\n--- Configurazione Dettagliata ---")
+
+	promptRuntimeAndFolder(cfg, scanner)
 
 	// 1. Server
 	fmt.Println("\n[1] Impostazioni Server")
@@ -261,6 +265,22 @@ func runDetailedWizard(cfg *Config, scanner *bufio.Scanner) error {
 	_ = os.MkdirAll(cfg.LogsRoot, 0755)
 
 	return nil
+}
+
+func promptRuntimeAndFolder(cfg *Config, scanner *bufio.Scanner) {
+	cfg.RuntimeMode = promptString("Runtime mode (personal/server/plugin)", "personal", scanner)
+	if !IsLiveRuntime(cfg.RuntimeMode) {
+		return
+	}
+	cwd, _ := os.Getwd()
+	folder := promptString("Local working folder", cwd, scanner)
+	if strings.TrimSpace(folder) == "" {
+		return
+	}
+	cfg.Projects = []ProjectConfig{{
+		Name:            filepath.Base(folder),
+		WorkingRepoPath: folder,
+	}}
 }
 
 func promptString(prompt, defaultValue string, scanner *bufio.Scanner) string {

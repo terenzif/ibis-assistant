@@ -46,6 +46,7 @@
   },
   "auto_scan": false,
   "git_repos": [],
+  "projects": [],
   "git_tokens": {
     "default": ""
   },

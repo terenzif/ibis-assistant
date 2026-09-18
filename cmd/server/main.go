@@ -32,12 +32,14 @@ import (
 	"github.com/terenzif/ibis-assistant/internal/progress"
 	"github.com/terenzif/ibis-assistant/internal/repopr"
 	repoprado "github.com/terenzif/ibis-assistant/internal/repopr/providers/azuredevops"
+	ibisruntime "github.com/terenzif/ibis-assistant/internal/runtime"
 	"github.com/terenzif/ibis-assistant/internal/schema"
 	"github.com/terenzif/ibis-assistant/internal/search"
 	"github.com/terenzif/ibis-assistant/internal/ticketing"
 	ticketado "github.com/terenzif/ibis-assistant/internal/ticketing/providers/azuredevops"
 	ticketjira "github.com/terenzif/ibis-assistant/internal/ticketing/providers/jira"
 	ticketredmine "github.com/terenzif/ibis-assistant/internal/ticketing/providers/redmine"
+	"github.com/terenzif/ibis-assistant/internal/workspace"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -69,7 +71,7 @@ func attachMCPProgress(ctx context.Context, mcpServer *server.MCPServer, request
 func main() {
 	// Se la configurazione non esiste e non stiamo usando opzioni di help o installazione,
 	// avviamo automaticamente il wizard interattivo.
-	if !configExists() {
+	if !configExists() && !isPluginLaunch() {
 		if len(os.Args) < 2 || (os.Args[1] != "help" && os.Args[1] != "-h" && os.Args[1] != "--help" && os.Args[1] != "install" && os.Args[1] != "uninstall" && os.Args[1] != "/install" && os.Args[1] != "/uninstall") {
 			if err := config.RunWizard(); err != nil {
 				fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
@@ -192,12 +194,12 @@ func getIntArg(args map[string]interface{}, key string) (int, error) {
 
 func runServer(ctx context.Context) {
 	// 1. Initial check for custom config path in raw args
-	configPath := ""
-	for i, arg := range os.Args {
-		if (arg == "-config" || arg == "--config") && i+1 < len(os.Args) {
-			configPath = os.Args[i+1]
-			break
-		}
+	configPath := peekFlag("-config", "--config")
+	if isPluginLaunch() && os.Getenv("RUNTIME_MODE") == "" {
+		_ = os.Setenv("RUNTIME_MODE", "plugin")
+	}
+	if ws := peekFlag("-workspace", "--workspace"); ws != "" && os.Getenv("IBIS_WORKSPACE") == "" {
+		_ = os.Setenv("IBIS_WORKSPACE", ws)
 	}
 
 	// 2. Load Config (Defaults + config.json + Env)
@@ -218,6 +220,8 @@ func runServer(ctx context.Context) {
 	rootFlag := fs.String("root", cfg.DiscoveryRoot, "Root directory for discovery")
 	logFileFlag := fs.String("log-file", cfg.LogFile, "Log file path")
 	logLevelFlag := fs.String("log-level", cfg.LogLevel, "Log level: DEBUG, INFO, WARN, ERROR")
+	runtimeModeFlag := fs.String("runtime-mode", cfg.RuntimeMode, "Runtime: personal, server, or plugin")
+	workspaceFlag := fs.String("workspace", cfg.Workspace, "Opened folder / live working tree (personal/plugin)")
 	// Add config flag just for help/documentation visibility
 	_ = fs.String("config", "", "Path to config.json")
 
@@ -231,11 +235,38 @@ func runServer(ctx context.Context) {
 	cfg.DiscoveryRoot = *rootFlag
 	cfg.LogFile = *logFileFlag
 	cfg.LogLevel = *logLevelFlag
+	cfg.RuntimeMode = *runtimeModeFlag
+	cfg.Workspace = *workspaceFlag
+
+	modeSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "mode" {
+			modeSet = true
+		}
+	})
+	if cfg.IsPlugin() {
+		if !modeSet {
+			cfg.Mode = "stdio"
+		}
+		config.ApplyPluginIsolation(cfg)
+		if err := workspace.EnsureOpenedWorkspace(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Plugin workspace: %v\n", err)
+		} else if len(cfg.Projects) > 0 && cfg.Projects[0].WorkingRepoPath != "" {
+			cfg.DiscoveryRoot = cfg.Projects[0].WorkingRepoPath
+			cfg.GitRepos = append(cfg.GitRepos, cfg.Projects[0].WorkingRepoPath)
+		}
+	} else if cfg.LiveWorkspace() {
+		_ = workspace.EnsureOpenedWorkspace(cfg)
+	}
 
 	// Initialize Logger
 	if err := logger.Init(cfg.LogFile, cfg.LogLevel); err != nil {
 		fmt.Printf("Error initializing logger: %v\n", err)
 		os.Exit(1)
+	}
+
+	if cfg.IsPlugin() {
+		warnPluginCollisions(cfg)
 	}
 
 	if cfg.ConfigLoaded {
@@ -764,7 +795,20 @@ func runServer(ctx context.Context) {
 			patchText += "\n"
 		}
 
-		repoPath := filepath.Join(cfg.DiscoveryRoot, "dynamic", projectName)
+		resolved, err := workspace.Resolve(cfg, projectName)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("workspace not found for project %q; run init_project first (%v)", projectName, err)), nil
+		}
+		if !resolved.Owned {
+			body, _ := json.Marshal(map[string]string{
+				"status":       "live_tree",
+				"project_name": projectName,
+				"workspace":    resolved.Path,
+				"message":      "Live working tree does not need a patch; dirty files are already visible to ingest.",
+			})
+			return mcp.NewToolResultText(string(body)), nil
+		}
+		repoPath := resolved.Path
 		if st, err := os.Stat(repoPath); err != nil || !st.IsDir() {
 			return mcp.NewToolResultError(fmt.Sprintf("workspace not found for project %q; run init_project first", projectName)), nil
 		}
@@ -1886,4 +1930,22 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 		}
 		json.NewEncoder(w).Encode(resp)
 	}
+}
+
+func warnPluginCollisions(cfg *config.Config) {
+	pidRunning := false
+	pid := 0
+	if data, err := os.ReadFile(getPidFilePath()); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			pid = n
+			pidRunning = isProcessRunning(n)
+		}
+	}
+	portBusy := ibisruntime.PortInUse("127.0.0.1", cfg.Port)
+	msg := ibisruntime.CollisionWarning(pidRunning, pid, portBusy, cfg.Port)
+	if msg == "" {
+		return
+	}
+	logger.Warn("%s", msg)
+	fmt.Fprintln(os.Stderr, msg)
 }

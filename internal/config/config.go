@@ -34,7 +34,8 @@ type Config struct {
 	DiscoveryRoot       string             `json:"discovery_root"`
 	PollInterval        int                `json:"poll_interval"` // seconds
 	AutoScan            bool               `json:"auto_scan"`
-	GitRepos            []string           `json:"git_repos"` // Manual list override
+	GitRepos            []string           `json:"git_repos"` // Manual list override (absolute paths; match by folder basename)
+	Projects            []ProjectConfig    `json:"projects,omitempty"`
 	LogFile             string             `json:"log_file"`
 	LogLevel            string             `json:"log_level"`      // DEBUG, INFO, WARN, ERROR
 	MaxFileSize         int64              `json:"max_file_size"`  // bytes
@@ -48,6 +49,15 @@ type Config struct {
 	LogIngestion        LogIngestionConfig `json:"log_ingestion"`
 	ConfigLoaded        bool               `json:"-"` // True if a config file was successfully loaded
 	ConfigPath          string             `json:"-"` // Path to the file that was loaded
+	Workspace           string             `json:"-"` // Opened folder / IBIS_WORKSPACE / -workspace
+}
+
+// ProjectConfig maps a project name to a live working tree or a server clone source.
+type ProjectConfig struct {
+	Name            string `json:"name"`
+	WorkingRepoPath string `json:"working_repo_path,omitempty"`
+	URL             string `json:"url,omitempty"`
+	Branch          string `json:"branch,omitempty"`
 }
 
 type SMTPConfig struct {
@@ -237,11 +247,16 @@ func Load(paths ...string) *Config {
 	// 2. Candidate paths
 	searchPaths := paths
 	if len(searchPaths) == 0 {
-		searchPaths = []string{"config.json"}
-		// If we are running as a service, the CWD might be wrong.
-		// Try next to executable.
-		if exe, err := os.Executable(); err == nil {
-			searchPaths = append(searchPaths, filepath.Join(filepath.Dir(exe), "config.json"))
+		if envLooksLikePlugin() {
+			// Do not load a personal install's config.json from CWD or next to the exe.
+			searchPaths = pluginConfigSearchPaths()
+		} else {
+			searchPaths = []string{"config.json"}
+			// If we are running as a service, the CWD might be wrong.
+			// Try next to executable.
+			if exe, err := os.Executable(); err == nil {
+				searchPaths = append(searchPaths, filepath.Join(filepath.Dir(exe), "config.json"))
+			}
 		}
 	}
 
@@ -279,6 +294,9 @@ func Load(paths ...string) *Config {
 	}
 	if v := os.Getenv("BIND_ADDRESS"); v != "" {
 		cfg.BindAddress = v
+	}
+	if v := os.Getenv("IBIS_WORKSPACE"); v != "" {
+		cfg.Workspace = v
 	}
 
 	// DB
@@ -393,18 +411,16 @@ func Load(paths ...string) *Config {
 		cfg.DBAutoUpdate = v == "true"
 	}
 
+	if cfg.IsPlugin() || envLooksLikePlugin() {
+		cfg.RuntimeMode = "plugin"
+		ApplyPluginIsolation(cfg)
+	}
+
 	// 5. Finalize paths (Service Mode Support)
 	// If running as a service, CWD might be System32.
 	// Resolve relative paths based on executable directory instead of CWD.
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		cfg.DBDataPath = resolvePath(exeDir, cfg.DBDataPath)
-		cfg.DiscoveryRoot = resolvePath(exeDir, cfg.DiscoveryRoot)
-		cfg.LogsRoot = resolvePath(exeDir, cfg.LogsRoot)
-		if cfg.LogFile != "" {
-			cfg.LogFile = resolvePath(exeDir, cfg.LogFile)
-		}
-	}
+	// Plugin mode uses the isolated user-data directory instead.
+	finalizeConfigPaths(cfg)
 
 	return cfg
 }

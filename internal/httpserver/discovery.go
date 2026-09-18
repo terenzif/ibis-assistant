@@ -66,7 +66,8 @@ func GuideMarkdown(cfg *config.Config, tools []toolMeta) string {
 	b.WriteString("2. `go build -o ibis-assistant ./cmd/server` (Windows: `ibis-assistant.exe`).\n")
 	b.WriteString("3. Copy `config_master.json` to `config.json` (never commit `config.json`).\n")
 	b.WriteString("4. Set `runtime_mode` to `personal` (same PC as your repos) or `server` (dedicated host).\n")
-	b.WriteString("5. Run `ibis-assistant run`, or `start`/`stop` for a daemon, or `/install` as a Windows service.\n\n")
+	b.WriteString("5. For personal mode, set `projects[].working_repo_path` (or `git_repos`) to the live checkout. Do not point `discovery_root/dynamic` at a developer tree.\n")
+	b.WriteString("6. Run `ibis-assistant run`, or `start`/`stop` for a daemon, or `/install` as a Windows service. Cursor plugin: `ibis-assistant -mode stdio` with `RUNTIME_MODE=plugin`.\n\n")
 	b.WriteString("Personal mode binds `127.0.0.1` unless `bind_address` is set. Server mode binds `0.0.0.0`.\n\n")
 
 	b.WriteString("## Agent autoconfig\n\n")

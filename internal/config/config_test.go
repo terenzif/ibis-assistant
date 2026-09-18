@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +16,7 @@ func cleanEnv() {
 		"SURREAL_DB", "SURREAL_USER", "SURREAL_PASS",
 		"REDMINE_URL", "REDMINE_API_KEY", "DISCOVERY_ROOT", "AUTO_SCAN",
 		"DB_AUTO_UPDATE", "RUNTIME_MODE", "BIND_ADDRESS",
+		"IBIS_DATA_DIR", "IBIS_WORKSPACE",
 	}
 	for _, v := range vars {
 		os.Unsetenv(v)
@@ -222,5 +224,57 @@ func TestListenAddrAndPublicURL(t *testing.T) {
 	}
 	if personal.PublicBaseURL() != "http://127.0.0.1:3030" {
 		t.Fatalf("public = %s", personal.PublicBaseURL())
+	}
+}
+
+func TestPluginIsolationUsesDataDir(t *testing.T) {
+	cleanEnv()
+	defer cleanEnv()
+	dir := t.TempDir()
+	t.Setenv("RUNTIME_MODE", "plugin")
+	t.Setenv("IBIS_DATA_DIR", dir)
+	cfg := Load()
+	if !cfg.IsPlugin() {
+		t.Fatal("expected plugin runtime")
+	}
+	if !strings.HasPrefix(cfg.DBDataPath, dir) {
+		t.Fatalf("DBDataPath=%s want under %s", cfg.DBDataPath, dir)
+	}
+	if !strings.HasPrefix(cfg.LogsRoot, dir) {
+		t.Fatalf("LogsRoot=%s want under %s", cfg.LogsRoot, dir)
+	}
+	if !strings.HasPrefix(cfg.LogFile, dir) {
+		t.Fatalf("LogFile=%s want under %s", cfg.LogFile, dir)
+	}
+	if cfg.DBUrl != defaultPluginDBURL {
+		t.Fatalf("DBUrl=%s want %s", cfg.DBUrl, defaultPluginDBURL)
+	}
+}
+
+func TestPluginLoadIgnoresCWDConfig(t *testing.T) {
+	cleanEnv()
+	defer cleanEnv()
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	personal := filepath.Join(cwd, "personal-db")
+	payload, err := json.Marshal(map[string]any{
+		"db_data_path": personal,
+		"runtime_mode": "personal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "config.json"), payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	data := t.TempDir()
+	t.Setenv("RUNTIME_MODE", "plugin")
+	t.Setenv("IBIS_DATA_DIR", data)
+	cfg := Load()
+	if strings.Contains(cfg.DBDataPath, "personal-db") {
+		t.Fatalf("plugin loaded personal config: %s", cfg.DBDataPath)
+	}
+	if !strings.HasPrefix(cfg.DBDataPath, data) {
+		t.Fatalf("DBDataPath=%s want under %s", cfg.DBDataPath, data)
 	}
 }

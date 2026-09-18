@@ -39,6 +39,8 @@ Copy `config_master.json` to `config.json` and fill in your settings. **Never co
 
 `runtime_mode` is `personal` (same PC as the repos, binds `127.0.0.1`), `server` (dedicated host, binds `0.0.0.0`), or `plugin` (Cursor stdio child). Leave it empty to keep the old all-interfaces bind. Optional `bind_address` overrides the host. See [docs/superpowers/specs/2026-09-18-runtime-modes-design.md](docs/superpowers/specs/2026-09-18-runtime-modes-design.md).
 
+Personal and plugin modes ingest the live working tree (no `git clone` / `reset --hard`). Point each project at its checkout with `projects[]`. `git_repos` remains a fallback list of absolute paths (matched by folder basename). Server mode (or empty `runtime_mode`) still clones under `discovery_root/dynamic/<name>`. Plugin data (SurrealDB, logs, optional `config.json`) lives under `%LOCALAPPDATA%\ibis-assistant\plugin` or `IBIS_DATA_DIR`, not next to a personal install.
+
 ```json
 {
   "port": 3333,
@@ -47,6 +49,9 @@ Copy `config_master.json` to `config.json` and fill in your settings. **Never co
   "db_url": "ws://127.0.0.1:8000/rpc",
   "db_user": "root",
   "db_password": "root",
+  "projects": [
+    { "name": "ibis-assistant", "working_repo_path": "C:/devsrc/ibis-assistant" }
+  ],
   "ai": {
     "embedding": {
       "provider": "ollama",
