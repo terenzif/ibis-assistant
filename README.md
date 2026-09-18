@@ -19,7 +19,7 @@ It gives AI agents (Claude, Copilot, Gemini, and others) context beyond the curr
 
 ## Prerequisites
 
-* **Go** 1.22+ (toolchain pin may require Go 1.26 — see repo docs if you hit module errors)
+* **Go** 1.27+ (this repo pins `toolchain go1.27.1` in `go.mod`)
 * **SurrealDB**: Managed automatically when possible (download on demand)
 * **Ollama** (default local embeddings): auto-start / auto-install when enabled in config
 * **Git** on `PATH`
@@ -37,9 +37,12 @@ go build -o ibis-assistant ./cmd/server   # on Windows: ibis-assistant.exe
 
 Copy `config_master.json` to `config.json` and fill in your settings. **Never commit `config.json`** (it is gitignored).
 
+`runtime_mode` is `personal` (same PC as the repos, binds `127.0.0.1`), `server` (dedicated host, binds `0.0.0.0`), or `plugin` (Cursor stdio child). Leave it empty to keep the old all-interfaces bind. Optional `bind_address` overrides the host. See [docs/superpowers/specs/2026-09-18-runtime-modes-design.md](docs/superpowers/specs/2026-09-18-runtime-modes-design.md).
+
 ```json
 {
   "port": 3333,
+  "runtime_mode": "personal",
   "mode": "sse",
   "db_url": "ws://127.0.0.1:8000/rpc",
   "db_user": "root",
@@ -93,9 +96,9 @@ With no arguments, the binary prints a short command guide. If `config.json` is 
 | `config` | Interactive config wizard |
 | `/install` `/uninstall` | Windows service (admin required) |
 
-### CLI (MCP over HTTP)
+### CLI (MCP over Streamable HTTP)
 
-The same binary talks to a running server via `/api/v1/cli/call`:
+The same binary is an MCP client of a running server (`POST /mcp`, JSON-RPC `tools/call`, progress notifications):
 
 ```bash
 ./ibis-assistant ask "Explain the auth flow" --branch main
@@ -116,8 +119,9 @@ MCP-only (no CLI wrapper yet): `sync_local_patch`, `analyze_blast_radius`, `find
 
 Example: `http://localhost:3030/`
 
-* Browsers (`Accept: text/html`): dark dashboard with endpoints, client snippets, and tool schemas
-* Programmatic clients (`Accept: application/json`): structured tool metadata for auto-configuration
+* Browsers (`Accept: text/html`): install/usage guide, endpoints, client snippets, and tool schemas
+* Agents (`Accept: application/json`): Streamable HTTP URL, protocol versions, `runtime_mode`, auth headers, tools
+* Markdown (`Accept: text/markdown`) and MCP resource `ibis://guide`: the same guide for a connected agent to show a human
 
 ### Config precedence
 
@@ -143,7 +147,8 @@ If the requested commit is not on the remote, the server may return `{"status":"
 
 ## MCP clients
 
-Default SSE endpoint: `http://localhost:3030/sse`
+Default Streamable HTTP endpoint: `http://localhost:3030/mcp`  
+Legacy SSE (kept for `mcp-bridge`): `http://localhost:3030/sse`
 
 ### Claude Desktop
 
@@ -154,8 +159,7 @@ See **[docs/CLAUDE_INTEGRATION.md](docs/CLAUDE_INTEGRATION.md)**. Build `tools/m
 ```json
 "mcpServers": {
   "ibis-assistant": {
-    "url": "http://localhost:3030/sse",
-    "transport": "sse",
+    "url": "http://localhost:3030/mcp",
     "headers": {
       "X-Redmine-API-Key": "YOUR_USER_KEY"
     }
@@ -172,7 +176,7 @@ Ticketing identity headers (optional overrides):
 ### MCP Inspector
 
 ```bash
-npx @modelcontextprotocol/inspector http://localhost:3030/sse
+npx @modelcontextprotocol/inspector http://localhost:3030/mcp
 ```
 
 ## Example questions
