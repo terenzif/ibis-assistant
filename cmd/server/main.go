@@ -45,6 +45,12 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// Filled at link time by the release workflow (-ldflags -X main.version=... -X main.commit=...).
+var (
+	version = "dev"
+	commit  = "none"
+)
+
 // AuthMiddleware injects ticketing and repo-provider auth headers into request context.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return httpserver.Auth(next)
@@ -113,6 +119,12 @@ func main() {
 		startBackgroundServer()
 	case "stop":
 		stopBackgroundServer()
+	case "version", "-version", "--version":
+		if commit != "" && commit != "none" {
+			fmt.Printf("ibis-assistant %s (%s)\n", version, commit)
+		} else {
+			fmt.Printf("ibis-assistant %s\n", version)
+		}
 	default:
 		// Se è una flag (inizia con - o --), avvia il server
 		if strings.HasPrefix(cmd, "-") {
@@ -126,7 +138,12 @@ func main() {
 
 func printHelp() {
 	binName := filepath.Base(os.Args[0])
-	fmt.Println("Ibis Assistant - MCP Knowledge Graph & Search Engine")
+	if commit != "" && commit != "none" {
+		fmt.Printf("Ibis Assistant %s (%s)\n", version, commit)
+	} else {
+		fmt.Printf("Ibis Assistant %s\n", version)
+	}
+	fmt.Println("MCP Knowledge Graph & Search Engine")
 	fmt.Println("\nUsage:")
 	fmt.Printf("  %s <command> [options]\n", binName)
 	fmt.Println("\nServer commands:")
@@ -134,6 +151,7 @@ func printHelp() {
 	fmt.Println("  start       Start the server in the background")
 	fmt.Println("  stop        Stop the background server")
 	fmt.Println("  config      Interactive configuration wizard")
+	fmt.Println("  version     Print the binary version")
 	fmt.Println("  install     Install as a Windows service ('ibis-assistant')")
 	fmt.Println("  uninstall   Uninstall the Windows service")
 	fmt.Println("\nCLI client (MCP Streamable HTTP POST /mcp):")

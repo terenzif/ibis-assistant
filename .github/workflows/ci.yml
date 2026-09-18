@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./cmd/... ./internal/... ./tools/...
+
+      - name: Test
+        run: go test ./cmd/... ./internal/... ./tools/... -short -count=1
+
+      - name: Build
+        run: go build -o ibis-assistant ./cmd/server
