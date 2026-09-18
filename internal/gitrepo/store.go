@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/terenzif/ibis-server/internal/db"
 	"github.com/terenzif/ibis-server/internal/schema"
@@ -36,7 +37,13 @@ func (s *CredentialStore) GetCredential(ctx context.Context, target string) (*Cr
 		return nil, nil
 	}
 
-	id := fmt.Sprintf("%s:%s", schema.TableGitCredential, db.SanitizeID(target))
+	target = strings.TrimSpace(target)
+	safeID := db.SanitizeID(target)
+	if safeID == "" {
+		return nil, nil
+	}
+
+	id := fmt.Sprintf("%s:%s", schema.TableGitCredential, safeID)
 	query := fmt.Sprintf("SELECT * FROM %s;", id)
 	res, err := s.db.Execute(ctx, query)
 	if err != nil {

@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,13 +30,13 @@ import (
 	"github.com/terenzif/ibis-server/internal/optimization"
 	"github.com/terenzif/ibis-server/internal/repopr"
 	repoprado "github.com/terenzif/ibis-server/internal/repopr/providers/azuredevops"
+	"github.com/terenzif/ibis-server/internal/schema"
 	"github.com/terenzif/ibis-server/internal/search"
 	"github.com/terenzif/ibis-server/internal/ticketing"
 	ticketado "github.com/terenzif/ibis-server/internal/ticketing/providers/azuredevops"
 	ticketjira "github.com/terenzif/ibis-server/internal/ticketing/providers/jira"
 	ticketredmine "github.com/terenzif/ibis-server/internal/ticketing/providers/redmine"
 	"github.com/terenzif/ibis-server/internal/gitrepo"
-	"errors"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -654,8 +654,9 @@ func runServer(ctx context.Context) {
 		}
 
 		syncDone := make(chan dynamic.IngestionResult, 1)
+		projectName := getStringArg(args, "project_name")
 		job := dynamic.IngestionJob{
-			ProjectName: getStringArg(args, "project_name"),
+			ProjectName: projectName,
 			OriginURL:   getStringArg(args, "origin_url"),
 			Branch:      getStringArg(args, "branch"),
 			Commit:      getStringArg(args, "commit"),
@@ -663,9 +664,13 @@ func runServer(ctx context.Context) {
 				syncDone <- res
 			},
 			OnComplete: func(err error) {
-				msg := fmt.Sprintf("Ingestion completed for %s", args["project_name"])
+				name := projectName
+				if name == "" {
+					name = "(unnamed)"
+				}
+				msg := fmt.Sprintf("Ingestion completed for %s", name)
 				if err != nil {
-					msg = fmt.Sprintf("Ingestion failed for %s: %v", args["project_name"], err)
+					msg = fmt.Sprintf("Ingestion failed for %s: %v", name, err)
 				}
 				logger.Info(msg)
 			},
@@ -676,6 +681,18 @@ func runServer(ctx context.Context) {
 			Branch:      job.Branch,
 			Commit:      job.Commit,
 		})
+		if dbClient != nil && job.ProjectName != "" {
+			projectID := db.FormatRecordID(schema.TableProject, db.SanitizeID(job.ProjectName))
+			commit := job.Commit
+			branch := job.Branch
+			source := "session"
+			if commit == "" && branch != "" {
+				source = "session_branch"
+			}
+			_, _ = dbClient.Execute(ctx, fmt.Sprintf(
+				"UPSERT %s SET name = '%s', baseline_commit = '%s', baseline_branch = '%s', baseline_source = '%s';",
+				projectID, db.EscapeSQL(job.ProjectName), db.EscapeSQL(commit), db.EscapeSQL(branch), source))
+		}
 
 		ingestionManager.Enqueue(job)
 
@@ -689,6 +706,18 @@ func runServer(ctx context.Context) {
 					return mcp.NewToolResultText(jsonPayload), nil
 				}
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to sync: %v", res.Error)), nil
+			}
+			if dbClient != nil && projectName != "" && res.ActualCommit != "" {
+				projectID := db.FormatRecordID(schema.TableProject, db.SanitizeID(projectName))
+				_, _ = dbClient.Execute(ctx, fmt.Sprintf(
+					"UPDATE %s SET baseline_commit = '%s', baseline_branch = '%s', baseline_source = 'init_project';",
+					projectID, db.EscapeSQL(res.ActualCommit), db.EscapeSQL(job.Branch)))
+				setSession(repoSessionContext{
+					ProjectName: projectName,
+					OriginURL:   job.OriginURL,
+					Branch:      job.Branch,
+					Commit:      res.ActualCommit,
+				})
 			}
 			if !res.IsAligned {
 				return mcp.NewToolResultText(fmt.Sprintf(`{"status": "requires_patch", "closest_known_commit": "%s", "message": "Commit not found on remote. Please use sync_local_patch for perfect alignment or continue with the closest commit."}`, res.ActualCommit)), nil
@@ -725,6 +754,80 @@ func runServer(ctx context.Context) {
 		})
 		ingestionManager.Enqueue(job)
 		return mcp.NewToolResultText("Aggiornamento accodato con successo."), nil
+	})
+
+	s.AddTool(mcp.NewTool("sync_local_patch",
+		mcp.WithDescription("Apply a local unpushed unified diff to the project workspace after init_project returned requires_patch, then re-index the patched tree."),
+		mcp.WithString("project_name", mcp.Description("Name of the project (same as init_project)")),
+		mcp.WithString("patch", mcp.Description("Unified diff text (git format) to apply with git apply")),
+		mcp.WithString("commit", mcp.Description("Optional local commit hash for session tracking after patch")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger.Info("MCP Tool Call: sync_local_patch")
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments"), nil
+		}
+		projectName := getStringArg(args, "project_name")
+		patchText := getStringArg(args, "patch")
+		commit := getStringArg(args, "commit")
+		if projectName == "" || patchText == "" {
+			return mcp.NewToolResultError("project_name and patch are required"), nil
+		}
+		// Reject path traversal in project name
+		if strings.Contains(projectName, "..") || strings.ContainsAny(projectName, `/\`) {
+			return mcp.NewToolResultError("invalid project_name"), nil
+		}
+
+		patchText = strings.ReplaceAll(patchText, "\r\n", "\n")
+		if !strings.HasSuffix(patchText, "\n") {
+			patchText += "\n"
+		}
+
+		repoPath := filepath.Join(cfg.DiscoveryRoot, "dynamic", projectName)
+		if st, err := os.Stat(repoPath); err != nil || !st.IsDir() {
+			return mcp.NewToolResultError(fmt.Sprintf("workspace not found for project %q; run init_project first", projectName)), nil
+		}
+
+		patchPath := filepath.Join(repoPath, "ibis-local.patch")
+		if err := os.WriteFile(patchPath, []byte(patchText), 0644); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to write patch: %v", err)), nil
+		}
+		defer os.Remove(patchPath)
+
+		runner := gitrepo.NewRunner(nil)
+		// Use relative patch path for Windows git compatibility
+		out, err := runner.Run(ctx, repoPath, "apply", "--whitespace=nowarn", "ibis-local.patch")
+		if err != nil {
+			out2, err2 := runner.Run(ctx, repoPath, "apply", "--3way", "--whitespace=nowarn", "ibis-local.patch")
+			if err2 != nil {
+				// Keep failed patch for diagnosis
+				_ = os.WriteFile(filepath.Join(repoPath, "ibis-local.failed.patch"), []byte(patchText), 0644)
+				return mcp.NewToolResultError(fmt.Sprintf("git apply failed: %v (%s); retry: %v (%s)", err, string(out), err2, string(out2))), nil
+			}
+		}
+
+		if sess, ok := getSession(projectName); ok {
+			if commit != "" {
+				sess.Commit = commit
+			}
+			setSession(sess)
+		} else {
+			setSession(repoSessionContext{ProjectName: projectName, Commit: commit})
+		}
+
+		if dbClient != nil && aiClient != nil && aiClient.IsEmbeddingFunctional() {
+			if err := code.IngestCodebase(ctx, dbClient, aiClient, repoPath, projectName, cfg); err != nil {
+				logger.Warn("sync_local_patch: ingest after patch failed: %v", err)
+			}
+		}
+
+		head := ""
+		if outRev, errRev := runner.Run(ctx, repoPath, "rev-parse", "HEAD"); errRev == nil {
+			head = strings.TrimSpace(string(outRev))
+		}
+		payload := fmt.Sprintf(`{"status":"patched","project_name":"%s","workspace_commit":"%s","requested_commit":"%s","message":"Local patch applied and workspace re-indexed"}`,
+			projectName, head, commit)
+		return mcp.NewToolResultText(payload), nil
 	})
 
 	s.AddTool(mcp.NewTool("git_configure_credentials",
@@ -987,9 +1090,12 @@ func runServer(ctx context.Context) {
 			iter = int(v)
 		}
 
+		// Detach from request context: the HTTP/MCP call returns immediately and would cancel ctx.
 		go func() {
-			if err := optimizer.OptimizeLoop(ctx, iter); err != nil {
+			if err := optimizer.OptimizeLoop(context.Background(), iter); err != nil {
 				logger.Error("Optimization failed: %v", err)
+			} else {
+				logger.Info("Optimization completed for %d iterations.", iter)
 			}
 		}()
 
@@ -1521,7 +1627,7 @@ func runServer(ctx context.Context) {
 		}
 
 		path := filepath.Join(cfg.LogsRoot, projectName, logFile)
-		analyzer := logs.NewLogAnalyzer(ctx, path, cfg, dbClient, aiClient)
+		analyzer := logs.NewLogAnalyzerWithProject(ctx, path, projectName, cfg, dbClient, aiClient)
 
 		anomalies, err := analyzer.ProcessBatchSync(ctx, cleanLines)
 		if err != nil {
@@ -1542,6 +1648,9 @@ func runServer(ctx context.Context) {
 				sb.WriteString(fmt.Sprintf("Severity: %d/10\r\n", e.Severity))
 				if e.File != "" {
 					sb.WriteString(fmt.Sprintf("File: %s\r\n", e.File))
+				}
+				if e.Cause != "" {
+					sb.WriteString(fmt.Sprintf("Cause: %s\r\n", e.Cause))
 				}
 				sb.WriteString("Stack Trace:\r\n")
 				sb.WriteString(e.StackTrace + "\r\n\r\n")
@@ -1697,9 +1806,13 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 			return
 		}
 
+		// Cap body size; ProcessBatchSync further chunks lines for AI.
+		r.Body = http.MaxBytesReader(w, r.Body, logs.MaxLogIngestBytes)
+
 		var project string
 		var fileName string
 		var lines []string
+		var truncated bool
 
 		contentType := r.Header.Get("Content-Type")
 		if strings.Contains(contentType, "application/json") {
@@ -1710,7 +1823,12 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 				Text     string   `json:"text"`
 			}
 			var req LogUploadRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			dec := json.NewDecoder(r.Body)
+			if err := dec.Decode(&req); err != nil {
+				if err.Error() == "http: request body too large" || strings.Contains(err.Error(), "request body too large") {
+					http.Error(w, fmt.Sprintf("Request body exceeds %d byte limit", logs.MaxLogIngestBytes), http.StatusRequestEntityTooLarge)
+					return
+				}
 				http.Error(w, fmt.Sprintf("Failed to parse JSON body: %v", err), http.StatusBadRequest)
 				return
 			}
@@ -1724,10 +1842,18 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 		} else {
 			project = r.URL.Query().Get("project")
 			fileName = r.URL.Query().Get("file_name")
-			bodyBytes, err := io.ReadAll(r.Body)
+			bodyBytes, trunc, err := logs.ReadCapped(r.Body, logs.MaxLogIngestBytes)
 			if err != nil {
+				if strings.Contains(err.Error(), "request body too large") {
+					http.Error(w, fmt.Sprintf("Request body exceeds %d byte limit", logs.MaxLogIngestBytes), http.StatusRequestEntityTooLarge)
+					return
+				}
 				http.Error(w, "Failed to read body", http.StatusInternalServerError)
 				return
+			}
+			truncated = trunc
+			if truncated {
+				logger.Warn("HTTP log upload truncated at %d bytes (project=%s file=%s)", logs.MaxLogIngestBytes, project, fileName)
 			}
 			lines = strings.Split(string(bodyBytes), "\n")
 		}
@@ -1759,7 +1885,7 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 		}
 
 		path := filepath.Join(cfg.LogsRoot, project, fileName)
-		analyzer := logs.NewLogAnalyzer(r.Context(), path, cfg, dbClient, aiClient)
+		analyzer := logs.NewLogAnalyzerWithProject(r.Context(), path, project, cfg, dbClient, aiClient)
 
 		anomalies, err := analyzer.ProcessBatchSync(r.Context(), cleanLines)
 		if err != nil {
@@ -1783,6 +1909,9 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 				if e.File != "" {
 					sb.WriteString(fmt.Sprintf("File: %s\r\n", e.File))
 				}
+				if e.Cause != "" {
+					sb.WriteString(fmt.Sprintf("Cause: %s\r\n", e.Cause))
+				}
 				sb.WriteString("Stack Trace:\r\n")
 				sb.WriteString(e.StackTrace + "\r\n\r\n")
 			}
@@ -1790,11 +1919,16 @@ func logUploadHandler(cfg *config.Config, dbClient db.Executor, aiClient *ai.Cli
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		resp := map[string]interface{}{
 			"status":    "processed",
 			"project":   project,
 			"file_name": fileName,
 			"anomalies": anomalies,
-		})
+		}
+		if truncated {
+			resp["truncated"] = true
+			resp["warning"] = fmt.Sprintf("Body truncated at %d bytes; analysis covers the capped prefix only", logs.MaxLogIngestBytes)
+		}
+		json.NewEncoder(w).Encode(resp)
 	}
 }

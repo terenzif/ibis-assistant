@@ -44,7 +44,7 @@ func TestCredentialStore_SaveAndGet(t *testing.T) {
 					"target":    "github.com",
 					"provider":  "github",
 					"auth_type": "token",
-					"token": "",
+					"token":     "ghp_test123",
 				},
 			}, nil
 		},
