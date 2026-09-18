@@ -97,7 +97,7 @@ func TestAskProject(t *testing.T) {
 
 	mockDB := &MockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [":    chunks,
+			"FROM file_chunk": chunks,
 			"<-changed": graphResponse,
 		},
 	}

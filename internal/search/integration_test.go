@@ -59,7 +59,7 @@ func TestSearchLifecycle(t *testing.T) {
 
 	mockDB := &MockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": chunks,        // For Vector Search
+			"FROM file_chunk": chunks, // For Vector Search
 			"<-changed":       graphResponse, // For Graph Context
 		},
 	}

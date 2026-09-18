@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/terenzif/ibis-server/internal/ai"
@@ -58,42 +59,104 @@ func (s *Service) AskProject(ctx context.Context, query string) ([]Result, error
 
 	vecJson, _ := json.Marshal(vec)
 
-	// 2. Vector Search (Time-Decayed) on file_chunk, memory, and reasoning
-	// We combine results from multiple tables.
-	ql := fmt.Sprintf(`
-		SELECT 
-			id,
-			file.path as path, 
-			content,
-			hash,
-			file.hash as current_hash,
-			(vector::similarity::cosine(embedding, %s) * 0.7) +
-			(math::max(0, 1 - (time::now() - (created_at OR time::now())).days / 365) * 0.3)
-			as score
-		FROM [%s, %s, %s]
-		WHERE embedding != NONE
-		ORDER BY score DESC 
-		LIMIT 15;`, string(vecJson), schema.TableFileChunk, schema.TableMemory, schema.TableReasoning)
-
-	resRaw, err := s.DB.Execute(ctx, ql)
-	if err != nil {
-		return nil, fmt.Errorf("vector search failed: %w", err)
+	// 2. Vector Search (Time-Decayed) on file_chunk, memory, and reasoning.
+	// SurrealDB multi-table FROM [a,b,c] returns empty for vector queries here,
+	// so we query each table separately and merge in Go.
+	type ChunkResult struct {
+		ID          string
+		Path        string
+		Content     string
+		Score       float64
+		Hash        string
+		CurrentHash string
 	}
 
-	// Parse chunks
-	type ChunkResult struct {
-		ID          string  `json:"id"`
-		Path        string  `json:"path"`
-		Content     string  `json:"content"`
-		Score       float64 `json:"score"`
-		Hash        string  `json:"hash"`
-		CurrentHash string  `json:"current_hash"`
+	scoreExpr := fmt.Sprintf(`(vector::similarity::cosine(embedding, %s) * 0.7) +
+			(IF created_at IS NONE THEN 0.3 ELSE math::max(0, 1 - duration::days(time::now() - created_at) / 365) * 0.3 END)`, string(vecJson))
+
+	type tableQuery struct {
+		name string
+		ql   string
+	}
+	queries := []tableQuery{
+		{
+			name: schema.TableFileChunk,
+			ql: fmt.Sprintf(`
+				SELECT id, file.path as path, content, hash, file.hash as current_hash, %s as score
+				FROM %s WHERE embedding != NONE ORDER BY score DESC LIMIT 15;`,
+				scoreExpr, schema.TableFileChunk),
+		},
+		{
+			name: schema.TableMemory,
+			ql: fmt.Sprintf(`
+				SELECT id, NONE as path, content, NONE as hash, NONE as current_hash, %s as score
+				FROM %s WHERE embedding != NONE ORDER BY score DESC LIMIT 15;`,
+				scoreExpr, schema.TableMemory),
+		},
+		{
+			name: schema.TableReasoning,
+			ql: fmt.Sprintf(`
+				SELECT id, NONE as path,
+					string::concat(question OR '', '\n', outcome OR '') as content,
+					NONE as hash, NONE as current_hash, %s as score
+				FROM %s WHERE embedding != NONE ORDER BY score DESC LIMIT 15;`,
+				scoreExpr, schema.TableReasoning),
+		},
 	}
 
 	var chunks []ChunkResult
-	bytes, _ := json.Marshal(resRaw)
-	if err := json.Unmarshal(bytes, &chunks); err != nil {
-		return nil, fmt.Errorf("failed to parse chunks: %w", err)
+	for _, tq := range queries {
+		resRaw, err := s.DB.Execute(ctx, tq.ql)
+		if err != nil {
+			return nil, fmt.Errorf("vector search failed on %s: %w", tq.name, err)
+		}
+		rows := normalizeRows(resRaw)
+		if rows == nil {
+			if resRaw != nil {
+				return nil, fmt.Errorf("failed to parse chunks from %s: unexpected result type %T", tq.name, resRaw)
+			}
+			continue
+		}
+		for _, raw := range rows {
+			row, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			c := ChunkResult{
+				ID: db.CoerceRecordID(row["id"]),
+			}
+			if content, ok := row["content"].(string); ok {
+				c.Content = content
+			}
+			if p, ok := row["path"].(string); ok {
+				c.Path = p
+			}
+			if h, ok := row["hash"].(string); ok {
+				c.Hash = h
+			}
+			if h, ok := row["current_hash"].(string); ok {
+				c.CurrentHash = h
+			}
+			switch score := row["score"].(type) {
+			case float64:
+				c.Score = score
+			case float32:
+				c.Score = float64(score)
+			case json.Number:
+				c.Score, _ = score.Float64()
+			}
+			if c.ID == "" && c.Content == "" {
+				continue
+			}
+			chunks = append(chunks, c)
+		}
+	}
+
+	sort.Slice(chunks, func(i, j int) bool {
+		return chunks[i].Score > chunks[j].Score
+	})
+	if len(chunks) > 15 {
+		chunks = chunks[:15]
 	}
 
 	// 3. Identify Top 3 Distinct Files for Enrichment
@@ -231,6 +294,10 @@ func (s *Service) SaveReasoningOutcome(ctx context.Context, repoName, question, 
 	// 2. Structural Loop: Reinforce useful sources
 	delta := 0.2 // Positive reinforcement delta
 	for _, sourceID := range usefulSources {
+		sourceID = strings.TrimSpace(sourceID)
+		if !db.IsSafeRecordID(sourceID) {
+			continue
+		}
 		// Increment usage_weight for related edges pointing to this source
 		// And increment access_count on the source itself
 		sb.WriteString(fmt.Sprintf("UPDATE %s SET usage_weight = (usage_weight OR 1.0) + %f WHERE out = %s;\n", schema.EdgeChanged, delta, sourceID))
@@ -241,6 +308,22 @@ func (s *Service) SaveReasoningOutcome(ctx context.Context, repoName, question, 
 
 	_, err = s.DB.Execute(ctx, sb.String())
 	return err
+}
+
+// normalizeRows accepts Surreal driver / mock result shapes as a []interface{} of row maps.
+func normalizeRows(resRaw interface{}) []interface{} {
+	switch rows := resRaw.(type) {
+	case []interface{}:
+		return rows
+	case []map[string]interface{}:
+		out := make([]interface{}, len(rows))
+		for i := range rows {
+			out[i] = rows[i]
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // RawQuery executes a raw SurrealQL query for power users

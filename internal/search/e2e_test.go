@@ -89,7 +89,7 @@ func TestEndToEnd_SearchReinforcement(t *testing.T) {
 
 	mockDB := &CapturingDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": chunks,
+			"FROM file_chunk": chunks,
 			"<-changed":       graphResponse,
 		},
 	}

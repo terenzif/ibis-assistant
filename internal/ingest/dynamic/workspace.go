@@ -44,19 +44,17 @@ func SyncWorkspace(ctx context.Context, cfg *config.Config, dbClient db.Executor
 	}
 
 	// B. If not found, check SurrealDB git_credential table
-	if cred == nil && dbClient != nil {
+	if cred == nil && dbClient != nil && strings.TrimSpace(originUrl) != "" {
 		store := gitrepo.NewCredentialStore(dbClient)
 		c, err := store.GetCredential(ctx, originUrl)
 		if err == nil && c != nil {
 			cred = c
 			logger.Debug("Using Git credential from DB (URL specific match): %s", originUrl)
-		} else {
-			if host, errHost := getHost(originUrl); errHost == nil {
-				c, err = store.GetCredential(ctx, host)
-				if err == nil && c != nil {
-					cred = c
-					logger.Debug("Using Git credential from DB (host match): %s", host)
-				}
+		} else if host, errHost := getHost(originUrl); errHost == nil && host != "" {
+			c, err = store.GetCredential(ctx, host)
+			if err == nil && c != nil {
+				cred = c
+				logger.Debug("Using Git credential from DB (host match): %s", host)
 			}
 		}
 	}
