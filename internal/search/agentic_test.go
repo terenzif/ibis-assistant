@@ -78,7 +78,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 	}
 
 	// We also need to handle the graph context enrichment if AskProject does it.
-	// AskProject queries "FROM [".
+	// AskProject queries "FROM file_chunk" (and memory/reasoning separately).
 	// It basically does:
 	// 1. Embed (Mocked)
 	// 2. Vector Search (Mocked DB returns chunks)
@@ -88,7 +88,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": chunks,
+			"FROM file_chunk": chunks,
 		},
 	}
 
@@ -164,7 +164,7 @@ func TestAskProjectAgentic_Flow(t *testing.T) {
 	// Verify Search was actually called on DB
 	foundSearch := false
 	for _, sql := range mockDB.CapturedQueries {
-		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM [") {
+		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM file_chunk") {
 			foundSearch = true
 			break
 		}
@@ -188,7 +188,7 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": []map[string]interface{}{}, // Return empty, doesn't matter, we want to see if Search is called
+			"FROM file_chunk": []map[string]interface{}{}, // Return empty, doesn't matter, we want to see if Search is called
 		},
 	}
 
@@ -245,7 +245,7 @@ func TestAskProjectAgentic_MixedResponse_Bug(t *testing.T) {
 
 	foundSearch := false
 	for _, sql := range mockDB.CapturedQueries {
-		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM [") {
+		if strings.Contains(sql, "SELECT") && strings.Contains(sql, "FROM file_chunk") {
 			foundSearch = true
 			break
 		}
@@ -358,7 +358,7 @@ func TestAskProjectAgentic_GraphContext(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [":    chunks,        // Triggered by AskProject Vector Search
+			"FROM file_chunk": chunks, // Triggered by AskProject Vector Search
 			"<-changed": graphResponse, // Triggered by AskProject -> GetFileContext
 		},
 	}

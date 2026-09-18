@@ -14,7 +14,7 @@ func TestAskProjectAgentic_RegexOptimization(t *testing.T) {
 
 	mockDB := &TestAgentMockDB{
 		ReturnData: map[string]interface{}{
-			"FROM [": []map[string]interface{}{},
+			"FROM file_chunk": []map[string]interface{}{},
 		},
 	}
 
