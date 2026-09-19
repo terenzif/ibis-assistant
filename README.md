@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="Ibis Assistant" width="160" height="160">
+  <img src="docs/assets/social-preview.png" alt="Ibis Assistant — Living project memory" width="100%">
 </p>
 
 # Ibis Assistant (MCP)
