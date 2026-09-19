@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > **Proposal status: IMPLEMENTED** (see [cli_and_wizard_implementation_instructions.md](cli_and_wizard_implementation_instructions.md); CLI includes `logs analyze` as of September 2026).
-> Historical proposal text below is kept for design rationale.
+> **Updated Sep 2026:** wizard lives in `internal/wizard`; commands are `config` / `config fast` (default) and `config full` (replaces Fast/Detailed). Settings also ship as HTTP `/settings/` and MCP `settings_*`. Operator guide: [ai_and_settings.md](ai_and_settings.md). Historical proposal text below is kept for design rationale.
 
 ---
 

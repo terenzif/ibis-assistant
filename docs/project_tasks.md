@@ -58,3 +58,11 @@
 - [x] Cursor plugin scaffold (Ibis Assistant for Cursor, stdio child) <!-- id: 57 -->
 - [x] E2E of 18 Sep runtime/HTTP/plugin stack (`go test ./internal/e2erun`) <!-- id: 58 -->
 
+## September 2026 (hybrid AI + Settings UX)
+
+- [x] Hybrid ReasoningRouter + Ollama chat + CloudPool (Gemini / OpenAI-compat / Claude) <!-- id: 59 -->
+- [x] SettingsEngine Probe/Recommend/Apply + `/settings/` UI + MCP `settings_*` <!-- id: 60 -->
+- [x] Wizard `config fast` / `config full` (`internal/wizard`); plug-and-play keys in config <!-- id: 61 -->
+- [x] Hardware auto-tier S/M/L/XL + `use_cloud_when_no_gpu`; Cursor command Open Settings <!-- id: 62 -->
+- [x] Operator docs: `docs/ai_and_settings.md`, changelog 20260919, discovery guide <!-- id: 63 -->
+

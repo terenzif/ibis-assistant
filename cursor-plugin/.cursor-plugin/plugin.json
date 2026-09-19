@@ -2,7 +2,7 @@
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
   "version": "1.0.0",
-  "description": "Living project memory over MCP. Spawns the Ibis Assistant Go binary on stdio against the opened folder.",
+  "description": "Living project memory over MCP. Spawns the Ibis Assistant Go binary on stdio against the opened folder. Includes Ibis: Open Settings for hybrid AI.",
   "author": {
     "name": "terenzif",
     "email": "terenzif@users.noreply.github.com"
@@ -16,13 +16,16 @@
     "mcp",
     "git",
     "logs",
-    "knowledge-graph"
+    "knowledge-graph",
+    "settings",
+    "ollama"
   ],
   "category": "developer-tools",
   "tags": [
     "mcp",
     "code-intelligence",
-    "logs"
+    "logs",
+    "ai-settings"
   ],
   "mcpServers": "./mcp.json",
   "commands": "./commands"

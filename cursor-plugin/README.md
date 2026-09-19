@@ -64,6 +64,9 @@ Optional env:
 
 ## Components
 
-- `mcpServers` only (`mcp.json`)
+- `mcpServers` (`mcp.json`)
+- `commands/ibis-settings.md` — **Ibis: Open Settings**
 
-The Go server, HTTP MCP (`/mcp`), and Windows service stay in the main repository, not in this plugin package.
+AI setup for plugin data dir: [docs/ai_and_settings.md](../docs/ai_and_settings.md).
+
+The Go server, HTTP MCP (`/mcp`), Settings UI (`/settings/`), and Windows service stay in the main repository, not in this plugin package.

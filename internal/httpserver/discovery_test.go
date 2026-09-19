@@ -31,8 +31,15 @@ func TestDiscoveryJSONAndMarkdown(t *testing.T) {
 	if eps["streamable_http"] != "http://127.0.0.1:3030/mcp" {
 		t.Fatalf("endpoints=%v", eps)
 	}
-	if !strings.Contains(body["guide_markdown"].(string), "/mcp") {
+	if eps["settings_ui"] != "http://127.0.0.1:3030/settings/" {
+		t.Fatalf("missing settings_ui: %v", eps)
+	}
+	guide := body["guide_markdown"].(string)
+	if !strings.Contains(guide, "/mcp") {
 		t.Fatal("guide missing /mcp")
+	}
+	if !strings.Contains(guide, "AI and Settings") || !strings.Contains(guide, "config fast") {
+		t.Fatal("guide missing AI/Settings section")
 	}
 	vers, _ := body["protocol_versions"].([]any)
 	foundLatest := false

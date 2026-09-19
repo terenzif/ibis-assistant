@@ -73,6 +73,14 @@ Source of truth: `cmd/server/main.go`. Obsolete names (`ingest_git`, `reinforce_
 * **`git_configure_credentials(...)`**: Persist Git auth in SurrealDB.
 * **`analyze_logs(project_name, log_text, log_file?)`**: On-demand log analysis (static → AI → enrich). See [log_analysis_pipeline.md](log_analysis_pipeline.md).
 
+### Settings (`settings_*`)
+
+* **`settings_get`**: Hardware probe + recommendations (hybrid AI, auto-tier, clouds).
+* **`settings_apply`**: Apply choices; keys written to `config.json`.
+* **`settings_open_ui`**: URL for the Settings UI (`/settings/` when personal HTTP is up).
+
+Operator guide: [ai_and_settings.md](ai_and_settings.md).
+
 ### Ticketing (`ticket_*`) and PRs (`repo_pr_*`)
 
 Full list and playbooks: [TICKETING_CLIENT.md](TICKETING_CLIENT.md) and [../copilot-instructions.md](../copilot-instructions.md).

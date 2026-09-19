@@ -14,10 +14,10 @@ Designed to get out of the way: **download a binary, configure once, run**.
 
 1. Grab a release executable from [Releases](https://github.com/terenzif/ibis-assistant/releases) (no Go toolchain required for normal use).
 2. On first launch with no `config.json`, an interactive **setup wizard** (`config fast`) probes hardware, configures hybrid AI, and writes keys into config (plug-and-play). Rerun with `ibis-assistant config`, `config full`, or open `http://127.0.0.1:<port>/settings/`.
-3. SurrealDB, Ollama embeddings, and related runtime pieces install or start **on demand** when enabled—aim is maximum automation, minimum manual wiring.
+3. SurrealDB, Ollama (embeddings **and** local chat), and related runtime pieces install or start **on demand** when enabled—aim is maximum automation, minimum manual wiring.
 4. Start the server (`run` / `start` / Windows service) and connect your MCP client. Done.
 
-> The first-run wizard is being redefined and hardened (auto-defaults, fewer prompts). A console wizard already exists; the next iteration is the product path described above.
+Settings: browser UI at `http://127.0.0.1:<port>/settings/`, or `ibis-assistant config show`. Full guide: [docs/ai_and_settings.md](docs/ai_and_settings.md).
 
 ## Features
 
@@ -29,9 +29,10 @@ Designed to get out of the way: **download a binary, configure once, run**.
 * **Log analysis pipeline**: Recursive watch → LogAlign / known patterns / ast-grep first → AI residual → enrich (file/cause) → sidecar markdown report. See [docs/log_analysis_pipeline.md](docs/log_analysis_pipeline.md).
 * **Email reporting**: Optional SMTP digests for anomalies and AI cost tracking.
 * **Polyglot AST ingest**: ast-grep rules + `languageGlobs`; AI may synthesize missing YAML rules. See [docs/code_ingest_polyglot_and_rules.md](docs/code_ingest_polyglot_and_rules.md).
-* **Efficient vector RAG**: Gemini batch embeddings (or local Ollama) for large chunk sets.
+* **Efficient vector RAG**: Local Ollama embeddings by default (or Gemini); chat models are never used as the embedding space.
+* **Hybrid AI reasoning**: Local Ollama chat (hardware auto-tier) + multi-cloud pool (Gemini, OpenAI-compatible, Claude). See [docs/ai_and_settings.md](docs/ai_and_settings.md).
 * **Hybrid search**: Per-table vector queries + time decay + graph context via `ask_project`.
-* **MCP-compliant**: Standard tools for plug-and-play MCP clients.
+* **MCP-compliant**: Standard tools for plug-and-play MCP clients, including `settings_*`.
 
 ## Prerequisites
 
@@ -41,11 +42,11 @@ For **building from source**:
 
 * **Go** 1.27+ (this repo pins `toolchain go1.27.1` in `go.mod`)
 * **SurrealDB**: Managed automatically when possible (download on demand)
-* **Ollama** (default local embeddings): auto-start / auto-install when enabled in config
+* **Ollama** (default local embeddings **and** local reasoning chat): auto-start / auto-install when enabled in config (AMD ROCm / NVIDIA CUDA via Ollama)
 * **Git** on `PATH`
-* **AI keys**:
+* **AI keys** (optional for local-only; enter via wizard/Settings UI, not ENV-first):
   * **Embedding**: Ollama by default (or Gemini)
-  * **Reasoning**: Gemini multi-key failover via `ai.reasoning.keys`
+  * **Reasoning**: hybrid default — Ollama local + cloud Gemini / OpenAI-compatible / Claude (`ai.reasoning.clouds`)
 
 ## Setup
 
@@ -54,12 +55,13 @@ For **building from source**:
 Draft GitHub Releases with cross-platform binaries are published by CI when a `v*` tag is pushed. Download from [Releases](https://github.com/terenzif/ibis-assistant/releases), put the binary on your `PATH` (or run it from any folder), then:
 
 ```bash
-ibis-assistant          # first run: wizard if config.json is missing
-ibis-assistant config   # re-run the wizard anytime
-ibis-assistant run      # start the MCP server
+ibis-assistant          # first run: config fast if config.json is missing
+ibis-assistant config   # same as config fast
+ibis-assistant config full
+ibis-assistant run      # start the MCP server (Settings UI at /settings/)
 ```
 
-Prefer that path over hand-editing config. **Never commit `config.json`** (it is gitignored).
+Prefer that path over hand-editing config. **Never commit `config.json`** (it is gitignored). See [docs/ai_and_settings.md](docs/ai_and_settings.md).
 
 ### Build from source
 
@@ -95,11 +97,29 @@ Personal and plugin modes ingest the live working tree (no `git clone` / `reset 
       "auto_update": true
     },
     "reasoning": {
-      "provider": "gemini",
-      "model": "gemini-2.5-pro",
-      "keys": [
-        { "key": "", "rpm": 15, "tpm": 30000, "rpd": 1500, "owner": "default" }
-      ]
+      "provider": "hybrid",
+      "model": "auto",
+      "context_only_fallback": true,
+      "clouds": {
+        "gemini": {
+          "keys": [
+            { "key": "", "rpm": 15, "tpm": 30000, "rpd": 1500, "owner": "default" }
+          ]
+        },
+        "openai_compat": {
+          "base_url": "https://api.openai.com/v1",
+          "api_key": "",
+          "model": "gpt-4.1"
+        },
+        "claude": {
+          "api_key": "",
+          "model": "claude-sonnet-4"
+        }
+      },
+      "routing": {
+        "cloud_provider": "auto",
+        "use_cloud_when_no_gpu": true
+      }
     }
   },
   "db_auto_update": true,
@@ -107,6 +127,8 @@ Personal and plugin modes ingest the live working tree (no `git clone` / `reset 
   "logs_root": "./logs"
 }
 ```
+
+Full AI field reference: [docs/ai_and_settings.md](docs/ai_and_settings.md). Tracked template: `config_master.json`.
 
 Provider-aware ticketing lives in `config/ticketing_config.json` (see `config/ticketing_config.example.json`). Per-request credential overrides use HTTP headers.
 
@@ -126,20 +148,11 @@ Full client guide: **[docs/TICKETING_CLIENT.md](docs/TICKETING_CLIENT.md)**
 ./ibis-assistant /run
 ```
 
-With no arguments, the binary prints a short command guide. If `config.json` is missing, an interactive config wizard starts first (`config fast`).
+With no arguments, the binary prints a short command guide. If `config.json` is missing, **`config fast`** runs first.
 
 | Command | Purpose |
 |---------|---------|
-| `config` / `config fast` | Fast setup: hardware probe, hybrid AI, cloud keys, local model |
-| `config full` | Full setup (DB, SMTP, ticketing, …) |
-| `config show` | Masked AI/settings summary (+ `/settings` URL) |
-| `config recommend` | JSON recommendations from SettingsEngine |
-
-Personal HTTP serves the same Settings UI at `http://127.0.0.1:<port>/settings/`. MCP tools: `settings_get`, `settings_apply`, `settings_open_ui`.
-
-| Command | Purpose |
-|---------|---------|
-| `run` | Interactive server (MCP) |
+| `run` | Interactive server (MCP + Settings UI at `/settings/`) |
 | `start` / `stop` | Background daemon (`server.log`, `ibis-assistant.pid`) |
 | `config` / `config fast` | Fast setup (probe + hybrid AI + keys) |
 | `config full` | Full setup (DB, SMTP, ticketing, …) |
@@ -147,6 +160,8 @@ Personal HTTP serves the same Settings UI at `http://127.0.0.1:<port>/settings/`
 | `config recommend` | JSON recommendations |
 | `version` | Print the binary version (release builds embed the git tag) |
 | `/install` `/uninstall` | Windows service (admin required) |
+
+MCP settings tools: `settings_get`, `settings_apply`, `settings_open_ui`. Guide: [docs/ai_and_settings.md](docs/ai_and_settings.md).
 
 ### CLI (MCP over Streamable HTTP)
 
@@ -171,9 +186,10 @@ MCP-only (no CLI wrapper yet): `sync_local_patch`, `analyze_blast_radius`, `find
 
 Example: `http://localhost:3030/`
 
-* Browsers (`Accept: text/html`): install/usage guide, endpoints, client snippets, and tool schemas
-* Agents (`Accept: application/json`): Streamable HTTP URL, protocol versions (including 2026-07-28), `runtime_mode`, auth headers, tools. After MCP connect, `server/discover` on `/mcp` is enough to attach.
+* Browsers (`Accept: text/html`): install/usage guide (includes AI/Settings), endpoints, client snippets, and tool schemas
+* Agents (`Accept: application/json`): Streamable HTTP URL, protocol versions (including 2026-07-28), `runtime_mode`, `settings_ui` / `settings_api`, auth headers, tools. After MCP connect, `server/discover` on `/mcp` is enough to attach.
 * Markdown (`Accept: text/markdown`) and MCP resource `ibis://guide`: the same guide for a connected agent to show a human
+* Settings UI: `http://localhost:3030/settings/` (when the HTTP listener is up)
 
 ### Config precedence
 
@@ -263,20 +279,20 @@ go test ./...
 * `cursor-plugin/` — Cursor marketplace plugin (MCP stdio spawn; binary stays on PATH)
 * `rules/` — ast-grep YAML extractors (hand-written + optional `ai-generated-*`)
 * `sgconfig.yml` — ast-grep config including `languageGlobs`
-* `docs/` — architecture and client guides (English). Start with [docs/naming.md](docs/naming.md), [docs/runtime_modes.md](docs/runtime_modes.md), and [docs/changelog_20260918.md](docs/changelog_20260918.md).
+* `docs/` — architecture and client guides (English). Start with [docs/naming.md](docs/naming.md), [docs/runtime_modes.md](docs/runtime_modes.md), [docs/ai_and_settings.md](docs/ai_and_settings.md), and [docs/changelog_20260919.md](docs/changelog_20260919.md).
 
 ## Roadmap vision
 
 Ibis Assistant is meant to stay useful when the cloud is optional:
 
-* **Local LLMs first-class** — deepen Ollama (and similar) paths for embeddings *and* reasoning, so a full self-hosted loop works without mandatory cloud APIs; cloud providers remain adapters, not the core.
+* **Local LLMs first-class** — Ollama embeddings and **hybrid local chat** (auto-tier) are in; deepen quality and AMD ROCm UX; cloud providers remain adapters in a pool.
 * **Continuous learning** — close the loop from real use: reinforce useful graph paths, decay noise, learn from agent outcomes and feedback so retrieval and tooling improve over time instead of staying a static index.
 
-**Walked on 18 Sep 2026** (this branch stack, not yet master): three runtimes with **live working trees** for personal/plugin (no OS links, no `reset --hard` on developer checkouts); Streamable HTTP `/mcp` as the default MCP transport; dual discovery (agent JSON + human guide); blocking `init_project` with progress; Cursor **stdio sidecar** with isolated plugin data. See [docs/runtime_modes.md](docs/runtime_modes.md).
+**Walked on 18–19 Sep 2026** (this branch stack): three runtimes with **live working trees** for personal/plugin; Streamable HTTP `/mcp`; Cursor **stdio sidecar**; **hybrid AI + Settings UX** ([docs/ai_and_settings.md](docs/ai_and_settings.md)). See also [docs/runtime_modes.md](docs/runtime_modes.md).
 
-**Still open on those two axes:** local **reasoning** (embeddings can already be Ollama); a closed learning loop from agent outcomes. Also still out of scope: OAuth, moving `mcp-bridge` off SSE, in-process Go in Cursor.
+**Still open:** closed learning loop from agent outcomes. Also still out of scope: OAuth, moving `mcp-bridge` off SSE, in-process Go in Cursor / `vscode.lm`.
 
-Contributions that move those two axes forward are especially welcome.
+Contributions that move those axes forward are especially welcome.
 
 ## Agent notes (for contributors working on this repo)
 

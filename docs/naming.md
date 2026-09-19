@@ -21,6 +21,8 @@
 
 `mode` (`sse` \| `stdio`) is the MCP **listener**. HTTP clients should use Streamable HTTP at `/mcp`; `/sse` is legacy. See [docs/superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md).
 
+**AI / settings:** hybrid reasoning + Settings UX — [ai_and_settings.md](ai_and_settings.md).
+
 The MCP process is an implementation detail (“the MCP server”), not a separate product name.
 
 ## Remotes

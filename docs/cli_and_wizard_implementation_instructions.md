@@ -1,8 +1,8 @@
 # Phased Implementation Guide: CLI Interface, Background Management, and Configuration Wizard
 
 > [!NOTE]
-> **Implementation status: COMPLETED** (commit `b139255`)
-> All phases have been implemented and verified with green tests. This document is kept as an architectural reference.
+> **Implementation status: COMPLETED** (commit `b139255`) for phases 1–6 of the original CLI/wizard work.
+> **Updated Sep 2026:** wizard package is `internal/wizard` (not `internal/config/wizard.go`); entrypoints are `config` / `config fast` / `config full` / `config show` / `config recommend`. Settings UI and MCP `settings_*` are documented in [ai_and_settings.md](ai_and_settings.md).
 >
 > **Residual risks identified (post-naming analysis):**
 > - PID/log path portability when the executable starts from a non-standard directory (e.g. `System32` in Windows service mode).
@@ -12,7 +12,7 @@
 ---
 
 ## Phase Overview
-* **Phase 1:** Interactive Configuration Wizard (`internal/config/wizard.go`)
+* **Phase 1:** Interactive Configuration Wizard (`internal/wizard` — historically sketched as `internal/config/wizard.go`)
 * **Phase 2:** HTTP CLI Client for MCP Tools (`internal/cli/client.go`)
 * **Phase 3:** Daemon Management & Lifecycle Control (`start` / `stop` via PID file)
 * **Phase 4:** Routing and Integration in the Main File (`cmd/server/main.go`)

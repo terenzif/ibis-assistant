@@ -622,9 +622,9 @@ func runServer(ctx context.Context) {
 
 	// --- Check Connections ---
 	if !aiClient.IsFunctional() {
-		logger.Warn("⚠️  AI vectorization is DISABLED (no Gemini API keys found).")
-		logger.Warn("   - Add keys to 'config.json' (gemini_keys: [\"...\"])")
-		logger.Warn("   - Or set 'GEMINI_API_KEY' environment variable.")
+		logger.Warn("⚠️  AI is limited (no local Ollama reasoning/embed and no cloud keys).")
+		logger.Warn("   - Run 'ibis-assistant config' or open /settings/ to add keys and enable hybrid AI.")
+		logger.Warn("   - ENV keys (GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY) are optional overrides only.")
 	}
 	if len(ticketService.Capabilities()["providers"].([]string)) == 0 {
 		logger.Warn("⚠️  No ticketing providers configured. ticket_* tools will return configuration errors.")
