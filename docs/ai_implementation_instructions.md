@@ -1,8 +1,8 @@
 # Phased Implementation Guide: AI API Generalization (Top-Down Methodology)
 
 > [!NOTE]
-> **Implementation status: COMPLETE AND VALIDATED (June 2026)**
-> All steps in this document have been executed successfully. The generalized architecture for embedding and reasoning providers, the local Ollama Runner, and on-demand installation for Windows/Linux/macOS have been implemented and integrated.
+> **Implementation status: COMPLETE AND VALIDATED (June 2026)** for phases 1–7 (interfaces, Ollama embed runner, Gemini adapter).
+> **Follow-on (Sep 2026):** hybrid router, Ollama chat, OpenAI-compat + Claude, SettingsEngine — see [ai_and_settings.md](ai_and_settings.md). This document remains the historical phased guide for the first generalization.
 
 ---
 

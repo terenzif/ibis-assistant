@@ -64,11 +64,20 @@ func GuideMarkdown(cfg *config.Config, tools []toolMeta) string {
 	b.WriteString("## Install\n\n")
 	b.WriteString("1. Install Go 1.27+ (this repo pins `toolchain go1.27.1`).\n")
 	b.WriteString("2. `go build -o ibis-assistant ./cmd/server` (Windows: `ibis-assistant.exe`).\n")
-	b.WriteString("3. Copy `config_master.json` to `config.json` (never commit `config.json`).\n")
+	b.WriteString("3. First run with no `config.json` launches **`config fast`** (hardware probe + hybrid AI + keys). Or run `ibis-assistant config` / `config full`. Prefer the wizard/Settings UI over hand-editing; never commit `config.json`.\n")
 	b.WriteString("4. Set `runtime_mode` to `personal` (same PC as your repos) or `server` (dedicated host).\n")
 	b.WriteString("5. For personal mode, set `projects[].working_repo_path` (or `git_repos`) to the live checkout. Do not point `discovery_root/dynamic` at a developer tree.\n")
 	b.WriteString("6. Run `ibis-assistant run`, or `start`/`stop` for a daemon, or `/install` as a Windows service. Cursor plugin: `ibis-assistant -mode stdio` with `RUNTIME_MODE=plugin`.\n\n")
 	b.WriteString("Personal mode binds `127.0.0.1` unless `bind_address` is set. Server mode binds `0.0.0.0`.\n\n")
+
+	b.WriteString("## AI and Settings\n\n")
+	b.WriteString("Default reasoning is **hybrid**: local Ollama chat (hardware auto-tier) plus a multi-cloud pool (Gemini, OpenAI-compatible, Claude). Embeddings stay on Ollama `nomic-embed-text`.\n\n")
+	fmt.Fprintf(&b, "- **Settings UI:** `%s/settings/` (same app as Cursor command **Ibis: Open Settings** / MCP `settings_open_ui`)\n", base)
+	b.WriteString("- **API:** `GET|POST /api/v1/settings` (localhost)\n")
+	b.WriteString("- **MCP:** `settings_get`, `settings_apply`, `settings_open_ui`\n")
+	b.WriteString("- **Keys:** enter in wizard or Settings UI into `config.json` (ENV is optional override only)\n")
+	b.WriteString("- **CLI:** `ibis-assistant config show` / `config recommend`\n\n")
+	b.WriteString("Operator guide in the repo: `docs/ai_and_settings.md`.\n\n")
 
 	b.WriteString("## Agent autoconfig\n\n")
 	b.WriteString("HTTP clients: `GET /` with `Accept: application/json`. MCP 2026-07-28 clients: `server/discover` on `/mcp` (legacy clients still `initialize`). Then `resources/read` on `ibis://guide` to show this page to a human.\n\n")
@@ -80,6 +89,7 @@ func GuideMarkdown(cfg *config.Config, tools []toolMeta) string {
 	b.WriteString("Inspector: `npx @modelcontextprotocol/inspector " + base + "/mcp`\n\n")
 
 	b.WriteString("## CLI\n\n")
+	b.WriteString("Setup: `ibis-assistant config` | `config fast` | `config full` | `config show`.\n\n")
 	b.WriteString("The same binary is an MCP client of a running server (`POST /mcp`):\n\n")
 	b.WriteString("```bash\n")
 	b.WriteString("ibis-assistant ask \"Explain the auth flow\" --branch main\n")
@@ -92,7 +102,8 @@ func GuideMarkdown(cfg *config.Config, tools []toolMeta) string {
 	b.WriteString("- `ask_project` — hybrid search over the knowledge graph.\n")
 	b.WriteString("- `analyze_logs` — synchronous log analysis.\n")
 	b.WriteString("- `ingest_code` / `ingest` CLI — vectorize a tree.\n")
-	b.WriteString("- `sync_local_patch` — server clones only, when `init_project` returns `requires_patch`.\n\n")
+	b.WriteString("- `sync_local_patch` — server clones only, when `init_project` returns `requires_patch`.\n")
+	b.WriteString("- `settings_get` / `settings_apply` / `settings_open_ui` — hybrid AI and cloud keys.\n\n")
 
 	b.WriteString("### Auth headers (optional per request)\n\n")
 	b.WriteString("`X-Git-Token` / `X-Git-PAT`, `X-Redmine-API-Key`, `X-Jira-Email` + `X-Jira-API-Token`, `X-Azure-DevOps-PAT`.\n\n")
@@ -137,6 +148,8 @@ func writeJSONDiscovery(w http.ResponseWriter, cfg *config.Config, tools []toolM
 			"streamable_http": base + "/mcp",
 			"sse_legacy":      base + "/sse",
 			"log_push_upload": base + "/api/v1/logs/upload",
+			"settings_ui":     base + "/settings/",
+			"settings_api":    base + "/api/v1/settings",
 			"guide_markdown":  base + "/",
 			"guide_resource":  GuideURI,
 			"server_discover": "server/discover",

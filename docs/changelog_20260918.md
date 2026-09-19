@@ -2,6 +2,8 @@
 
 Shipped on what is now `terenzif/ibis-assistant` `master` (merge tip `3b3d3ee`; repo was then named `ibis-server`). Primary docs are English. This note records **what landed**, **where it lives**, and **how it was verified**. See [naming.md](naming.md) for the current product name.
 
+**Follow-on (19 Sep):** hybrid AI + Settings UX — [changelog_20260919.md](changelog_20260919.md), [ai_and_settings.md](ai_and_settings.md).
+
 ## 18 Sep 2026 — runtime modes + HTTP MCP (open PRs, not yet on master)
 
 Operator guide: [runtime_modes.md](runtime_modes.md). Design: [superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md).

@@ -1,5 +1,8 @@
 # Implementation Plan - Knowledge Graph MCP Server
 
+> [!NOTE]
+> Historical bootstrap plan. Current operator docs: [docs/ai_and_settings.md](docs/ai_and_settings.md), [docs/runtime_modes.md](docs/runtime_modes.md), [docs/naming.md](docs/naming.md). AI is hybrid (Ollama + multi-cloud); keys via wizard/Settings UI, not ENV-first.
+
 ## [Goal] The "Universal Senior Engineer" Context Server
 Build **Ibis Assistant**: a **Graph + RAG + Timeline** server that gives *any* AI (Claude, Copilot, Gemini) deep, structural, and historical understanding of the codebase.
 **Key Philosophy**:

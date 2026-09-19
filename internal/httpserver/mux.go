@@ -39,6 +39,11 @@ func bindHost(cfg *config.Config) string {
 
 // Handler mounts Streamable HTTP /mcp (primary), legacy SSE, discovery, and log upload.
 func Handler(cfg *config.Config, mcpServer *server.MCPServer, logUpload http.Handler) http.Handler {
+	return HandlerWithSettings(cfg, mcpServer, logUpload, nil, nil)
+}
+
+// HandlerWithSettings is Handler plus optional /settings and /api/v1/settings.
+func HandlerWithSettings(cfg *config.Config, mcpServer *server.MCPServer, logUpload, settingsAPI, settingsUI http.Handler) http.Handler {
 	sseServer := server.NewSSEServer(mcpServer)
 	streamable := server.NewStreamableHTTPServer(mcpServer,
 		server.WithHeartbeatInterval(30*time.Second),
@@ -63,15 +68,27 @@ func Handler(cfg *config.Config, mcpServer *server.MCPServer, logUpload http.Han
 	if logUpload != nil {
 		mux.Handle("/api/v1/logs/upload", logUpload)
 	}
+	if settingsAPI != nil {
+		mux.Handle("/api/v1/settings", settingsAPI)
+	}
+	if settingsUI != nil {
+		mux.Handle("/settings/", http.StripPrefix("/settings/", settingsUI))
+		mux.Handle("/settings", http.RedirectHandler("/settings/", http.StatusFound))
+	}
 
 	return Auth(mux)
 }
 
 // NewHTTPServer builds a server that listens on cfg.ListenAddr().
 func NewHTTPServer(cfg *config.Config, mcpServer *server.MCPServer, logUpload http.Handler) *http.Server {
+	return NewHTTPServerWithSettings(cfg, mcpServer, logUpload, nil, nil)
+}
+
+// NewHTTPServerWithSettings mounts optional settings UI and API.
+func NewHTTPServerWithSettings(cfg *config.Config, mcpServer *server.MCPServer, logUpload, settingsAPI, settingsUI http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              cfg.ListenAddr(),
-		Handler:           Handler(cfg, mcpServer, logUpload),
+		Handler:           HandlerWithSettings(cfg, mcpServer, logUpload, settingsAPI, settingsUI),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 }

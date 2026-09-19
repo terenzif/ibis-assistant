@@ -1,0 +1,60 @@
+:root {
+  --bg: #f6f3ee;
+  --ink: #1a1a1a;
+  --accent: #0b6e4f;
+  --muted: #5c5c5c;
+  --card: #fffdf9;
+  --line: #d9d2c5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "IBM Plex Sans", system-ui, sans-serif;
+  background: linear-gradient(165deg, #e8efe9 0%, var(--bg) 45%, #efe8df 100%);
+  color: var(--ink);
+  min-height: 100vh;
+}
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+}
+h1 { font-size: 1.75rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+.lead { color: var(--muted); margin: 0 0 1.5rem; }
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+}
+h2 { font-size: 1rem; margin: 0 0 0.75rem; }
+label { display: block; margin: 0.4rem 0; }
+input[type="text"], input[type="password"] {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #fff;
+}
+.hint { font-size: 0.9rem; color: var(--muted); }
+pre {
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+  background: #f0ebe3;
+  padding: 0.75rem;
+  border-radius: 3px;
+  margin: 0;
+}
+button#save {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  padding: 0.65rem 1.2rem;
+  border-radius: 3px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#status { min-height: 1.25rem; color: var(--muted); }

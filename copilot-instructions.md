@@ -34,6 +34,7 @@
 10. `optimize_knowledge(iterations?)`
 11. `git_configure_credentials(target, provider, auth_type, token, username?, ssh_private_key?)`
    * Persists credentials in SurrealDB (domain or full repo URL).
+12. `settings_get` / `settings_apply` / `settings_open_ui` — hybrid AI, cloud keys, local models (see `docs/ai_and_settings.md`). Prefer Settings UI when the user needs to enter keys.
 
 ### Ticketing tools (`ticket_*`)
 

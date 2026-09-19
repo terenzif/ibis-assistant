@@ -1,8 +1,8 @@
 # Architecture Proposal: AI API Generalization (Embedding & Reasoning)
 
 > [!NOTE]
-> **Proposal status: APPROVED AND IMPLEMENTED (June 2026)**
-> This proposal has been fully translated into working code in the `internal/ai` module and the application-wide wiring.
+> **Proposal status: APPROVED AND IMPLEMENTED (June 2026)** for embedding/reasoning interfaces and Ollama embed runner.
+> **Superseded for hybrid multi-cloud / Settings UX (Sep 2026):** see [ai_and_settings.md](ai_and_settings.md) and [superpowers/specs/2026-09-19-hybrid-reasoning-settings-design.md](superpowers/specs/2026-09-19-hybrid-reasoning-settings-design.md). Historical text below remains for rationale.
 
 ---
 
