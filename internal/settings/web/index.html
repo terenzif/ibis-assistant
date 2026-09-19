@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ibis Assistant Settings</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>Ibis Assistant</h1>
+    <p class="lead">Configure hybrid AI, cloud keys, and local models. Secrets stay on this machine.</p>
+
+    <section id="overview">
+      <h2>Overview</h2>
+      <pre id="probe">Loading…</pre>
+    </section>
+
+    <section>
+      <h2>AI mode</h2>
+      <label><input type="radio" name="ai_mode" value="hybrid" checked /> Hybrid (recommended)</label>
+      <label><input type="radio" name="ai_mode" value="ollama" /> Local only</label>
+      <label><input type="radio" name="ai_mode" value="gemini" /> Cloud Gemini</label>
+      <label><input type="radio" name="ai_mode" value="openai_compat" /> Cloud OpenAI-compatible</label>
+      <label><input type="radio" name="ai_mode" value="claude" /> Cloud Claude</label>
+      <label><input type="radio" name="ai_mode" value="none" /> Context only</label>
+    </section>
+
+    <section>
+      <h2>Cloud keys</h2>
+      <p class="hint">Paste keys here (saved to config.json). Leave blank to keep existing.</p>
+      <label>Gemini <input id="gemini_key" type="password" autocomplete="off" /></label>
+      <label>OpenAI-compatible <input id="openai_key" type="password" autocomplete="off" /></label>
+      <label>OpenAI base URL <input id="openai_base" type="text" placeholder="https://api.openai.com/v1" /></label>
+      <label>Claude <input id="claude_key" type="password" autocomplete="off" /></label>
+    </section>
+
+    <section>
+      <h2>Local models</h2>
+      <label><input type="radio" name="local_model" value="auto" checked /> Automatic for this PC</label>
+      <label><input type="radio" name="local_model" value="granite4.1:3b" /> Always smallest (granite4.1:3b)</label>
+      <label><input type="checkbox" id="use_cloud_when_no_gpu" checked /> On CPU-only PCs, use the cloud for hard questions</label>
+    </section>
+
+    <section>
+      <h2>Paths</h2>
+      <label>Discovery root <input id="discovery_root" type="text" /></label>
+      <label>Logs root <input id="logs_root" type="text" /></label>
+    </section>
+
+    <button id="save" type="button">Save</button>
+    <p id="status" role="status"></p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

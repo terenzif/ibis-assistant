@@ -8,6 +8,12 @@ Thin Cursor plugin that **spawns** the Ibis Assistant Go binary as an MCP stdio 
 
 The opened folder is the live workspace (`RUNTIME_MODE=plugin`). Knowledge is stored under `%LOCALAPPDATA%\ibis-assistant\plugin` (or `IBIS_DATA_DIR`), separate from a personal `ibis-assistant` daemon. A Cursor empty window (no folder) still completes the MCP handshake (no `${workspaceFolder}` in `mcp.json`, no SurrealDB) so the shared plugin id is not marked failed. The opened folder is bound from `IBIS_WORKSPACE` / Cursor workspace env / MCP `roots/list` when present.
 
+## Settings
+
+- Command **Ibis: Open Settings** (`commands/ibis-settings.md`) → MCP `settings_open_ui`
+- Tools: `settings_get`, `settings_apply`, `settings_open_ui`
+- Same browser UI as personal mode: `http://127.0.0.1:<port>/settings/` when the HTTP listener is up
+
 ## Install
 
 1. Build or install the Go binary and put it on `PATH` as `ibis-assistant` (Windows: `ibis-assistant.exe`).

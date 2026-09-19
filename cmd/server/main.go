@@ -35,11 +35,13 @@ import (
 	ibisruntime "github.com/terenzif/ibis-assistant/internal/runtime"
 	"github.com/terenzif/ibis-assistant/internal/schema"
 	"github.com/terenzif/ibis-assistant/internal/search"
+	"github.com/terenzif/ibis-assistant/internal/settings"
 	"github.com/terenzif/ibis-assistant/internal/ticketing"
 	ticketado "github.com/terenzif/ibis-assistant/internal/ticketing/providers/azuredevops"
 	ticketjira "github.com/terenzif/ibis-assistant/internal/ticketing/providers/jira"
 	ticketredmine "github.com/terenzif/ibis-assistant/internal/ticketing/providers/redmine"
 	"github.com/terenzif/ibis-assistant/internal/workspace"
+	"github.com/terenzif/ibis-assistant/internal/wizard"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -78,7 +80,7 @@ func main() {
 	// Se la configurazione non esiste e non stiamo usando opzioni di help o installazione,
 	// avviamo automaticamente il wizard interattivo.
 	if shouldRunWizard() {
-		if err := config.RunWizard(); err != nil {
+		if err := wizard.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -111,9 +113,38 @@ func main() {
 	case "/uninstall", "uninstall", "-uninstall", "--uninstall":
 		handleService("/uninstall")
 	case "config":
-		if err := config.RunWizard(); err != nil {
-			fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
-			os.Exit(1)
+		sub := "fast"
+		if len(os.Args) > 2 {
+			sub = os.Args[2]
+		}
+		switch sub {
+		case "full":
+			if err := wizard.RunMode(wizard.ModeFull); err != nil {
+				fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
+				os.Exit(1)
+			}
+		case "--show", "show":
+			wizard.ShowAISummary(config.Load())
+		case "--recommend", "recommend":
+			if err := wizard.PrintRecommendationsJSON(config.Load()); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(1)
+			}
+		case "--ai", "ai":
+			if err := wizard.RunMode(wizard.ModeFast); err != nil {
+				fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
+				os.Exit(1)
+			}
+		case "fast", "":
+			fallthrough
+		default:
+			if sub != "fast" && !strings.HasPrefix(sub, "-") {
+				// unknown subcommand treated as fast unless it's a flag already handled
+			}
+			if err := wizard.RunMode(wizard.ModeFast); err != nil {
+				fmt.Fprintf(os.Stderr, "Config wizard failed: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	case "start":
 		startBackgroundServer()
@@ -136,6 +167,22 @@ func main() {
 	}
 }
 
+func strArg(args map[string]interface{}, key string) string {
+	if args == nil {
+		return ""
+	}
+	v, _ := args[key].(string)
+	return v
+}
+
+func boolArg(args map[string]interface{}, key string) bool {
+	if args == nil {
+		return false
+	}
+	v, _ := args[key].(bool)
+	return v
+}
+
 func printHelp() {
 	binName := filepath.Base(os.Args[0])
 	if commit != "" && commit != "none" {
@@ -150,7 +197,11 @@ func printHelp() {
 	fmt.Println("  run         Start the server interactively (default)")
 	fmt.Println("  start       Start the server in the background")
 	fmt.Println("  stop        Stop the background server")
-	fmt.Println("  config      Interactive configuration wizard")
+	fmt.Println("  config       Interactive setup (default: fast)")
+	fmt.Println("  config fast  Fast setup with hardware probe")
+	fmt.Println("  config full  Full setup (DB, SMTP, ticketing, …)")
+	fmt.Println("  config show  Print AI/settings summary (keys masked)")
+	fmt.Println("  config recommend  Print JSON recommendations")
 	fmt.Println("  version     Print the binary version")
 	fmt.Println("  install     Install as a Windows service ('ibis-assistant')")
 	fmt.Println("  uninstall   Uninstall the Windows service")
@@ -401,7 +452,7 @@ func runServer(ctx context.Context) {
 
 	case "gemini":
 		var aiKeys []ai.KeyConfig
-		for _, k := range cfg.AI.Reasoning.Keys {
+		for _, k := range cfg.AI.Reasoning.GeminiKeysEffective() {
 			rpm := k.RPM
 			if rpm <= 0 {
 				rpm = cfg.GeminiDefaultRPM
@@ -423,27 +474,92 @@ func runServer(ctx context.Context) {
 	}
 
 	// --- 6b. Initialize Reasoning Provider ---
-	switch cfg.AI.Reasoning.Provider {
-	case "gemini":
+	probe := settings.Probe(cfg.AI.Embedding.URL)
+	localModel := settings.ResolveLocalModel(cfg.AI.Reasoning, probe)
+	logger.Info("AI probe: tier=%s vram_mib=%d cpu_only=%v ollama=%v recommended_local=%s",
+		probe.Tier, probe.VRAMMiB, probe.CPUOnly, probe.OllamaReachable, localModel)
+
+	geminiKeysFromCfg := func() []ai.KeyConfig {
 		var aiKeys []ai.KeyConfig
-		for _, k := range cfg.AI.Reasoning.Keys {
+		for _, k := range cfg.AI.Reasoning.GeminiKeysEffective() {
 			rpm := k.RPM
 			if rpm <= 0 {
 				rpm = cfg.GeminiDefaultRPM
 			}
 			aiKeys = append(aiKeys, ai.KeyConfig{
-				Key:          k.Key,
-				RPM:          rpm,
-				TPM:          k.TPM,
-				RPD:          k.RPD,
-				Owner:        k.Owner,
-				AllowOverage: k.AllowOverage,
+				Key: k.Key, RPM: rpm, TPM: k.TPM, RPD: k.RPD, Owner: k.Owner, AllowOverage: k.AllowOverage,
 			})
 		}
-		reasProvider = ai.NewGeminiProvider(aiKeys, dbClient)
+		return aiKeys
+	}
 
+	var localReasoning ai.ReasoningProvider
+	switch cfg.AI.Reasoning.Provider {
+	case "hybrid", "ollama", "":
+		if cfg.AI.Embedding.Provider == "ollama" && !pluginUnbound && ollamaRunner == nil && cfg.AI.Embedding.AutoStart {
+			cmd, err := ai.EnsureOllama(ctx, cfg.AI.Embedding.URL, localModel, cfg.AI.Embedding.AutoStart, cfg.AI.Embedding.AutoUpdate)
+			if err != nil {
+				logger.Warn("Ollama chat model ensure failed: %v", err)
+			} else if cmd != nil {
+				ollamaRunner = &ai.OllamaRunner{Cmd: cmd}
+			}
+		} else if cfg.AI.Embedding.Provider == "ollama" && cfg.AI.Embedding.AutoUpdate && !pluginUnbound {
+			_, _ = ai.EnsureOllama(ctx, cfg.AI.Embedding.URL, localModel, false, true)
+		}
+		localReasoning = ai.NewOllamaChatProvider(localModel, cfg.AI.Embedding.URL)
+	}
+
+	cloudProviders := map[string]ai.ReasoningProvider{}
+	if keys := geminiKeysFromCfg(); len(keys) > 0 {
+		cloudProviders["gemini"] = ai.NewGeminiProvider(keys, dbClient)
+	}
+	oa := cfg.AI.Reasoning.Clouds.OpenAICompat
+	if strings.TrimSpace(oa.APIKey) != "" {
+		cloudProviders["openai_compat"] = ai.NewOpenAICompatProvider(oa.BaseURL, oa.APIKey, oa.Model)
+	}
+	cl := cfg.AI.Reasoning.Clouds.Claude
+	if strings.TrimSpace(cl.APIKey) != "" {
+		cloudProviders["claude"] = ai.NewClaudeProvider(cl.APIKey, cl.Model)
+	}
+	order := cfg.AI.Reasoning.Routing.CloudFallbackOrder
+	if len(order) == 0 {
+		order = []string{"gemini", "openai_compat", "claude"}
+	}
+	cloudPool := ai.NewCloudPool(cfg.AI.Reasoning.ResolveCloudPrimary(), order, cloudProviders)
+
+	switch strings.ToLower(strings.TrimSpace(cfg.AI.Reasoning.Provider)) {
+	case "gemini":
+		if p, ok := cloudProviders["gemini"]; ok {
+			reasProvider = p
+		} else {
+			logger.Warn("Reasoning provider gemini selected but no keys configured")
+		}
+	case "openai_compat":
+		if p, ok := cloudProviders["openai_compat"]; ok {
+			reasProvider = p
+		} else {
+			logger.Warn("Reasoning provider openai_compat selected but not configured")
+		}
+	case "claude":
+		if p, ok := cloudProviders["claude"]; ok {
+			reasProvider = p
+		} else {
+			logger.Warn("Reasoning provider claude selected but not configured")
+		}
+	case "ollama":
+		reasProvider = localReasoning
+	case "none":
+		reasProvider = nil
+		logger.Info("Reasoning provider=none (context-only mode)")
+	case "hybrid", "":
+		reasProvider = ai.NewReasoningRouter(localReasoning, cloudPool, ai.RouterConfig{
+			UseCloudWhenNoGPU: cfg.AI.Reasoning.Routing.UseCloudWhenNoGPU,
+			CPUOnly:           probe.CPUOnly,
+			LocalTimeout:      time.Duration(cfg.AI.Reasoning.Routing.LocalTimeoutMs) * time.Millisecond,
+			ContextOnly:       cfg.AI.Reasoning.ContextOnlyFallback,
+		})
 	default:
-		logger.Warn("Unknown reasoning provider: %s. Reasoning provider might be non-functional.", cfg.AI.Reasoning.Provider)
+		logger.Warn("Unknown reasoning provider: %s", cfg.AI.Reasoning.Provider)
 	}
 
 	// --- 6c. Unified AI Client Orchestrator ---
@@ -1134,6 +1250,69 @@ func runServer(ctx context.Context) {
 		return mcp.NewToolResultText(string(bytes)), nil
 	})
 
+	s.AddTool(mcp.NewTool("settings_get",
+		mcp.WithDescription("Get AI/settings recommendations and masked current config (probe + hybrid routing)."),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		probe := settings.Probe(cfg.AI.Embedding.URL)
+		rec := settings.Recommend(cfg, probe)
+		out := map[string]any{
+			"probe":        probe,
+			"summary":      rec.Summary,
+			"fields":       rec.Fields,
+			"settings_url": settings.OpenURL(cfg.PublicBaseURL()),
+			"provider":     cfg.AI.Reasoning.Provider,
+			"cloud_primary": cfg.AI.Reasoning.ResolveCloudPrimary(),
+		}
+		b, _ := json.MarshalIndent(out, "", "  ")
+		return mcp.NewToolResultText(string(b)), nil
+	})
+
+	s.AddTool(mcp.NewTool("settings_apply",
+		mcp.WithDescription("Apply AI settings choices (keys written to config.json). Prefer settings UI when possible."),
+		mcp.WithString("ai_mode", mcp.Description("hybrid|ollama|gemini|openai_compat|claude|none")),
+		mcp.WithString("gemini_key", mcp.Description("Optional Gemini API key to store")),
+		mcp.WithString("openai_key", mcp.Description("Optional OpenAI-compatible API key")),
+		mcp.WithString("claude_key", mcp.Description("Optional Claude API key")),
+		mcp.WithBoolean("always_smallest_local", mcp.Description("Force granite4.1:3b")),
+		mcp.WithBoolean("use_cloud_when_no_gpu", mcp.Description("On CPU-only PCs, use cloud for hard questions")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, _ := request.Params.Arguments.(map[string]interface{})
+		useCloud := true
+		if v, ok := args["use_cloud_when_no_gpu"].(bool); ok {
+			useCloud = v
+		}
+		choices := settings.UserChoices{
+			AIMode:              strArg(args, "ai_mode"),
+			GeminiKey:           strArg(args, "gemini_key"),
+			OpenAIKey:           strArg(args, "openai_key"),
+			ClaudeKey:           strArg(args, "claude_key"),
+			AlwaysSmallestLocal: boolArg(args, "always_smallest_local"),
+			UseCloudWhenNoGPU:   &useCloud,
+		}
+		probe := settings.Probe(cfg.AI.Embedding.URL)
+		out, _, err := settings.Apply(cfg, choices, probe)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		path := cfg.ConfigPath
+		if path == "" {
+			path = "config.json"
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		*cfg = *out
+		return mcp.NewToolResultText("Settings saved to " + path + ". Restart to reload providers."), nil
+	})
+
+	s.AddTool(mcp.NewTool("settings_open_ui",
+		mcp.WithDescription("Return the local Settings UI URL (same page as personal HTTP /settings). Open it in a browser."),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		url := settings.OpenURL(cfg.PublicBaseURL())
+		return mcp.NewToolResultText("Open Settings UI: " + url + "\n(Personal mode serves this on the Ibis HTTP listener. Plugin mode: run personal briefly or use settings_get/settings_apply.)"), nil
+	})
+
 	s.AddTool(mcp.NewTool("optimize_knowledge",
 		mcp.WithDescription("Trigger the RAFT self-optimization loop to improve knowledge graph weights."),
 		mcp.WithNumber("iterations", mcp.Description("Number of chunks to process (default 10)")),
@@ -1736,7 +1915,8 @@ func runServer(ctx context.Context) {
 
 	if cfg.Mode == "sse" {
 		logger.Info("Starting Streamable HTTP (legacy SSE on /sse) at %s...", cfg.ListenAddr())
-		httpSrv := httpserver.NewHTTPServer(cfg, s, logUploadHandler(cfg, dbClient, aiClient))
+		httpSrv := httpserver.NewHTTPServerWithSettings(cfg, s, logUploadHandler(cfg, dbClient, aiClient),
+			settings.APIHandler(cfg), settings.UIHandler())
 
 		go func() {
 			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -24,5 +24,6 @@
     "code-intelligence",
     "logs"
   ],
-  "mcpServers": "./mcp.json"
+  "mcpServers": "./mcp.json",
+  "commands": "./commands"
 }

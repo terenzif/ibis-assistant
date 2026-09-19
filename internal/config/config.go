@@ -125,9 +125,46 @@ type EmbeddingConfig struct {
 }
 
 type ReasoningConfig struct {
-	Provider string            `json:"provider"` // gemini, openai
-	Model    string            `json:"model"`
-	Keys     []GeminiKeyConfig `json:"keys"`
+	Provider             string            `json:"provider"` // hybrid, ollama, gemini, openai_compat, claude, none
+	Model                string            `json:"model"`    // auto or explicit Ollama/cloud model
+	Keys                 []GeminiKeyConfig `json:"keys,omitempty"` // legacy; migrated into Clouds.Gemini
+	Clouds               CloudsConfig      `json:"clouds,omitempty"`
+	Routing              RoutingConfig     `json:"routing,omitempty"`
+	ModelOverrides       map[string]string `json:"model_overrides,omitempty"` // S/M/L/XL
+	ContextOnlyFallback  bool              `json:"context_only_fallback"`
+	AlwaysSmallestLocal  bool              `json:"always_smallest_local,omitempty"`
+}
+
+// CloudsConfig holds multi-cloud credentials (plug-and-play via wizard/GUI).
+type CloudsConfig struct {
+	Gemini       GeminiCloudConfig       `json:"gemini,omitempty"`
+	OpenAICompat OpenAICompatCloudConfig `json:"openai_compat,omitempty"`
+	Claude       ClaudeCloudConfig       `json:"claude,omitempty"`
+}
+
+type GeminiCloudConfig struct {
+	Keys []GeminiKeyConfig `json:"keys,omitempty"`
+}
+
+type OpenAICompatCloudConfig struct {
+	BaseURL string `json:"base_url,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+type ClaudeCloudConfig struct {
+	APIKey string `json:"api_key,omitempty"`
+	Model  string `json:"model,omitempty"`
+}
+
+// RoutingConfig controls hybrid local/cloud routing.
+type RoutingConfig struct {
+	Mode                string   `json:"mode,omitempty"` // auto
+	LocalProvider       string   `json:"local_provider,omitempty"`
+	CloudProvider       string   `json:"cloud_provider,omitempty"` // auto|gemini|openai_compat|claude
+	CloudFallbackOrder  []string `json:"cloud_fallback_order,omitempty"`
+	UseCloudWhenNoGPU   bool     `json:"use_cloud_when_no_gpu"`
+	LocalTimeoutMs      int      `json:"local_timeout_ms,omitempty"`
 }
 
 // ListenAddr is host:port for the HTTP listener.
@@ -199,8 +236,32 @@ func Load(paths ...string) *Config {
 				AutoUpdate: true,
 			},
 			Reasoning: ReasoningConfig{
-				Provider: "gemini",
-				Model:    "gemini-2.5-pro",
+				Provider:            "hybrid",
+				Model:               "auto",
+				ContextOnlyFallback: true,
+				Routing: RoutingConfig{
+					Mode:               "auto",
+					LocalProvider:      "ollama",
+					CloudProvider:      "auto",
+					CloudFallbackOrder: []string{"gemini", "openai_compat", "claude"},
+					UseCloudWhenNoGPU:  true,
+					LocalTimeoutMs:     120000,
+				},
+				ModelOverrides: map[string]string{
+					"S":  "granite4.1:3b",
+					"M":  "qwen2.5-coder:7b",
+					"L":  "gemma4:12b",
+					"XL": "muse-glimmer",
+				},
+				Clouds: CloudsConfig{
+					OpenAICompat: OpenAICompatCloudConfig{
+						BaseURL: "https://api.openai.com/v1",
+						Model:   "gpt-4.1",
+					},
+					Claude: ClaudeCloudConfig{
+						Model: "claude-sonnet-4",
+					},
+				},
 			},
 		},
 		GeminiDefaultRPM:   100,
@@ -327,23 +388,6 @@ func Load(paths ...string) *Config {
 		}
 	}
 
-	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
-		// Split by comma for pooling
-		parts := strings.Split(v, ",")
-		var keys []GeminiKeyConfig
-		for _, p := range parts {
-			clean := strings.TrimSpace(p)
-			if clean != "" {
-				keys = append(keys, GeminiKeyConfig{
-					Key: clean,
-					RPM: cfg.GeminiDefaultRPM,
-				})
-			}
-		}
-		cfg.AI.Reasoning.Keys = keys // Replace file keys if ENV is set
-		cfg.GeminiKeys = keys        // Populate legacy field as well
-	}
-
 	if v := os.Getenv("EMBEDDING_PROVIDER"); v != "" {
 		cfg.AI.Embedding.Provider = v
 	}
@@ -365,6 +409,32 @@ func Load(paths ...string) *Config {
 		cfg.AI.Reasoning.Keys = cfg.GeminiKeys
 	} else if len(cfg.AI.Reasoning.Keys) > 0 && len(cfg.GeminiKeys) == 0 {
 		cfg.GeminiKeys = cfg.AI.Reasoning.Keys
+	}
+
+	NormalizeReasoningConfig(&cfg.AI.Reasoning, cfg.GeminiDefaultRPM)
+
+	// Optional ENV key overrides only when file/clouds still empty (plug-and-play prefers wizard/GUI).
+	if v := os.Getenv("GEMINI_API_KEY"); v != "" && !cfg.AI.Reasoning.CloudHasCredentials("gemini") {
+		parts := strings.Split(v, ",")
+		var keys []GeminiKeyConfig
+		for _, p := range parts {
+			clean := strings.TrimSpace(p)
+			if clean != "" {
+				keys = append(keys, GeminiKeyConfig{Key: clean, RPM: cfg.GeminiDefaultRPM})
+			}
+		}
+		cfg.AI.Reasoning.Keys = keys
+		cfg.GeminiKeys = keys
+		cfg.AI.Reasoning.Clouds.Gemini.Keys = keys
+	}
+	if v := os.Getenv("OPENAI_API_KEY"); v != "" && strings.TrimSpace(cfg.AI.Reasoning.Clouds.OpenAICompat.APIKey) == "" {
+		cfg.AI.Reasoning.Clouds.OpenAICompat.APIKey = v
+	}
+	if v := os.Getenv("OPENAI_BASE_URL"); v != "" {
+		cfg.AI.Reasoning.Clouds.OpenAICompat.BaseURL = v
+	}
+	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" && strings.TrimSpace(cfg.AI.Reasoning.Clouds.Claude.APIKey) == "" {
+		cfg.AI.Reasoning.Clouds.Claude.APIKey = v
 	}
 
 	// Legacy REDMINE_URL/REDMINE_API_KEY environment fallbacks intentionally removed.

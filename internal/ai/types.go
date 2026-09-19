@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -36,7 +37,12 @@ type Part struct {
 type GenerationConfig struct {
 	Temperature     float64 `json:"temperature,omitempty"`
 	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+	// RouteHint guides hybrid routing: bulk | quality | auto (empty = auto).
+	RouteHint string `json:"routeHint,omitempty"`
 }
+
+// ErrContextOnly is returned when no LLM is available and callers should pack retrieval context.
+var ErrContextOnly = errors.New("context only: no reasoning provider available")
 
 type Candidate struct {
 	Content       Content        `json:"content"`
